@@ -3,6 +3,11 @@ name: Build
 on:
   workflow_dispatch:
   pull_request:
+    branches:
+      - next
+  push:
+    branches:
+      - next
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -34,56 +39,8 @@ jobs:
         run: npm ci
 
       # Setup any services required for tests here
-      # Start PostgreSQL service only for PostgreSQL package
-      - name: Start PostgreSQL Service
-        run: docker run -d --name twin-entity-storage-postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -p 5432:5432 postgres:latest
-
-        # Start ScyllaDB service only for ScyllaDB package
-      - name: Start ScyllaDB Service
-        run: docker run -d --name twin-entity-storage-scylladb -p 9042:9042 scylladb/scylla:5.4.9
-
-        # Start DynamoDB service only for DynamoDB package
-      - name: Start DynamoDB Service
-        run: docker run -d --name twin-entity-storage-dynamodb -p 8000:8000 amazon/dynamodb-local:latest
-
-        # Start MySQL service only for MySQL package
-      - name: Start MySQL Service
-        run: docker run -d --name twin-entity-storage-mysql -e MYSQL_ROOT_PASSWORD=password -p 3306:3306 mysql:latest
-
-        # Start MongoDB service only for MongoDB package
-      - name: Start MongoDB Service
-        run: docker run -d --name twin-entity-storage-mongo -p 27017:27017 mongo:latest
-
-        # Start Firestore service only for Firestore package
-      - name: Start Firestore Emulator
-        run: docker run -d --name twin-entity-storage-firestore -p 8080:8080 gcr.io/google.com/cloudsdktool/cloud-sdk:emulators gcloud beta emulators firestore start --host-port=0.0.0.0:8080
-
-      - name: Increase aio-max-nr
-        # Increase the maximum number of asynchronous I/O (AIO) requests that can be queued to
-        # the kernel. This is necessary for the CosmosDB Emulator to function properly, as it
-        # requires a higher limit for I/O operations.
-        # Reference: https://man7.org/linux/man-pages/man5/proc.5.html#fs.aio-max-nr
-        run: echo 1048576 | sudo tee /proc/sys/fs/aio-max-nr
-
-        # Start CosmosDB service only for CosmosDB package
-      - name: Pull CosmosDB Emulator Docker Image
-        run: docker pull mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
-
-      - name: Run CosmosDB Emulator
-        run: docker run --publish 8081:8081 --publish 10250-10255:10250-10255 --name twin-entity-storage-cosmos --detach --platform=linux/amd64 --memory=3g --cpus=2.0 mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
-
-      - name: Wait for CosmosDB Emulator to be Ready
-        run: |
-          for i in {1..30}; do
-            if nc -zv localhost 8081; then
-              echo "CosmosDB emulator is ready!"
-              break
-            fi
-            echo "Waiting for CosmosDB emulator to be ready..."
-            sleep 5
-          done
-
-      # End setup for tests
+      - name: Setup Test Environment
+        uses: ./.github/workflows/setup-test-env
 
       # Run Lint and Dist
       - name: Run Lint and Dist
