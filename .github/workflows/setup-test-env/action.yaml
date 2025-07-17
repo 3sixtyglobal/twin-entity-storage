@@ -42,7 +42,7 @@ runs:
 
     # Start Firestore service only for Firestore package
     - name: Start Firestore Emulator
-      if: inputs.package == 'packages/entity-storage-connector-firestore' || inputs.package == 'all'
+      if: inputs.package == 'packages/entity-storage-connector-gcp-firestore' || inputs.package == 'all'
       shell: bash
       run: docker run -d --name twin-entity-storage-firestore -p 8080:8080 gcr.io/google.com/cloudsdktool/cloud-sdk:emulators gcloud beta emulators firestore start --host-port=0.0.0.0:8080
 
