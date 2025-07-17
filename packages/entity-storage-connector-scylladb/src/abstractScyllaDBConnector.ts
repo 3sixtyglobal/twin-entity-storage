@@ -337,7 +337,10 @@ export abstract class AbstractScyllaDBConnector<T> {
 		const client = new Client({
 			contactPoints: this._config.hosts,
 			localDataCenter: this._config.localDataCenter,
-			keyspace: skipKeySpace ? undefined : this._config.keyspace
+			keyspace: skipKeySpace ? undefined : this._config.keyspace,
+			protocolOptions: {
+				port: this._config.port
+			}
 		});
 		await client.connect();
 

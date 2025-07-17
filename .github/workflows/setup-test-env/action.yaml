@@ -20,7 +20,7 @@ runs:
     - name: Start ScyllaDB Service
       if: inputs.package == 'packages/entity-storage-connector-scylladb' || inputs.package == 'all'
       shell: bash
-      run: docker run -d --name twin-entity-storage-scylladb -p 9042:9042 scylladb/scylla:5.4.9
+      run: docker run -d --name twin-entity-storage-scylladb -p 9500:9042 scylladb/scylla:5.4.9
 
     # Start DynamoDB service only for DynamoDB package
     - name: Start DynamoDB Service

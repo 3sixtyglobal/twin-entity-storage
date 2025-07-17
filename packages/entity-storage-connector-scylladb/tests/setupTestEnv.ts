@@ -13,10 +13,12 @@ Guards.stringValue("TestEnv", "TEST_SCYLLA_TABLE", process.env.TEST_SCYLLA_TABLE
 Guards.stringValue("TestEnv", "TEST_SCYLLA_HOSTS", process.env.TEST_SCYLLA_HOSTS);
 Guards.stringValue("TestEnv", "TEST_SCYLLA_DATA_CENTER", process.env.TEST_SCYLLA_DATA_CENTER);
 Guards.stringValue("TestEnv", "TEST_SCYLLA_KEYSPACE", process.env.TEST_SCYLLA_KEYSPACE);
+Guards.stringValue("TestEnv", "TEST_SCYLLA_PORT", process.env.TEST_SCYLLA_PORT);
 
 export const TEST_SCYLLA_CONFIG: IScyllaDBTableConfig = {
 	tableName: process.env.TEST_SCYLLA_TABLE,
 	hosts: process.env.TEST_SCYLLA_HOSTS.split(","),
 	localDataCenter: process.env.TEST_SCYLLA_DATA_CENTER,
-	keyspace: process.env.TEST_SCYLLA_KEYSPACE
+	keyspace: process.env.TEST_SCYLLA_KEYSPACE,
+	port: Number.parseInt(process.env.TEST_SCYLLA_PORT, 10)
 };
