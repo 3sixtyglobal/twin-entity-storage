@@ -11,6 +11,7 @@ console.debug("Setting up test environment from .env and .env.dev files");
 
 Guards.stringValue("TestEnv", "TEST_SCYLLA_TABLE", process.env.TEST_SCYLLA_TABLE);
 Guards.stringValue("TestEnv", "TEST_SCYLLA_HOSTS", process.env.TEST_SCYLLA_HOSTS);
+Guards.stringValue("TestEnv", "TEST_SCYLLA_PORT", process.env.TEST_SCYLLA_PORT);
 Guards.stringValue("TestEnv", "TEST_SCYLLA_DATA_CENTER", process.env.TEST_SCYLLA_DATA_CENTER);
 Guards.stringValue("TestEnv", "TEST_SCYLLA_KEYSPACE", process.env.TEST_SCYLLA_KEYSPACE);
 Guards.stringValue("TestEnv", "TEST_SCYLLA_PORT", process.env.TEST_SCYLLA_PORT);

@@ -26,7 +26,7 @@ export interface IDynamoDbEntityStorageConnectorConfig {
 	tableName: string;
 
 	/**
-	 * AWS endpoint, not usually required but could be used for local DynamoDB instance e.g. http://localhost:8000.
+	 * AWS endpoint, not usually required but could be used for local DynamoDB instance e.g. http://localhost:8500.
 	 */
 	endpoint?: string;
 }

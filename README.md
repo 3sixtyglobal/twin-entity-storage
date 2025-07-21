@@ -14,6 +14,7 @@ This mono-repository contains the packages to use with Entity Storage in TWIN ap
 - [entity-storage-connector-mysql](packages/entity-storage-connector-mysql/README.md) - Entity Storage connector implementation using MySql.
 - [entity-storage-connector-mongodb](packages/entity-storage-connector-mongodb/README.md) - Entity Storage connector implementation using MongoDb.
 - [entity-storage-connector-postgresql](packages/entity-storage-connector-postgresql/README.md) - Entity Storage connector implementation using PostgreSQL.
+- [entity-storage-connector-synchronised](packages/entity-storage-connector-synchronised/README.md) - Entity Storage connector which used event bus to communicate with synchronised storage.
 - [entity-storage-service](packages/entity-storage-service/README.md) - Entity Storage contract implementation and REST endpoint definitions.
 - [entity-storage-rest-client](packages/entity-storage-rest-client/README.md) - Entity Storage contract implementation which can connect to REST endpoints.
 

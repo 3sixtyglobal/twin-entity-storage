@@ -14,7 +14,7 @@ runs:
     - name: Start PostgreSQL Service
       if: inputs.package == 'packages/entity-storage-connector-postgresql' || inputs.package == 'all'
       shell: bash
-      run: docker run -d --name twin-entity-storage-postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -p 5432:5432 postgres:latest
+      run: docker run -d --name twin-entity-storage-postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -p 5444:5432 postgres:latest
 
     # Start ScyllaDB service only for ScyllaDB package
     - name: Start ScyllaDB Service
@@ -26,19 +26,19 @@ runs:
     - name: Start DynamoDB Service
       if: inputs.package == 'packages/entity-storage-connector-dynamodb' || inputs.package == 'all'
       shell: bash
-      run: docker run -d --name twin-entity-storage-dynamodb -p 8000:8000 amazon/dynamodb-local:latest
+      run: docker run -d --name twin-entity-storage-dynamodb -p 8500:8000 amazon/dynamodb-local:latest
 
     # Start MySQL service only for MySQL package
     - name: Start MySQL Service
       if: inputs.package == 'packages/entity-storage-connector-mysql' || inputs.package == 'all'
       shell: bash
-      run: docker run -d --name twin-entity-storage-mysql -e MYSQL_ROOT_PASSWORD=password -p 3306:3306 mysql:latest
+      run: docker run -d --name twin-entity-storage-mysql -e MYSQL_ROOT_PASSWORD=password -p 3400:3306 mysql:latest
 
     # Start MongoDB service only for MongoDB package
     - name: Start MongoDB Service
       if: inputs.package == 'packages/entity-storage-connector-mongodb' || inputs.package == 'all'
       shell: bash
-      run: docker run -d --name twin-entity-storage-mongo -p 27017:27017 mongo:latest
+      run: docker run -d --name twin-entity-storage-mongo -p 27500:27017 mongo:latest
 
     # Start Firestore service only for Firestore package
     - name: Start Firestore Emulator
