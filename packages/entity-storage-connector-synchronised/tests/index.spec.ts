@@ -183,9 +183,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 		await connector?.start("test-node-identity", undefined);
 
-		let itemResponseData:
-			| IEvent<ISyncItemResponse<TestType>>
-			| undefined;
+		let itemResponseData: IEvent<ISyncItemResponse<TestType>> | undefined;
 
 		eventBusService.subscribe<ISyncItemResponse<TestType>>(
 			SynchronisedStorageTopics.LocalItemResponse,
@@ -200,18 +198,13 @@ describe("synchronisedEntityStorageConnector", () => {
 			dateModified: new Date().toISOString()
 		});
 
-		await eventBusService.publish<ISyncItemRequest>(
-			SynchronisedStorageTopics.LocalItemRequest,
-			{
-				schemaType: "test-type",
-				id: "test-id"
-			}
-		);
+		await eventBusService.publish<ISyncItemRequest>(SynchronisedStorageTopics.LocalItemRequest, {
+			schemaType: "test-type",
+			id: "test-id"
+		});
 
 		expect(itemResponseData).toBeDefined();
-		expect(itemResponseData?.topic).toEqual(
-			"synchronised-storage:local-item-response"
-		);
+		expect(itemResponseData?.topic).toEqual("synchronised-storage:local-item-response");
 		expect(itemResponseData?.data.id).toEqual("test-id");
 		expect(itemResponseData?.data.entity).toEqual({
 			id: "test-id",
@@ -228,9 +221,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 		await connector?.start("test-node-identity", undefined);
 
-		let itemResponseData:
-			| IEvent<ISyncItemResponse<TestType>>
-			| undefined;
+		let itemResponseData: IEvent<ISyncItemResponse<TestType>> | undefined;
 
 		eventBusService.subscribe<ISyncItemResponse<TestType>>(
 			SynchronisedStorageTopics.LocalItemResponse,
@@ -245,18 +236,13 @@ describe("synchronisedEntityStorageConnector", () => {
 			dateModified: new Date().toISOString()
 		});
 
-		await eventBusService.publish<ISyncItemRequest>(
-			SynchronisedStorageTopics.LocalItemRequest,
-			{
-				schemaType: "test-type",
-				id: "test-id-does-not-exist"
-			}
-		);
+		await eventBusService.publish<ISyncItemRequest>(SynchronisedStorageTopics.LocalItemRequest, {
+			schemaType: "test-type",
+			id: "test-id-does-not-exist"
+		});
 
 		expect(itemResponseData).toBeDefined();
-		expect(itemResponseData?.topic).toEqual(
-			"synchronised-storage:local-item-response"
-		);
+		expect(itemResponseData?.topic).toEqual("synchronised-storage:local-item-response");
 		expect(itemResponseData?.data.id).toEqual("test-id-does-not-exist");
 		expect(itemResponseData?.data.entity).toEqual(undefined);
 	});
@@ -269,12 +255,8 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 		await connector?.start("test-node-identity", undefined);
 
-		let consolidateBatchResponseData1:
-			| IEvent<ISyncBatchResponse<TestType>>
-			| undefined;
-		let consolidateBatchResponseData2:
-			| IEvent<ISyncBatchResponse<TestType>>
-			| undefined;
+		let consolidateBatchResponseData1: IEvent<ISyncBatchResponse<TestType>> | undefined;
+		let consolidateBatchResponseData2: IEvent<ISyncBatchResponse<TestType>> | undefined;
 
 		eventBusService.subscribe<ISyncBatchResponse<TestType>>(
 			SynchronisedStorageTopics.BatchResponse,
@@ -295,25 +277,18 @@ describe("synchronisedEntityStorageConnector", () => {
 			});
 		}
 
-		await eventBusService.publish<ISyncBatchRequest>(
-			SynchronisedStorageTopics.BatchRequest,
-			{
-				schemaType: "test-type",
-				batchSize: 3
-			}
-		);
+		await eventBusService.publish<ISyncBatchRequest>(SynchronisedStorageTopics.BatchRequest, {
+			schemaType: "test-type",
+			batchSize: 3
+		});
 
 		expect(consolidateBatchResponseData1).toBeDefined();
-		expect(consolidateBatchResponseData1?.topic).toEqual(
-			"synchronised-storage:batch-response"
-		);
+		expect(consolidateBatchResponseData1?.topic).toEqual("synchronised-storage:batch-response");
 		expect(consolidateBatchResponseData1?.data.entities.length).toEqual(3);
 		expect(consolidateBatchResponseData1?.data.lastEntry).toEqual(false);
 
 		expect(consolidateBatchResponseData2).toBeDefined();
-		expect(consolidateBatchResponseData2?.topic).toEqual(
-			"synchronised-storage:batch-response"
-		);
+		expect(consolidateBatchResponseData2?.topic).toEqual("synchronised-storage:batch-response");
 		expect(consolidateBatchResponseData2?.data.entities.length).toEqual(2);
 		expect(consolidateBatchResponseData2?.data.lastEntry).toEqual(true);
 	});
