@@ -14,12 +14,15 @@ import {
 import { EventBusService } from "@twin.org/event-bus-service";
 import { nameof } from "@twin.org/nameof";
 import {
-	type ISyncConsolidationBatchRequest,
-	type ISyncConsolidationBatchResponse,
+	type ISyncBatchRequest,
+	type ISyncBatchResponse,
 	SynchronisedStorageTopics,
 	type ISyncItemSet,
 	type ISyncItemRemove,
-	type ISyncRegisterSchemaType
+	type ISyncRegisterSchemaType,
+	type ISyncItemChange,
+	type ISyncItemResponse,
+	type ISyncItemRequest
 } from "@twin.org/synchronised-storage-models";
 import { SynchronisedEntityStorageConnector } from "../src/synchronisedEntityStorageConnector";
 
@@ -108,12 +111,12 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 		await connector?.start("test-node-identity", undefined);
 
-		let setEventData: IEvent<ISyncItemSet<TestType>> | undefined;
+		let localItemChangeEventData: IEvent<ISyncItemChange> | undefined;
 
-		eventBusService.subscribe<ISyncItemSet<TestType>>(
-			SynchronisedStorageTopics.LocalItemSet,
+		eventBusService.subscribe<ISyncItemChange>(
+			SynchronisedStorageTopics.LocalItemChange,
 			async data => {
-				setEventData = data;
+				localItemChangeEventData = data;
 			}
 		);
 
@@ -123,13 +126,11 @@ describe("synchronisedEntityStorageConnector", () => {
 			dateModified: new Date().toISOString()
 		});
 
-		expect(setEventData).toBeDefined();
-		expect(setEventData?.topic).toEqual("synchronised-storage:local-item-set");
-		expect(setEventData?.data.id).toBe("test-id");
-		expect(setEventData?.data.schemaType).toBe("test-type");
-		expect(setEventData?.data?.entity.id).toBe("test-id");
-		expect(setEventData?.data?.entity?.nodeIdentity).toBe("test-node");
-		expect(setEventData?.data?.entity?.dateModified).toBeDefined();
+		expect(localItemChangeEventData).toBeDefined();
+		expect(localItemChangeEventData?.topic).toEqual("synchronised-storage:local-item-change");
+		expect(localItemChangeEventData?.data.schemaType).toBe("test-type");
+		expect(localItemChangeEventData?.data.operation).toBe("set");
+		expect(localItemChangeEventData?.data.id).toBe("test-id");
 
 		expect(memoryStorageConnector.getStore()).toEqual([
 			{
@@ -148,12 +149,12 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 		await connector?.start("test-node-identity", undefined);
 
-		let removeEventData: IEvent<ISyncItemSet<TestType>> | undefined;
+		let localItemChangeEventData: IEvent<ISyncItemChange> | undefined;
 
-		eventBusService.subscribe<ISyncItemSet<TestType>>(
-			SynchronisedStorageTopics.LocalItemRemove,
+		eventBusService.subscribe<ISyncItemChange>(
+			SynchronisedStorageTopics.LocalItemChange,
 			async data => {
-				removeEventData = data;
+				localItemChangeEventData = data;
 			}
 		);
 
@@ -165,16 +166,102 @@ describe("synchronisedEntityStorageConnector", () => {
 
 		await connector.remove("test-id");
 
-		expect(removeEventData).toBeDefined();
-		expect(removeEventData?.topic).toEqual("synchronised-storage:local-item-remove");
-		expect(removeEventData?.data.id).toBe("test-id");
-		expect(removeEventData?.data.schemaType).toBe("test-type");
-		expect(removeEventData?.data?.entity).toBeUndefined();
+		expect(localItemChangeEventData).toBeDefined();
+		expect(localItemChangeEventData?.topic).toEqual("synchronised-storage:local-item-change");
+		expect(localItemChangeEventData?.data.schemaType).toBe("test-type");
+		expect(localItemChangeEventData?.data.id).toBe("test-id");
+		expect(localItemChangeEventData?.data.operation).toEqual("delete");
 
 		expect(memoryStorageConnector.getStore()).toEqual([]);
 	});
 
-	test("can respond to a consolidation batch request", async () => {
+	test("can respond to an item request", async () => {
+		const connector = new SynchronisedEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			entityStorageConnectorType: "memory",
+			eventBusComponentType: "event-bus"
+		});
+		await connector?.start("test-node-identity", undefined);
+
+		let itemResponseData:
+			| IEvent<ISyncItemResponse<TestType>>
+			| undefined;
+
+		eventBusService.subscribe<ISyncItemResponse<TestType>>(
+			SynchronisedStorageTopics.LocalItemResponse,
+			async event => {
+				itemResponseData = event;
+			}
+		);
+
+		await connector.set({
+			id: "test-id",
+			nodeIdentity: "test-node",
+			dateModified: new Date().toISOString()
+		});
+
+		await eventBusService.publish<ISyncItemRequest>(
+			SynchronisedStorageTopics.LocalItemRequest,
+			{
+				schemaType: "test-type",
+				id: "test-id"
+			}
+		);
+
+		expect(itemResponseData).toBeDefined();
+		expect(itemResponseData?.topic).toEqual(
+			"synchronised-storage:local-item-response"
+		);
+		expect(itemResponseData?.data.id).toEqual("test-id");
+		expect(itemResponseData?.data.entity).toEqual({
+			id: "test-id",
+			nodeIdentity: "test-node",
+			dateModified: expect.any(String)
+		});
+	});
+
+	test("can respond to an item request when the item does not exist", async () => {
+		const connector = new SynchronisedEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			entityStorageConnectorType: "memory",
+			eventBusComponentType: "event-bus"
+		});
+		await connector?.start("test-node-identity", undefined);
+
+		let itemResponseData:
+			| IEvent<ISyncItemResponse<TestType>>
+			| undefined;
+
+		eventBusService.subscribe<ISyncItemResponse<TestType>>(
+			SynchronisedStorageTopics.LocalItemResponse,
+			async event => {
+				itemResponseData = event;
+			}
+		);
+
+		await connector.set({
+			id: "test-id",
+			nodeIdentity: "test-node",
+			dateModified: new Date().toISOString()
+		});
+
+		await eventBusService.publish<ISyncItemRequest>(
+			SynchronisedStorageTopics.LocalItemRequest,
+			{
+				schemaType: "test-type",
+				id: "test-id-does-not-exist"
+			}
+		);
+
+		expect(itemResponseData).toBeDefined();
+		expect(itemResponseData?.topic).toEqual(
+			"synchronised-storage:local-item-response"
+		);
+		expect(itemResponseData?.data.id).toEqual("test-id-does-not-exist");
+		expect(itemResponseData?.data.entity).toEqual(undefined);
+	});
+
+	test("can respond to a batch request", async () => {
 		const connector = new SynchronisedEntityStorageConnector<TestType>({
 			entitySchema: nameof<TestType>(),
 			entityStorageConnectorType: "memory",
@@ -183,14 +270,14 @@ describe("synchronisedEntityStorageConnector", () => {
 		await connector?.start("test-node-identity", undefined);
 
 		let consolidateBatchResponseData1:
-			| IEvent<ISyncConsolidationBatchResponse<TestType>>
+			| IEvent<ISyncBatchResponse<TestType>>
 			| undefined;
 		let consolidateBatchResponseData2:
-			| IEvent<ISyncConsolidationBatchResponse<TestType>>
+			| IEvent<ISyncBatchResponse<TestType>>
 			| undefined;
 
-		eventBusService.subscribe<ISyncConsolidationBatchResponse<TestType>>(
-			SynchronisedStorageTopics.ConsolidationBatchResponse,
+		eventBusService.subscribe<ISyncBatchResponse<TestType>>(
+			SynchronisedStorageTopics.BatchResponse,
 			async event => {
 				if (event.data.lastEntry) {
 					consolidateBatchResponseData2 = event;
@@ -208,24 +295,24 @@ describe("synchronisedEntityStorageConnector", () => {
 			});
 		}
 
-		await eventBusService.publish<ISyncConsolidationBatchRequest>(
-			SynchronisedStorageTopics.ConsolidationBatchRequest,
+		await eventBusService.publish<ISyncBatchRequest>(
+			SynchronisedStorageTopics.BatchRequest,
 			{
 				schemaType: "test-type",
-				consolidationBatchSize: 3
+				batchSize: 3
 			}
 		);
 
 		expect(consolidateBatchResponseData1).toBeDefined();
 		expect(consolidateBatchResponseData1?.topic).toEqual(
-			"synchronised-storage:consolidation-batch-response"
+			"synchronised-storage:batch-response"
 		);
 		expect(consolidateBatchResponseData1?.data.entities.length).toEqual(3);
 		expect(consolidateBatchResponseData1?.data.lastEntry).toEqual(false);
 
 		expect(consolidateBatchResponseData2).toBeDefined();
 		expect(consolidateBatchResponseData2?.topic).toEqual(
-			"synchronised-storage:consolidation-batch-response"
+			"synchronised-storage:batch-response"
 		);
 		expect(consolidateBatchResponseData2?.data.entities.length).toEqual(2);
 		expect(consolidateBatchResponseData2?.data.lastEntry).toEqual(true);
@@ -241,7 +328,6 @@ describe("synchronisedEntityStorageConnector", () => {
 
 		await eventBusService.publish<ISyncItemSet<TestType>>(SynchronisedStorageTopics.RemoteItemSet, {
 			schemaType: "test-type",
-			id: "test-id",
 			entity: {
 				id: "test-id",
 				nodeIdentity: "test-node",

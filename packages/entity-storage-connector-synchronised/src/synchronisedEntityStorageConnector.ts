@@ -16,12 +16,16 @@ import {
 import type { IEventBusComponent } from "@twin.org/event-bus-models";
 import { nameof } from "@twin.org/nameof";
 import {
-	type ISyncConsolidationBatchRequest,
-	type ISyncConsolidationBatchResponse,
+	type ISyncBatchRequest,
+	type ISyncBatchResponse,
 	type ISynchronisedEntity,
+	type ISyncItemChange,
 	type ISyncItemRemove,
+	type ISyncItemRequest,
+	type ISyncItemResponse,
 	type ISyncItemSet,
 	type ISyncRegisterSchemaType,
+	SyncChangeOperation,
 	SynchronisedStorageTopics
 } from "@twin.org/synchronised-storage-models";
 import type { ISynchronisedEntityStorageConnectorConstructorOptions } from "./models/ISynchronisedEntityStorageConnectorConstructorOptions";
@@ -176,11 +180,14 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		await this._entityStorageConnector.set(entity, conditions);
 
 		// Tell the synchronised storage about the entity changes
-		await this._eventBusComponent.publish<ISyncItemSet<T>>(SynchronisedStorageTopics.LocalItemSet, {
-			schemaType: this._entitySchemaType,
-			id: entity[this._primaryKey.property] as string,
-			entity
-		});
+		await this._eventBusComponent.publish<ISyncItemChange>(
+			SynchronisedStorageTopics.LocalItemChange,
+			{
+				schemaType: this._entitySchemaType,
+				operation: SyncChangeOperation.Set,
+				id: entity[this._primaryKey.property] as string
+			}
+		);
 	}
 
 	/**
@@ -198,10 +205,11 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		await this._entityStorageConnector.remove(id, conditions);
 
 		// Tell the synchronised storage about the entity removal
-		await this._eventBusComponent.publish<ISyncItemRemove>(
-			SynchronisedStorageTopics.LocalItemRemove,
+		await this._eventBusComponent.publish<ISyncItemChange>(
+			SynchronisedStorageTopics.LocalItemChange,
 			{
 				schemaType: this._entitySchemaType,
+				operation: SyncChangeOperation.Delete,
 				id
 			}
 		);
@@ -250,9 +258,33 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 	 * @internal
 	 */
 	private handleEventBusMessages(): void {
-		// When the synchronised storage requests a consolidation batch, we need to provide it
-		this._eventBusComponent.subscribe<ISyncConsolidationBatchRequest>(
-			SynchronisedStorageTopics.ConsolidationBatchRequest,
+		// When the synchronised storage requests an item, we need to provide it
+		this._eventBusComponent.subscribe<ISyncItemRequest>(
+			SynchronisedStorageTopics.LocalItemRequest,
+			async params => {
+				// Only handle the request if it matches the schema type
+				if (params.data.schemaType === this._entitySchemaType) {
+					let entity: T | undefined;
+					try {
+						entity = await this._entityStorageConnector.get(params.data.id);
+					} catch {}
+
+					// Publish the item response with the entity
+					this._eventBusComponent.publish<ISyncItemResponse<T>>(
+						SynchronisedStorageTopics.LocalItemResponse,
+						{
+							schemaType: this._entitySchemaType,
+							id: params.data.id,
+							entity
+						}
+					);
+				}
+			}
+		);
+
+		// When the synchronised storage requests a batch, we need to provide it
+		this._eventBusComponent.subscribe<ISyncBatchRequest>(
+			SynchronisedStorageTopics.BatchRequest,
 			async params => {
 				// Only handle the request if it matches the schema type
 				if (params.data.schemaType === this._entitySchemaType) {
@@ -263,20 +295,18 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 							[{ property: "dateModified", sortDirection: SortDirection.Ascending }],
 							undefined,
 							cursor,
-							params.data.consolidationBatchSize
+							params.data.batchSize
 						);
 
 						cursor = result.cursor;
 
 						// Publish the batch response with the entities
-						this._eventBusComponent.publish<ISyncConsolidationBatchResponse<T>>(
-							SynchronisedStorageTopics.ConsolidationBatchResponse,
+						this._eventBusComponent.publish<ISyncBatchResponse<T>>(
+							SynchronisedStorageTopics.BatchResponse,
 							{
 								schemaType: this._entitySchemaType,
-								entities: result.entities.map(e => ({
-									id: e[this._primaryKey.property] as string,
-									entity: e as T
-								})),
+								primaryKey: this._primaryKey.property,
+								entities: result.entities as T[],
 								lastEntry: !Is.stringValue(cursor)
 							}
 						);
