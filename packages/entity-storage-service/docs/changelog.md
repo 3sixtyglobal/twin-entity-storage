@@ -1,5 +1,22 @@
 # @twin.org/entity-storage-service - Changelog
 
+## [0.0.2-next.2](https://github.com/twinfoundation/entity-storage/compare/entity-storage-service-v0.0.2-next.1...entity-storage-service-v0.0.2-next.2) (2025-07-24)
+
+
+### Features
+
+* remove includeNodeIdentity flag ([d88d1d0](https://github.com/twinfoundation/entity-storage/commit/d88d1d0694419b795dc860e0b712a0051c9a1c9e))
+* synchronised storage ([#44](https://github.com/twinfoundation/entity-storage/issues/44)) ([94e10e2](https://github.com/twinfoundation/entity-storage/commit/94e10e26d1feec801449dc04af7a9757ac7495ff))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.2-next.1 to 0.0.2-next.2
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.2-next.1 to 0.0.2-next.2
+
 ## [0.0.2-next.1](https://github.com/twinfoundation/entity-storage/compare/entity-storage-service-v0.0.2-next.0...entity-storage-service-v0.0.2-next.1) (2025-07-17)
 
 

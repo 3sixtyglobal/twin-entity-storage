@@ -1,5 +1,12 @@
 # @twin.org/entity-storage-models - Changelog
 
+## [0.0.2-next.2](https://github.com/twinfoundation/entity-storage/compare/entity-storage-models-v0.0.2-next.1...entity-storage-models-v0.0.2-next.2) (2025-07-24)
+
+
+### Features
+
+* remove includeNodeIdentity flag ([d88d1d0](https://github.com/twinfoundation/entity-storage/commit/d88d1d0694419b795dc860e0b712a0051c9a1c9e))
+
 ## [0.0.2-next.1](https://github.com/twinfoundation/entity-storage/compare/entity-storage-models-v0.0.2-next.0...entity-storage-models-v0.0.2-next.1) (2025-07-17)
 
 
