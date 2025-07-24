@@ -121,9 +121,6 @@ class BlobStorageEntry {
 
 	@property({ type: "string", optional: true })
 	public userIdentity?: string;
-
-	@property({ type: "string", optional: true })
-	public nodeIdentity?: string;
 }
 
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;

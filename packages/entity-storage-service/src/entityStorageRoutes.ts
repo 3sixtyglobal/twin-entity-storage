@@ -214,11 +214,7 @@ export async function entityStorageSet(
 	Guards.object<IEntityStorageSetRequest>(ROUTES_SOURCE, nameof(request), request);
 
 	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
-	await component.set(
-		request.body,
-		httpRequestContext.userIdentity,
-		httpRequestContext.nodeIdentity
-	);
+	await component.set(request.body, httpRequestContext.userIdentity);
 	return {
 		statusCode: HttpStatusCode.noContent
 	};
@@ -248,8 +244,7 @@ export async function entityStorageGet(
 	const item = await component.get(
 		request.pathParams.id,
 		request.query?.secondaryIndex as keyof unknown,
-		httpRequestContext.userIdentity,
-		httpRequestContext.nodeIdentity
+		httpRequestContext.userIdentity
 	);
 	return {
 		body: item
@@ -277,11 +272,7 @@ export async function entityStorageRemove(
 	Guards.stringValue(ROUTES_SOURCE, nameof(request.pathParams.id), request.pathParams.id);
 
 	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
-	await component.remove(
-		request.pathParams.id,
-		httpRequestContext.userIdentity,
-		httpRequestContext.nodeIdentity
-	);
+	await component.remove(request.pathParams.id, httpRequestContext.userIdentity);
 	return {
 		statusCode: HttpStatusCode.noContent
 	};
@@ -309,8 +300,7 @@ export async function entityStorageList(
 		HttpParameterHelper.objectFromString(request.query?.properties),
 		request.query?.cursor,
 		Coerce.number(request.query?.pageSize),
-		httpRequestContext.userIdentity,
-		httpRequestContext.nodeIdentity
+		httpRequestContext.userIdentity
 	);
 	return {
 		body: result
