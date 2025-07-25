@@ -19,7 +19,7 @@ import {
 	SynchronisedStorageTopics,
 	type ISyncItemSet,
 	type ISyncItemRemove,
-	type ISyncRegisterSchemaType,
+	type ISyncRegisterStorageKey,
 	type ISyncItemChange,
 	type ISyncItemResponse,
 	type ISyncItemRequest
@@ -80,17 +80,17 @@ describe("synchronisedEntityStorageConnector", () => {
 		expect(connector).toBeInstanceOf(SynchronisedEntityStorageConnector);
 	});
 
-	test("can register its schema type when started", async () => {
+	test("can register its storage key when started", async () => {
 		const connector = new SynchronisedEntityStorageConnector({
 			entitySchema: nameof<TestType>(),
 			entityStorageConnectorType: "memory",
 			eventBusComponentType: "event-bus"
 		});
 
-		let registeredEventData: IEvent<ISyncRegisterSchemaType> | undefined;
+		let registeredEventData: IEvent<ISyncRegisterStorageKey> | undefined;
 
-		eventBusService.subscribe<ISyncRegisterSchemaType>(
-			SynchronisedStorageTopics.RegisterSchemaType,
+		eventBusService.subscribe<ISyncRegisterStorageKey>(
+			SynchronisedStorageTopics.RegisterStorageKey,
 			async data => {
 				registeredEventData = data;
 			}
@@ -99,8 +99,8 @@ describe("synchronisedEntityStorageConnector", () => {
 		await connector?.start("test-node-identity", undefined);
 
 		expect(registeredEventData).toBeDefined();
-		expect(registeredEventData?.topic).toEqual("synchronised-storage:register-schema-type");
-		expect(registeredEventData?.data.schemaType).toBe("test-type");
+		expect(registeredEventData?.topic).toEqual("synchronised-storage:register-storage-key");
+		expect(registeredEventData?.data.storageKey).toBe("test-type");
 	});
 
 	test("can set an item", async () => {
@@ -128,7 +128,7 @@ describe("synchronisedEntityStorageConnector", () => {
 
 		expect(localItemChangeEventData).toBeDefined();
 		expect(localItemChangeEventData?.topic).toEqual("synchronised-storage:local-item-change");
-		expect(localItemChangeEventData?.data.schemaType).toBe("test-type");
+		expect(localItemChangeEventData?.data.storageKey).toBe("test-type");
 		expect(localItemChangeEventData?.data.operation).toBe("set");
 		expect(localItemChangeEventData?.data.id).toBe("test-id");
 
@@ -168,7 +168,7 @@ describe("synchronisedEntityStorageConnector", () => {
 
 		expect(localItemChangeEventData).toBeDefined();
 		expect(localItemChangeEventData?.topic).toEqual("synchronised-storage:local-item-change");
-		expect(localItemChangeEventData?.data.schemaType).toBe("test-type");
+		expect(localItemChangeEventData?.data.storageKey).toBe("test-type");
 		expect(localItemChangeEventData?.data.id).toBe("test-id");
 		expect(localItemChangeEventData?.data.operation).toEqual("delete");
 
@@ -199,7 +199,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 
 		await eventBusService.publish<ISyncItemRequest>(SynchronisedStorageTopics.LocalItemRequest, {
-			schemaType: "test-type",
+			storageKey: "test-type",
 			id: "test-id"
 		});
 
@@ -237,7 +237,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 
 		await eventBusService.publish<ISyncItemRequest>(SynchronisedStorageTopics.LocalItemRequest, {
-			schemaType: "test-type",
+			storageKey: "test-type",
 			id: "test-id-does-not-exist"
 		});
 
@@ -278,7 +278,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		}
 
 		await eventBusService.publish<ISyncBatchRequest>(SynchronisedStorageTopics.BatchRequest, {
-			schemaType: "test-type",
+			storageKey: "test-type",
 			batchSize: 3
 		});
 
@@ -302,7 +302,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		await connector?.start("test-node-identity", undefined);
 
 		await eventBusService.publish<ISyncItemSet<TestType>>(SynchronisedStorageTopics.RemoteItemSet, {
-			schemaType: "test-type",
+			storageKey: "test-type",
 			entity: {
 				id: "test-id",
 				nodeIdentity: "test-node",
@@ -334,7 +334,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 
 		await eventBusService.publish<ISyncItemRemove>(SynchronisedStorageTopics.RemoteItemRemove, {
-			schemaType: "test-type",
+			storageKey: "test-type",
 			id: "test-id"
 		});
 

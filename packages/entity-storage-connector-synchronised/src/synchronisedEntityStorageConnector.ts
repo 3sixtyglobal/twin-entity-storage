@@ -24,7 +24,7 @@ import {
 	type ISyncItemRequest,
 	type ISyncItemResponse,
 	type ISyncItemSet,
-	type ISyncRegisterSchemaType,
+	type ISyncRegisterStorageKey,
 	SyncChangeOperation,
 	SynchronisedStorageTopics
 } from "@twin.org/synchronised-storage-models";
@@ -54,10 +54,10 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 	private readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
-	 * The entity schema type.
+	 * The storage key for the entity.
 	 * @internal
 	 */
-	private readonly _entitySchemaType: string;
+	private readonly _storageKey: string;
 
 	/**
 	 * The entity storage connector to use for actual data.
@@ -89,7 +89,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		);
 
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
-		this._entitySchemaType = StringHelper.kebabCase(options.entitySchema);
+		this._storageKey = options?.config?.storageKey ?? StringHelper.kebabCase(options.entitySchema);
 
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey(this._entitySchema);
 
@@ -137,11 +137,11 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 			[id: string]: unknown;
 		}
 	): Promise<void> {
-		// Tell the synchronised storage about this schema type
-		await this._eventBusComponent.publish<ISyncRegisterSchemaType>(
-			SynchronisedStorageTopics.RegisterSchemaType,
+		// Tell the synchronised storage about this storage key
+		await this._eventBusComponent.publish<ISyncRegisterStorageKey>(
+			SynchronisedStorageTopics.RegisterStorageKey,
 			{
-				schemaType: this._entitySchemaType
+				storageKey: this._storageKey
 			}
 		);
 
@@ -183,7 +183,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		await this._eventBusComponent.publish<ISyncItemChange>(
 			SynchronisedStorageTopics.LocalItemChange,
 			{
-				schemaType: this._entitySchemaType,
+				storageKey: this._storageKey,
 				operation: SyncChangeOperation.Set,
 				id: entity[this._primaryKey.property] as string
 			}
@@ -208,7 +208,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		await this._eventBusComponent.publish<ISyncItemChange>(
 			SynchronisedStorageTopics.LocalItemChange,
 			{
-				schemaType: this._entitySchemaType,
+				storageKey: this._storageKey,
 				operation: SyncChangeOperation.Delete,
 				id
 			}
@@ -262,8 +262,8 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		this._eventBusComponent.subscribe<ISyncItemRequest>(
 			SynchronisedStorageTopics.LocalItemRequest,
 			async params => {
-				// Only handle the request if it matches the schema type
-				if (params.data.schemaType === this._entitySchemaType) {
+				// Only handle the request if it matches the storage key
+				if (params.data.storageKey === this._storageKey) {
 					let entity: T | undefined;
 					try {
 						entity = await this._entityStorageConnector.get(params.data.id);
@@ -273,7 +273,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 					this._eventBusComponent.publish<ISyncItemResponse<T>>(
 						SynchronisedStorageTopics.LocalItemResponse,
 						{
-							schemaType: this._entitySchemaType,
+							storageKey: this._storageKey,
 							id: params.data.id,
 							entity
 						}
@@ -286,8 +286,8 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		this._eventBusComponent.subscribe<ISyncBatchRequest>(
 			SynchronisedStorageTopics.BatchRequest,
 			async params => {
-				// Only handle the request if it matches the schema type
-				if (params.data.schemaType === this._entitySchemaType) {
+				// Only handle the request if it matches the storage key
+				if (params.data.storageKey === this._storageKey) {
 					let cursor;
 					do {
 						const result = await this._entityStorageConnector.query(
@@ -304,7 +304,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 						this._eventBusComponent.publish<ISyncBatchResponse<T>>(
 							SynchronisedStorageTopics.BatchResponse,
 							{
-								schemaType: this._entitySchemaType,
+								storageKey: this._storageKey,
 								primaryKey: this._primaryKey.property,
 								entities: result.entities as T[],
 								lastEntry: !Is.stringValue(cursor)
@@ -319,8 +319,8 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		this._eventBusComponent.subscribe<ISyncItemSet<T>>(
 			SynchronisedStorageTopics.RemoteItemSet,
 			async params => {
-				// Only remove the item if it matches the schema type
-				if (params.data.schemaType === this._entitySchemaType) {
+				// Only remove the item if it matches the storage key
+				if (params.data.storageKey === this._storageKey) {
 					await this.set(params.data.entity);
 				}
 			}
@@ -330,8 +330,8 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		this._eventBusComponent.subscribe<ISyncItemRemove>(
 			SynchronisedStorageTopics.RemoteItemRemove,
 			async params => {
-				// Only remove the item if it matches the schema type
-				if (params.data.schemaType === this._entitySchemaType) {
+				// Only remove the item if it matches the storage key
+				if (params.data.storageKey === this._storageKey) {
 					await this.remove(params.data.id);
 				}
 			}

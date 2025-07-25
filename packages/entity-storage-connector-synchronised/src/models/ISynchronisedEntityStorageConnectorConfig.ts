@@ -4,5 +4,10 @@
 /**
  * Configuration for the Synchronised Entity Storage Connector.
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
-export interface ISynchronisedEntityStorageConnectorConfig {}
+export interface ISynchronisedEntityStorageConnectorConfig {
+	/**
+	 * The storage key for the synchronised entity storage connector.
+	 * Will default to kebab cased entity schema name.
+	 */
+	storageKey?: string;
+}
