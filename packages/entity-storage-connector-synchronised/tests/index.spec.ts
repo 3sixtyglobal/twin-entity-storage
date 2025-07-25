@@ -75,7 +75,10 @@ describe("synchronisedEntityStorageConnector", () => {
 		const connector = new SynchronisedEntityStorageConnector({
 			entitySchema: nameof<TestType>(),
 			entityStorageConnectorType: "memory",
-			eventBusComponentType: "event-bus"
+			eventBusComponentType: "event-bus",
+			config: {
+				storageKey: "test-type-100"
+			}
 		});
 		expect(connector).toBeInstanceOf(SynchronisedEntityStorageConnector);
 	});
@@ -84,7 +87,10 @@ describe("synchronisedEntityStorageConnector", () => {
 		const connector = new SynchronisedEntityStorageConnector({
 			entitySchema: nameof<TestType>(),
 			entityStorageConnectorType: "memory",
-			eventBusComponentType: "event-bus"
+			eventBusComponentType: "event-bus",
+			config: {
+				storageKey: "test-type-100"
+			}
 		});
 
 		let registeredEventData: IEvent<ISyncRegisterStorageKey> | undefined;
@@ -100,14 +106,17 @@ describe("synchronisedEntityStorageConnector", () => {
 
 		expect(registeredEventData).toBeDefined();
 		expect(registeredEventData?.topic).toEqual("synchronised-storage:register-storage-key");
-		expect(registeredEventData?.data.storageKey).toBe("test-type");
+		expect(registeredEventData?.data.storageKey).toBe("test-type-100");
 	});
 
 	test("can set an item", async () => {
 		const connector = new SynchronisedEntityStorageConnector<TestType>({
 			entitySchema: nameof<TestType>(),
 			entityStorageConnectorType: "memory",
-			eventBusComponentType: "event-bus"
+			eventBusComponentType: "event-bus",
+			config: {
+				storageKey: "test-type-100"
+			}
 		});
 		await connector?.start("test-node-identity", undefined);
 
@@ -128,7 +137,7 @@ describe("synchronisedEntityStorageConnector", () => {
 
 		expect(localItemChangeEventData).toBeDefined();
 		expect(localItemChangeEventData?.topic).toEqual("synchronised-storage:local-item-change");
-		expect(localItemChangeEventData?.data.storageKey).toBe("test-type");
+		expect(localItemChangeEventData?.data.storageKey).toBe("test-type-100");
 		expect(localItemChangeEventData?.data.operation).toBe("set");
 		expect(localItemChangeEventData?.data.id).toBe("test-id");
 
@@ -145,7 +154,10 @@ describe("synchronisedEntityStorageConnector", () => {
 		const connector = new SynchronisedEntityStorageConnector<TestType>({
 			entitySchema: nameof<TestType>(),
 			entityStorageConnectorType: "memory",
-			eventBusComponentType: "event-bus"
+			eventBusComponentType: "event-bus",
+			config: {
+				storageKey: "test-type-100"
+			}
 		});
 		await connector?.start("test-node-identity", undefined);
 
@@ -168,7 +180,7 @@ describe("synchronisedEntityStorageConnector", () => {
 
 		expect(localItemChangeEventData).toBeDefined();
 		expect(localItemChangeEventData?.topic).toEqual("synchronised-storage:local-item-change");
-		expect(localItemChangeEventData?.data.storageKey).toBe("test-type");
+		expect(localItemChangeEventData?.data.storageKey).toBe("test-type-100");
 		expect(localItemChangeEventData?.data.id).toBe("test-id");
 		expect(localItemChangeEventData?.data.operation).toEqual("delete");
 
@@ -179,7 +191,10 @@ describe("synchronisedEntityStorageConnector", () => {
 		const connector = new SynchronisedEntityStorageConnector<TestType>({
 			entitySchema: nameof<TestType>(),
 			entityStorageConnectorType: "memory",
-			eventBusComponentType: "event-bus"
+			eventBusComponentType: "event-bus",
+			config: {
+				storageKey: "test-type-100"
+			}
 		});
 		await connector?.start("test-node-identity", undefined);
 
@@ -199,7 +214,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 
 		await eventBusService.publish<ISyncItemRequest>(SynchronisedStorageTopics.LocalItemRequest, {
-			storageKey: "test-type",
+			storageKey: "test-type-100",
 			id: "test-id"
 		});
 
@@ -217,7 +232,10 @@ describe("synchronisedEntityStorageConnector", () => {
 		const connector = new SynchronisedEntityStorageConnector<TestType>({
 			entitySchema: nameof<TestType>(),
 			entityStorageConnectorType: "memory",
-			eventBusComponentType: "event-bus"
+			eventBusComponentType: "event-bus",
+			config: {
+				storageKey: "test-type-100"
+			}
 		});
 		await connector?.start("test-node-identity", undefined);
 
@@ -237,7 +255,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 
 		await eventBusService.publish<ISyncItemRequest>(SynchronisedStorageTopics.LocalItemRequest, {
-			storageKey: "test-type",
+			storageKey: "test-type-100",
 			id: "test-id-does-not-exist"
 		});
 
@@ -251,7 +269,10 @@ describe("synchronisedEntityStorageConnector", () => {
 		const connector = new SynchronisedEntityStorageConnector<TestType>({
 			entitySchema: nameof<TestType>(),
 			entityStorageConnectorType: "memory",
-			eventBusComponentType: "event-bus"
+			eventBusComponentType: "event-bus",
+			config: {
+				storageKey: "test-type-100"
+			}
 		});
 		await connector?.start("test-node-identity", undefined);
 
@@ -278,7 +299,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		}
 
 		await eventBusService.publish<ISyncBatchRequest>(SynchronisedStorageTopics.BatchRequest, {
-			storageKey: "test-type",
+			storageKey: "test-type-100",
 			batchSize: 3
 		});
 
@@ -297,12 +318,15 @@ describe("synchronisedEntityStorageConnector", () => {
 		const connector = new SynchronisedEntityStorageConnector<TestType>({
 			entitySchema: nameof<TestType>(),
 			entityStorageConnectorType: "memory",
-			eventBusComponentType: "event-bus"
+			eventBusComponentType: "event-bus",
+			config: {
+				storageKey: "test-type-100"
+			}
 		});
 		await connector?.start("test-node-identity", undefined);
 
 		await eventBusService.publish<ISyncItemSet<TestType>>(SynchronisedStorageTopics.RemoteItemSet, {
-			storageKey: "test-type",
+			storageKey: "test-type-100",
 			entity: {
 				id: "test-id",
 				nodeIdentity: "test-node",
@@ -323,7 +347,10 @@ describe("synchronisedEntityStorageConnector", () => {
 		const connector = new SynchronisedEntityStorageConnector<TestType>({
 			entitySchema: nameof<TestType>(),
 			entityStorageConnectorType: "memory",
-			eventBusComponentType: "event-bus"
+			eventBusComponentType: "event-bus",
+			config: {
+				storageKey: "test-type-100"
+			}
 		});
 		await connector?.start("test-node-identity", undefined);
 
@@ -334,7 +361,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 
 		await eventBusService.publish<ISyncItemRemove>(SynchronisedStorageTopics.RemoteItemRemove, {
-			storageKey: "test-type",
+			storageKey: "test-type-100",
 			id: "test-id"
 		});
 
