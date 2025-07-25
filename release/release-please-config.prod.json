@@ -36,6 +36,13 @@
 				"src/index.ts"
 			]
 		},
+		"packages/entity-storage-connector-synchronised": {
+			"package-name": "entity-storage-connector-synchronised",
+			"changelog-path": "docs/changelog.md",
+			"extra-files": [
+				"src/index.ts"
+			]
+		},
 		"packages/entity-storage-connector-file": {
 			"package-name": "entity-storage-connector-file",
 			"changelog-path": "docs/changelog.md",
@@ -103,6 +110,7 @@
 				"entity-storage-connector-memory",
 				"entity-storage-service",
 				"entity-storage-rest-client",
+				"entity-storage-connector-synchronised",
 				"entity-storage-connector-file",
 				"entity-storage-connector-scylladb",
 				"entity-storage-connector-dynamodb",
