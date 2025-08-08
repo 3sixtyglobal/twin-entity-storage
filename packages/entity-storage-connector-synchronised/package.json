@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-synchronised",
-	"version": "0.0.2-next.3",
+	"version": "0.0.2-next.4",
 	"description": "Entity Storage connector implementation using synchronised storage",
 	"repository": {
 		"type": "git",
@@ -32,7 +32,7 @@
 	"dependencies": {
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.0.2-next.3",
+		"@twin.org/entity-storage-models": "0.0.2-next.4",
 		"@twin.org/event-bus-models": "next",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next",
@@ -41,7 +41,7 @@
 	"devDependencies": {
 		"@twin.org/nameof-transformer": "next",
 		"@twin.org/nameof-vitest-plugin": "next",
-		"@twin.org/entity-storage-connector-memory": "0.0.2-next.3",
+		"@twin.org/entity-storage-connector-memory": "0.0.2-next.4",
 		"@twin.org/event-bus-connector-local": "next",
 		"@twin.org/event-bus-service": "next",
 		"@types/node": "22.14.1",
