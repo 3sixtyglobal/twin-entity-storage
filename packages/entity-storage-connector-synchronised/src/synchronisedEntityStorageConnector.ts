@@ -93,7 +93,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey(this._entitySchema);
 
-		const requiredProperties: (keyof ISynchronisedEntity)[] = ["nodeIdentity", "dateModified"];
+		const requiredProperties: (keyof ISynchronisedEntity)[] = ["id", "nodeIdentity", "dateModified"];
 
 		for (const requiredProperty of requiredProperties) {
 			const foundProperty = this._entitySchema.properties?.find(
@@ -101,7 +101,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 			);
 			if (Is.empty(foundProperty)) {
 				throw new GeneralError(this.CLASS_NAME, "missingRequiredProperty", { requiredProperty });
-			} else if (Is.empty(foundProperty.isSecondary) && Is.empty(foundProperty.sortDirection)) {
+			} else if (Is.empty(foundProperty.isPrimary) && Is.empty(foundProperty.isSecondary) && Is.empty(foundProperty.sortDirection)) {
 				throw new GeneralError(this.CLASS_NAME, "missingRequiredPropertySort", {
 					requiredProperty
 				});
