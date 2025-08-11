@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-mongodb",
-	"version": "0.0.2-next.4",
+	"version": "0.0.2-next.5",
 	"description": "Entity Storage connector implementation using MongoDb storage",
 	"repository": {
 		"type": "git",
@@ -32,13 +32,13 @@
 	"dependencies": {
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.0.2-next.4",
+		"@twin.org/entity-storage-models": "0.0.2-next.5",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next",
 		"mongodb": "6.17.0"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.0.2-next.4",
+		"@twin.org/entity-storage-connector-memory": "0.0.2-next.5",
 		"@twin.org/logging-connector-entity-storage": "next",
 		"@twin.org/nameof-transformer": "next",
 		"@twin.org/nameof-vitest-plugin": "next",

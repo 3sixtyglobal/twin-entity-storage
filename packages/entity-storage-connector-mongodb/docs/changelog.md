@@ -1,5 +1,21 @@
 # @twin.org/entity-storage-connector-mongodb - Changelog
 
+## [0.0.2-next.5](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-mongodb-v0.0.2-next.4...entity-storage-connector-mongodb-v0.0.2-next.5) (2025-08-11)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-connector-mongodb:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.2-next.4 to 0.0.2-next.5
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.2-next.4 to 0.0.2-next.5
+
 ## [0.0.2-next.4](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-mongodb-v0.0.2-next.3...entity-storage-connector-mongodb-v0.0.2-next.4) (2025-08-08)
 
 
