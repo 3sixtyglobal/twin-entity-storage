@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0.
 import { ComponentFactory, GeneralError, Guards, Is, StringHelper } from "@twin.org/core";
 import {
+	ComparisonOperator,
 	type EntityCondition,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
@@ -13,7 +14,7 @@ import {
 	EntityStorageConnectorFactory,
 	type IEntityStorageConnector
 } from "@twin.org/entity-storage-models";
-import type { IEventBusComponent } from "@twin.org/event-bus-models";
+import type { IEvent, IEventBusComponent } from "@twin.org/event-bus-models";
 import { nameof } from "@twin.org/nameof";
 import {
 	type ISyncBatchRequest,
@@ -25,8 +26,10 @@ import {
 	type ISyncItemResponse,
 	type ISyncItemSet,
 	type ISyncRegisterStorageKey,
+	type ISyncReset,
 	SyncChangeOperation,
-	SynchronisedStorageTopics
+	SynchronisedStorageTopics,
+	SyncNodeIdentityMode
 } from "@twin.org/synchronised-storage-models";
 import type { ISynchronisedEntityStorageConnectorConstructorOptions } from "./models/ISynchronisedEntityStorageConnectorConstructorOptions";
 
@@ -70,6 +73,12 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 	 * @internal
 	 */
 	private readonly _eventBusComponent: IEventBusComponent;
+
+	/**
+	 * The node identity.
+	 * @internal
+	 */
+	private _nodeIdentity?: string;
 
 	/**
 	 * Create a new instance of SynchronisedEntityStorageConnector.
@@ -145,6 +154,8 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 			[id: string]: unknown;
 		}
 	): Promise<void> {
+		this._nodeIdentity = nodeIdentity;
+
 		// Tell the synchronised storage about this storage key
 		await this._eventBusComponent.publish<ISyncRegisterStorageKey>(
 			SynchronisedStorageTopics.RegisterStorageKey,
@@ -182,20 +193,24 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(this.CLASS_NAME, nameof(entity), entity);
 
-		// Make sure the entity has the required properties
-		entity.dateModified = new Date(Date.now()).toISOString();
+		if (Is.stringValue(this._nodeIdentity)) {
+			// Make sure the entity has the required properties
+			entity.dateModified = new Date(Date.now()).toISOString();
+			entity.nodeIdentity = this._nodeIdentity;
 
-		await this._entityStorageConnector.set(entity, conditions);
+			await this._entityStorageConnector.set(entity, conditions);
 
-		// Tell the synchronised storage about the entity changes
-		await this._eventBusComponent.publish<ISyncItemChange>(
-			SynchronisedStorageTopics.LocalItemChange,
-			{
-				storageKey: this._storageKey,
-				operation: SyncChangeOperation.Set,
-				id: entity[this._primaryKey.property] as string
-			}
-		);
+			// Tell the synchronised storage about the entity changes
+			await this._eventBusComponent.publish<ISyncItemChange>(
+				SynchronisedStorageTopics.LocalItemChange,
+				{
+					storageKey: this._storageKey,
+					operation: SyncChangeOperation.Set,
+					nodeIdentity: this._nodeIdentity,
+					id: entity[this._primaryKey.property] as string
+				}
+			);
+		}
 	}
 
 	/**
@@ -210,17 +225,20 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 	): Promise<void> {
 		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
 
-		await this._entityStorageConnector.remove(id, conditions);
+		if (Is.stringValue(this._nodeIdentity)) {
+			await this._entityStorageConnector.remove(id, conditions);
 
-		// Tell the synchronised storage about the entity removal
-		await this._eventBusComponent.publish<ISyncItemChange>(
-			SynchronisedStorageTopics.LocalItemChange,
-			{
-				storageKey: this._storageKey,
-				operation: SyncChangeOperation.Delete,
-				id
-			}
-		);
+			// Tell the synchronised storage about the entity removal
+			await this._eventBusComponent.publish<ISyncItemChange>(
+				SynchronisedStorageTopics.LocalItemChange,
+				{
+					storageKey: this._storageKey,
+					operation: SyncChangeOperation.Delete,
+					nodeIdentity: this._nodeIdentity,
+					id
+				}
+			);
+		}
 	}
 
 	/**
@@ -270,23 +288,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		this._eventBusComponent.subscribe<ISyncItemRequest>(
 			SynchronisedStorageTopics.LocalItemRequest,
 			async params => {
-				// Only handle the request if it matches the storage key
-				if (params.data.storageKey === this._storageKey) {
-					let entity: T | undefined;
-					try {
-						entity = await this._entityStorageConnector.get(params.data.id);
-					} catch {}
-
-					// Publish the item response with the entity
-					this._eventBusComponent.publish<ISyncItemResponse<T>>(
-						SynchronisedStorageTopics.LocalItemResponse,
-						{
-							storageKey: this._storageKey,
-							id: params.data.id,
-							entity
-						}
-					);
-				}
+				await this.handleLocalItemRequest(params);
 			}
 		);
 
@@ -294,31 +296,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		this._eventBusComponent.subscribe<ISyncBatchRequest>(
 			SynchronisedStorageTopics.BatchRequest,
 			async params => {
-				// Only handle the request if it matches the storage key
-				if (params.data.storageKey === this._storageKey) {
-					let cursor;
-					do {
-						const result = await this._entityStorageConnector.query(
-							undefined,
-							[{ property: "dateModified", sortDirection: SortDirection.Ascending }],
-							undefined,
-							cursor,
-							params.data.batchSize
-						);
-
-						cursor = result.cursor;
-
-						// Publish the batch response with the entities
-						this._eventBusComponent.publish<ISyncBatchResponse<T>>(
-							SynchronisedStorageTopics.BatchResponse,
-							{
-								storageKey: this._storageKey,
-								entities: result.entities as T[],
-								lastEntry: !Is.stringValue(cursor)
-							}
-						);
-					} while (Is.stringValue(cursor));
-				}
+				await this.handleBatchRequest(params);
 			}
 		);
 
@@ -326,10 +304,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		this._eventBusComponent.subscribe<ISyncItemSet<T>>(
 			SynchronisedStorageTopics.RemoteItemSet,
 			async params => {
-				// Only remove the item if it matches the storage key
-				if (params.data.storageKey === this._storageKey) {
-					await this.set(params.data.entity);
-				}
+				await this.handleRemoteItemSet(params);
 			}
 		);
 
@@ -337,11 +312,170 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		this._eventBusComponent.subscribe<ISyncItemRemove>(
 			SynchronisedStorageTopics.RemoteItemRemove,
 			async params => {
-				// Only remove the item if it matches the storage key
-				if (params.data.storageKey === this._storageKey) {
-					await this.remove(params.data.id);
-				}
+				await this.handleRemoteItemRemove(params);
 			}
 		);
+
+		// Subscribe to resets from the synchronised storage and update the local storage
+		this._eventBusComponent.subscribe<ISyncReset>(SynchronisedStorageTopics.Reset, async params => {
+			await this.handleReset(params);
+		});
+	}
+
+	/**
+	 * Handle a local item request.
+	 * @param event The request parameters
+	 * @internal
+	 */
+	private async handleLocalItemRequest(event: IEvent<ISyncItemRequest>): Promise<void> {
+		// Only handle the request if it matches the storage key
+		if (event.data.storageKey === this._storageKey) {
+			let entity: T | undefined;
+			try {
+				entity = await this._entityStorageConnector.get(event.data.id);
+			} catch {}
+
+			// Publish the item response with the entity
+			this._eventBusComponent.publish<ISyncItemResponse<T>>(
+				SynchronisedStorageTopics.LocalItemResponse,
+				{
+					storageKey: this._storageKey,
+					id: event.data.id,
+					entity
+				}
+			);
+		}
+	}
+
+	/**
+	 * Handle a remote item set event.
+	 * @param event The event parameters
+	 * @internal
+	 */
+	private async handleRemoteItemSet(event: IEvent<ISyncItemSet<T>>): Promise<void> {
+		// Only set the item if it matches the storage key
+		// and it is from another node, remote updates can not change data for this node
+		// That must be done via the regular entity storage methods
+		if (
+			event.data.storageKey === this._storageKey &&
+			event.data.entity.nodeIdentity !== this._nodeIdentity
+		) {
+			await this._entityStorageConnector.set(event.data.entity);
+		}
+	}
+
+	/**
+	 * Handle a remote item remove event.
+	 * @param params The event parameters
+	 * @internal
+	 */
+	private async handleRemoteItemRemove(params: IEvent<ISyncItemRemove>): Promise<void> {
+		// Only remove the item if it matches the storage key
+		// and it is from another node, remote updates can not change data for this node
+		// That must be done via the regular entity storage methods
+		if (
+			params.data.storageKey === this._storageKey &&
+			params.data.nodeIdentity !== this._nodeIdentity
+		) {
+			await this._entityStorageConnector.remove(params.data.id);
+		}
+	}
+
+	/**
+	 * Handle a batch request.
+	 * @param event The request parameters
+	 * @internal
+	 */
+	private async handleBatchRequest(event: IEvent<ISyncBatchRequest>): Promise<void> {
+		// Only handle the request if it matches the storage key
+		if (event.data.storageKey === this._storageKey) {
+			let cursor;
+			do {
+				const condition: EntityCondition<T> = {
+					conditions: []
+				};
+				if (
+					event.data.requestMode === SyncNodeIdentityMode.Local ||
+					event.data.requestMode === SyncNodeIdentityMode.Remote
+				) {
+					condition.conditions.push({
+						property: "nodeIdentity",
+						value: this._nodeIdentity,
+						comparison:
+							event.data.requestMode === SyncNodeIdentityMode.Local
+								? ComparisonOperator.Equals
+								: ComparisonOperator.NotEquals
+					});
+				}
+				const result = await this._entityStorageConnector.query(
+					condition,
+					[{ property: "dateModified", sortDirection: SortDirection.Ascending }],
+					undefined,
+					cursor,
+					event.data.batchSize
+				);
+
+				cursor = result.cursor;
+
+				// Publish the batch response with the entities
+				this._eventBusComponent.publish<ISyncBatchResponse<T>>(
+					SynchronisedStorageTopics.BatchResponse,
+					{
+						storageKey: this._storageKey,
+						entities: result.entities as T[],
+						lastEntry: !Is.stringValue(cursor)
+					}
+				);
+			} while (Is.stringValue(cursor));
+		}
+	}
+
+	/**
+	 * Handle a reset event.
+	 * @param event The event parameters
+	 * @internal
+	 */
+	private async handleReset(event: IEvent<ISyncReset>): Promise<void> {
+		// Only reset the storage if it matches the storage key
+		if (event.data.storageKey === this._storageKey) {
+			let cursor;
+			let toRemove: string[] = [];
+
+			// Build a list of the ids to remove
+			do {
+				const condition: EntityCondition<T> = {
+					conditions: []
+				};
+
+				// Depending on the reset mode we can filter the entities to remove
+				if (
+					event.data.resetMode === SyncNodeIdentityMode.Local ||
+					event.data.resetMode === SyncNodeIdentityMode.Remote
+				) {
+					condition.conditions.push({
+						property: "nodeIdentity",
+						value: this._nodeIdentity,
+						comparison:
+							event.data.resetMode === SyncNodeIdentityMode.Local
+								? ComparisonOperator.Equals
+								: ComparisonOperator.NotEquals
+					});
+				}
+				const result = await this._entityStorageConnector.query(
+					condition,
+					undefined,
+					undefined,
+					cursor
+				);
+
+				cursor = result.cursor;
+				toRemove = toRemove.concat(result.entities.map(entity => (entity as T).id));
+			} while (Is.stringValue(cursor));
+
+			// Remove the entities
+			for (let i = 0; i < toRemove.length; i++) {
+				await this.remove(toRemove[i]);
+			}
+		}
 	}
 }

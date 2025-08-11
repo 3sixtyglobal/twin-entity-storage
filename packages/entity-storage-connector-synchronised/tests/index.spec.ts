@@ -22,7 +22,9 @@ import {
 	type ISyncRegisterStorageKey,
 	type ISyncItemChange,
 	type ISyncItemResponse,
-	type ISyncItemRequest
+	type ISyncItemRequest,
+	SyncNodeIdentityMode,
+	type ISyncReset
 } from "@twin.org/synchronised-storage-models";
 import { SynchronisedEntityStorageConnector } from "../src/synchronisedEntityStorageConnector";
 
@@ -131,7 +133,7 @@ describe("synchronisedEntityStorageConnector", () => {
 
 		await connector.set({
 			id: "test-id",
-			nodeIdentity: "test-node",
+			nodeIdentity: "test-node-identity",
 			dateModified: new Date().toISOString()
 		});
 
@@ -144,7 +146,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		expect(memoryStorageConnector.getStore()).toEqual([
 			{
 				id: "test-id",
-				nodeIdentity: "test-node",
+				nodeIdentity: "test-node-identity",
 				dateModified: expect.any(String)
 			}
 		]);
@@ -172,7 +174,7 @@ describe("synchronisedEntityStorageConnector", () => {
 
 		await connector.set({
 			id: "test-id",
-			nodeIdentity: "test-node",
+			nodeIdentity: "test-node-identity",
 			dateModified: new Date().toISOString()
 		});
 
@@ -209,7 +211,7 @@ describe("synchronisedEntityStorageConnector", () => {
 
 		await connector.set({
 			id: "test-id",
-			nodeIdentity: "test-node",
+			nodeIdentity: "test-node-identity",
 			dateModified: new Date().toISOString()
 		});
 
@@ -223,7 +225,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		expect(itemResponseData?.data.id).toEqual("test-id");
 		expect(itemResponseData?.data.entity).toEqual({
 			id: "test-id",
-			nodeIdentity: "test-node",
+			nodeIdentity: "test-node-identity",
 			dateModified: expect.any(String)
 		});
 	});
@@ -250,7 +252,7 @@ describe("synchronisedEntityStorageConnector", () => {
 
 		await connector.set({
 			id: "test-id",
-			nodeIdentity: "test-node",
+			nodeIdentity: "test-node-identity",
 			dateModified: new Date().toISOString()
 		});
 
@@ -293,14 +295,15 @@ describe("synchronisedEntityStorageConnector", () => {
 		for (let i = 0; i < 5; i++) {
 			await connector.set({
 				id: `test-id-${i}`,
-				nodeIdentity: "test-node",
+				nodeIdentity: "test-node-identity",
 				dateModified: new Date().toISOString()
 			});
 		}
 
 		await eventBusService.publish<ISyncBatchRequest>(SynchronisedStorageTopics.BatchRequest, {
 			storageKey: "test-type-100",
-			batchSize: 3
+			batchSize: 3,
+			requestMode: SyncNodeIdentityMode.Local
 		});
 
 		expect(consolidateBatchResponseData1).toBeDefined();
@@ -329,7 +332,7 @@ describe("synchronisedEntityStorageConnector", () => {
 			storageKey: "test-type-100",
 			entity: {
 				id: "test-id",
-				nodeIdentity: "test-node",
+				nodeIdentity: "test-node-identity-2",
 				dateModified: new Date().toISOString()
 			}
 		});
@@ -337,7 +340,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		expect(memoryStorageConnector.getStore()).toEqual([
 			{
 				id: "test-id",
-				nodeIdentity: "test-node",
+				nodeIdentity: "test-node-identity-2",
 				dateModified: expect.any(String)
 			}
 		]);
@@ -356,13 +359,116 @@ describe("synchronisedEntityStorageConnector", () => {
 
 		await connector.set({
 			id: "test-id",
-			nodeIdentity: "test-node",
+			nodeIdentity: "test-node-identity-2",
 			dateModified: new Date().toISOString()
 		});
 
 		await eventBusService.publish<ISyncItemRemove>(SynchronisedStorageTopics.RemoteItemRemove, {
 			storageKey: "test-type-100",
-			id: "test-id"
+			id: "test-id",
+			nodeIdentity: "test-node-identity-2"
+		});
+
+		expect(memoryStorageConnector.getStore()).toEqual([]);
+	});
+
+	test("can reset and remove local items", async () => {
+		const connector = new SynchronisedEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			entityStorageConnectorType: "memory",
+			eventBusComponentType: "event-bus",
+			config: {
+				storageKey: "test-type-100"
+			}
+		});
+		await connector?.start("test-node-identity", undefined);
+
+		await memoryStorageConnector.set({
+			id: "test-id-local",
+			nodeIdentity: "test-node-identity",
+			dateModified: new Date().toISOString()
+		});
+		await memoryStorageConnector.set({
+			id: "test-id-remote",
+			nodeIdentity: "test-node-identity-2",
+			dateModified: new Date().toISOString()
+		});
+
+		await eventBusService.publish<ISyncReset>(SynchronisedStorageTopics.Reset, {
+			storageKey: "test-type-100",
+			resetMode: SyncNodeIdentityMode.Local
+		});
+
+		expect(memoryStorageConnector.getStore()).toEqual([
+			{
+				id: "test-id-remote",
+				dateModified: expect.any(String),
+				nodeIdentity: "test-node-identity-2"
+			}
+		]);
+	});
+
+	test("can reset and remove remote items", async () => {
+		const connector = new SynchronisedEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			entityStorageConnectorType: "memory",
+			eventBusComponentType: "event-bus",
+			config: {
+				storageKey: "test-type-100"
+			}
+		});
+		await connector?.start("test-node-identity", undefined);
+
+		await memoryStorageConnector.set({
+			id: "test-id-local",
+			nodeIdentity: "test-node-identity",
+			dateModified: new Date().toISOString()
+		});
+		await memoryStorageConnector.set({
+			id: "test-id-remote",
+			nodeIdentity: "test-node-identity-2",
+			dateModified: new Date().toISOString()
+		});
+
+		await eventBusService.publish<ISyncReset>(SynchronisedStorageTopics.Reset, {
+			storageKey: "test-type-100",
+			resetMode: SyncNodeIdentityMode.Remote
+		});
+
+		expect(memoryStorageConnector.getStore()).toEqual([
+			{
+				id: "test-id-local",
+				dateModified: expect.any(String),
+				nodeIdentity: "test-node-identity"
+			}
+		]);
+	});
+
+	test("can reset and remove all items", async () => {
+		const connector = new SynchronisedEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			entityStorageConnectorType: "memory",
+			eventBusComponentType: "event-bus",
+			config: {
+				storageKey: "test-type-100"
+			}
+		});
+		await connector?.start("test-node-identity", undefined);
+
+		await memoryStorageConnector.set({
+			id: "test-id-local",
+			nodeIdentity: "test-node-identity",
+			dateModified: new Date().toISOString()
+		});
+		await memoryStorageConnector.set({
+			id: "test-id-remote",
+			nodeIdentity: "test-node-identity-2",
+			dateModified: new Date().toISOString()
+		});
+
+		await eventBusService.publish<ISyncReset>(SynchronisedStorageTopics.Reset, {
+			storageKey: "test-type-100",
+			resetMode: SyncNodeIdentityMode.All
 		});
 
 		expect(memoryStorageConnector.getStore()).toEqual([]);
