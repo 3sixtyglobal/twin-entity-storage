@@ -3,7 +3,7 @@
 /* eslint-disable max-classes-per-file */
 /* eslint-disable jsdoc/require-jsdoc */
 
-import { I18n } from "@twin.org/core";
+import { ComponentFactory, I18n } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -20,6 +20,7 @@ import {
 	initSchema
 } from "@twin.org/logging-connector-entity-storage";
 import { LoggingConnectorFactory } from "@twin.org/logging-models";
+import { LoggingService } from "@twin.org/logging-service";
 import { nameof } from "@twin.org/nameof";
 import { TEST_SCYLLA_CONFIG } from "./setupTestEnv";
 import type { IScyllaDBTableConfig } from "../src/models/IScyllaDBTableConfig";
@@ -85,7 +86,7 @@ describe("ScyllaDBTableConnector", () => {
 		EntityStorageConnectorFactory.register("log-entry", () => memoryEntityStorage);
 
 		LoggingConnectorFactory.register("logging", () => new EntityStorageLoggingConnector());
-		LoggingConnectorFactory.register("node-logging", () => new EntityStorageLoggingConnector());
+		ComponentFactory.register("logging", () => new LoggingService());
 	});
 
 	afterEach(async () => {
@@ -111,7 +112,7 @@ describe("ScyllaDBTableConnector", () => {
 			() =>
 				new ScyllaDBTableConnector(
 					undefined as unknown as {
-						loggingConnectorType?: string;
+						loggingComponentType?: string;
 						entitySchema: string;
 						config: IScyllaDBTableConfig;
 					}
@@ -133,7 +134,7 @@ describe("ScyllaDBTableConnector", () => {
 			() =>
 				new ScyllaDBTableConnector(
 					{} as unknown as {
-						loggingConnectorType?: string;
+						loggingComponentType?: string;
 						entitySchema: string;
 						config: IScyllaDBTableConfig;
 					}
@@ -154,7 +155,7 @@ describe("ScyllaDBTableConnector", () => {
 		expect(
 			() =>
 				new ScyllaDBTableConnector({ entitySchema: "test" } as unknown as {
-					loggingConnectorType?: string;
+					loggingComponentType?: string;
 					entitySchema: string;
 					config: IScyllaDBTableConfig;
 				})
@@ -174,7 +175,7 @@ describe("ScyllaDBTableConnector", () => {
 		expect(
 			() =>
 				new ScyllaDBTableConnector({ entitySchema: "test", config: {} } as unknown as {
-					loggingConnectorType?: string;
+					loggingComponentType?: string;
 					entitySchema: string;
 					config: IScyllaDBTableConfig;
 				})

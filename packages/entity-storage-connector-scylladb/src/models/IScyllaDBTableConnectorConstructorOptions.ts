@@ -7,9 +7,9 @@ import type { IScyllaDBTableConfig } from "./IScyllaDBTableConfig";
  */
 export interface IScyllaDBTableConnectorConstructorOptions {
 	/**
-	 * The type of logging connector to use, defaults to no logging.
+	 * The type of logging component to use, defaults to no logging.
 	 */
-	loggingConnectorType?: string;
+	loggingComponentType?: string;
 
 	/**
 	 * The name of the entity schema.

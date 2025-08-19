@@ -18,6 +18,7 @@ import { type NativeAttributeValue, unmarshall } from "@aws-sdk/util-dynamodb";
 import {
 	BaseError,
 	Coerce,
+	ComponentFactory,
 	Converter,
 	GeneralError,
 	Guards,
@@ -37,7 +38,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { LoggingConnectorFactory } from "@twin.org/logging-models";
+import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import type { IDynamoDbEntityStorageConnectorConfig } from "./models/IDynamoDbEntityStorageConnectorConfig";
 import type { IDynamoDbEntityStorageConnectorConstructorOptions } from "./models/IDynamoDbEntityStorageConnectorConstructorOptions";
@@ -124,12 +125,12 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 
 	/**
 	 * Bootstrap the component by creating and initializing any resources it needs.
-	 * @param nodeLoggingConnectorType The node logging connector type, defaults to "node-logging".
+	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the bootstrapping process was successful.
 	 */
-	public async bootstrap(nodeLoggingConnectorType?: string): Promise<boolean> {
-		const nodeLogging = LoggingConnectorFactory.getIfExists(
-			nodeLoggingConnectorType ?? "node-logging"
+	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(
+			nodeLoggingComponentType ?? "logging"
 		);
 
 		if (!(await this.tableExists(this._config.tableName))) {
@@ -250,19 +251,16 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 						}
 					});
 				} else {
-					const errors = err instanceof AggregateError ? err.errors : [err];
-					for (const error of errors) {
-						await nodeLogging?.log({
-							level: "error",
-							source: this.CLASS_NAME,
-							ts: Date.now(),
-							message: "tableCreateFailed",
-							error: BaseError.fromError(error),
-							data: {
-								tableName: this._config.tableName
-							}
-						});
-					}
+					await nodeLogging?.log({
+						level: "error",
+						source: this.CLASS_NAME,
+						ts: Date.now(),
+						message: "tableCreateFailed",
+						error: BaseError.fromError(err),
+						data: {
+							tableName: this._config.tableName
+						}
+					});
 				}
 				return false;
 			}

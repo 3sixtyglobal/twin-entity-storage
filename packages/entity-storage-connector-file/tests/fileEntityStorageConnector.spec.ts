@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { readFile, rm } from "node:fs/promises";
-import { Converter, I18n, RandomHelper } from "@twin.org/core";
+import { ComponentFactory, Converter, I18n, RandomHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -18,6 +18,7 @@ import {
 	initSchema
 } from "@twin.org/logging-connector-entity-storage";
 import { LoggingConnectorFactory } from "@twin.org/logging-models";
+import { LoggingService } from "@twin.org/logging-service";
 import { nameof } from "@twin.org/nameof";
 import { FileEntityStorageConnector } from "../src/fileEntityStorageConnector";
 import type { IFileEntityStorageConnectorConfig } from "../src/models/IFileEntityStorageConnectorConfig";
@@ -67,7 +68,7 @@ describe("FileEntityStorageConnector", () => {
 		EntityStorageConnectorFactory.register("log-entry", () => memoryEntityStorage);
 
 		LoggingConnectorFactory.register("logging", () => new EntityStorageLoggingConnector());
-		LoggingConnectorFactory.register("node-logging", () => new EntityStorageLoggingConnector());
+		ComponentFactory.register("logging", () => new LoggingService());
 	});
 
 	afterEach(async () => {
@@ -81,7 +82,7 @@ describe("FileEntityStorageConnector", () => {
 			() =>
 				new FileEntityStorageConnector(
 					undefined as unknown as {
-						loggingConnectorType?: string;
+						loggingComponentType?: string;
 						entitySchema: string;
 						config: IFileEntityStorageConnectorConfig;
 					}
@@ -103,7 +104,7 @@ describe("FileEntityStorageConnector", () => {
 			() =>
 				new FileEntityStorageConnector(
 					{} as unknown as {
-						loggingConnectorType?: string;
+						loggingComponentType?: string;
 						entitySchema: string;
 						config: IFileEntityStorageConnectorConfig;
 					}
@@ -124,7 +125,7 @@ describe("FileEntityStorageConnector", () => {
 		expect(
 			() =>
 				new FileEntityStorageConnector({ entitySchema: "test" } as unknown as {
-					loggingConnectorType?: string;
+					loggingComponentType?: string;
 					entitySchema: string;
 					config: IFileEntityStorageConnectorConfig;
 				})
@@ -144,7 +145,7 @@ describe("FileEntityStorageConnector", () => {
 		expect(
 			() =>
 				new FileEntityStorageConnector({ entitySchema: "test", config: {} } as unknown as {
-					loggingConnectorType?: string;
+					loggingComponentType?: string;
 					entitySchema: string;
 					config: IFileEntityStorageConnectorConfig;
 				})

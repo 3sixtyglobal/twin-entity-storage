@@ -6,6 +6,9 @@ inputs:
     description: 'The package to publish prerequisites for.'
     required: true
     default: 'all'
+  publish-config-json:
+    description: 'The configuration to use when publishing, stored as JSON.'
+    required: true
 
 runs:
   using: 'composite'

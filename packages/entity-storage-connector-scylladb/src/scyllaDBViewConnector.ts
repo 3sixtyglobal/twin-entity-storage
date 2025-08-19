@@ -1,9 +1,16 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { BaseError, Is, NotSupportedError, StringHelper, type IError } from "@twin.org/core";
+import {
+	BaseError,
+	ComponentFactory,
+	Is,
+	NotSupportedError,
+	StringHelper,
+	type IError
+} from "@twin.org/core";
 import { EntitySchemaHelper, type IEntitySchema } from "@twin.org/entity";
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { LoggingConnectorFactory } from "@twin.org/logging-models";
+import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import { AbstractScyllaDBConnector } from "./abstractScyllaDBConnector";
 import type { IScyllaDBViewConnectorConstructorOptions } from "./models/IScyllaDBViewConnectorConstructorOptions";
@@ -40,7 +47,7 @@ export class ScyllaDBViewConnector<T>
 		// We need this conversion so that types can match in the superclass and reuse the get method
 		super(
 			{
-				loggingConnectorType: options.loggingConnectorType,
+				loggingComponentType: options.loggingComponentType,
 				entitySchema: options.viewSchema,
 				config: options.config
 			},
@@ -60,12 +67,12 @@ export class ScyllaDBViewConnector<T>
 
 	/**
 	 * Bootstrap the component by creating and initializing any resources it needs.
-	 * @param nodeLoggingConnectorType The node logging connector type, defaults to "node-logging".
+	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the bootstrapping process was successful.
 	 */
-	public async bootstrap(nodeLoggingConnectorType?: string): Promise<boolean> {
-		const nodeLogging = LoggingConnectorFactory.getIfExists(
-			nodeLoggingConnectorType ?? "node-logging"
+	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(
+			nodeLoggingComponentType ?? "logging"
 		);
 
 		nodeLogging?.log({

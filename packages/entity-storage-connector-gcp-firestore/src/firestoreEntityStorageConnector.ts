@@ -1,14 +1,22 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import {
-	Firestore,
-	type Settings,
 	type CollectionReference,
-	type Query,
+	type DocumentData,
 	type DocumentSnapshot,
-	type DocumentData
+	Firestore,
+	type Query,
+	type Settings
 } from "@google-cloud/firestore";
-import { BaseError, Converter, GeneralError, Guards, Is, ObjectHelper } from "@twin.org/core";
+import {
+	BaseError,
+	ComponentFactory,
+	Converter,
+	GeneralError,
+	Guards,
+	Is,
+	ObjectHelper
+} from "@twin.org/core";
 import {
 	ComparisonOperator,
 	type EntityCondition,
@@ -19,7 +27,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { LoggingConnectorFactory } from "@twin.org/logging-models";
+import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import type { JWTInput } from "google-auth-library";
 import type { IEntityWithIndexing } from "./models/IEntityWithIndexing";
@@ -127,12 +135,12 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 
 	/**
 	 * Bootstrap the component by creating and initializing any resources it needs.
-	 * @param nodeLoggingConnectorType The node logging connector type, defaults to "node-logging".
+	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the bootstrapping process was successful.
 	 */
-	public async bootstrap(nodeLoggingConnectorType?: string): Promise<boolean> {
-		const nodeLogging = LoggingConnectorFactory.getIfExists(
-			nodeLoggingConnectorType ?? "node-logging"
+	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(
+			nodeLoggingComponentType ?? "logging"
 		);
 
 		try {

@@ -11,7 +11,15 @@ import {
 	type SqlParameter,
 	type SqlQuerySpec
 } from "@azure/cosmos";
-import { BaseError, Coerce, GeneralError, Guards, Is, ObjectHelper } from "@twin.org/core";
+import {
+	BaseError,
+	Coerce,
+	ComponentFactory,
+	GeneralError,
+	Guards,
+	Is,
+	ObjectHelper
+} from "@twin.org/core";
 import {
 	ComparisonOperator,
 	type EntityCondition,
@@ -25,7 +33,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { LoggingConnectorFactory } from "@twin.org/logging-models";
+import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import type { ICosmosDbEntityStorageConnectorConfig } from "./models/ICosmosDbEntityStorageConnectorConfig";
 import type { ICosmosDbEntityStorageConnectorConstructorOptions } from "./models/ICosmosDbEntityStorageConnectorConstructorOptions";
@@ -137,12 +145,12 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 
 	/**
 	 * Initialize the Cosmos DB environment.
-	 * @param nodeLoggingConnectorType Optional type of the logging connector.
+	 * @param nodeLoggingComponentType Optional type of the logging component.
 	 * @returns A promise that resolves to a boolean indicating success.
 	 */
-	public async bootstrap(nodeLoggingConnectorType?: string): Promise<boolean> {
-		const nodeLogging = LoggingConnectorFactory.getIfExists(
-			nodeLoggingConnectorType ?? "node-logging"
+	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(
+			nodeLoggingComponentType ?? "logging"
 		);
 
 		// Create the database if it does not exist
@@ -183,19 +191,16 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 					}
 				});
 			} else {
-				const errors = error instanceof AggregateError ? error.errors : [error];
-				for (const err of errors) {
-					await nodeLogging?.log({
-						level: "error",
-						source: this.CLASS_NAME,
-						ts: Date.now(),
-						message: "databaseCreateFailed",
-						error: BaseError.fromError(err),
-						data: {
-							databaseId: this._config.databaseId
-						}
-					});
-				}
+				await nodeLogging?.log({
+					level: "error",
+					source: this.CLASS_NAME,
+					ts: Date.now(),
+					message: "databaseCreateFailed",
+					error: BaseError.fromError(error),
+					data: {
+						databaseId: this._config.databaseId
+					}
+				});
 				return false;
 			}
 		}

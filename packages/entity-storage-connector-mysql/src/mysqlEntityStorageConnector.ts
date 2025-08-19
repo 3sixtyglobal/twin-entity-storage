@@ -1,6 +1,13 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { BaseError, GeneralError, Guards, Is, ObjectHelper } from "@twin.org/core";
+import {
+	BaseError,
+	ComponentFactory,
+	GeneralError,
+	Guards,
+	Is,
+	ObjectHelper
+} from "@twin.org/core";
 import {
 	ComparisonOperator,
 	type EntityCondition,
@@ -13,9 +20,9 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { LoggingConnectorFactory } from "@twin.org/logging-models";
+import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import { createConnection, type Connection, type ConnectionOptions } from "mysql2/promise";
+import { type Connection, type ConnectionOptions, createConnection } from "mysql2/promise";
 import type { IMySqlEntityStorageConnectorConfig } from "./models/IMySqlEntityStorageConnectorConfig";
 import type { IMySqlEntityStorageConnectorConstructorOptions } from "./models/IMySqlEntityStorageConnectorConstructorOptions";
 
@@ -77,12 +84,12 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 
 	/**
 	 * Initialize the MySql environment.
-	 * @param nodeLoggingConnectorType Optional type of the logging connector.
+	 * @param nodeLoggingComponentType Optional type of the logging component.
 	 * @returns A promise that resolves to a boolean indicating success.
 	 */
-	public async bootstrap(nodeLoggingConnectorType?: string): Promise<boolean> {
-		const nodeLogging = LoggingConnectorFactory.getIfExists(
-			nodeLoggingConnectorType ?? "node-logging"
+	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(
+			nodeLoggingComponentType ?? "logging"
 		);
 
 		try {
@@ -125,19 +132,16 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 				}
 			});
 		} catch (error) {
-			const errors = error instanceof AggregateError ? error.errors : [error];
-			for (const err of errors) {
-				await nodeLogging?.log({
-					level: "error",
-					source: this.CLASS_NAME,
-					ts: Date.now(),
-					message: "databaseCreateFailed",
-					error: BaseError.fromError(err),
-					data: {
-						database: this._config.database
-					}
-				});
-			}
+			await nodeLogging?.log({
+				level: "error",
+				source: this.CLASS_NAME,
+				ts: Date.now(),
+				message: "databaseCreateFailed",
+				error: BaseError.fromError(error),
+				data: {
+					database: this._config.database
+				}
+			});
 			return false;
 		}
 

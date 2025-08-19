@@ -12,10 +12,10 @@ export interface IMongoDbEntityStorageConnectorConstructorOptions {
 	entitySchema: string;
 
 	/**
-	 * The type of logging connector to use.
+	 * The type of logging component to use.
 	 * @default logging
 	 */
-	loggingConnectorType?: string;
+	loggingComponentType?: string;
 
 	/**
 	 * The configuration for the connector.

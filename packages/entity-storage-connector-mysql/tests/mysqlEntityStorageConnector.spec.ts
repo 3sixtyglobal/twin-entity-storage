@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 /* eslint-disable max-classes-per-file */
-import { GeneralError, I18n, ObjectHelper } from "@twin.org/core";
+import { ComponentFactory, GeneralError, I18n, ObjectHelper } from "@twin.org/core";
 import type { IJsonLdNodeObject } from "@twin.org/data-json-ld";
 import {
 	ComparisonOperator,
@@ -19,6 +19,7 @@ import {
 	initSchema
 } from "@twin.org/logging-connector-entity-storage";
 import { LoggingConnectorFactory } from "@twin.org/logging-models";
+import { LoggingService } from "@twin.org/logging-service";
 import { nameof } from "@twin.org/nameof";
 import { TEST_MYSQL_CONFIG } from "./setupTestEnv";
 import type { IMySqlEntityStorageConnectorConfig } from "../src/models/IMySqlEntityStorageConnectorConfig";
@@ -145,7 +146,7 @@ describe("MySqlEntityStorageConnector", () => {
 		});
 		EntityStorageConnectorFactory.register("log-entry", () => memoryEntityStorage);
 		LoggingConnectorFactory.register("logging", () => new EntityStorageLoggingConnector());
-		LoggingConnectorFactory.register("node-logging", () => new EntityStorageLoggingConnector());
+		ComponentFactory.register("logging", () => new LoggingService());
 	});
 
 	afterEach(async () => {

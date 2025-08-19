@@ -12,9 +12,9 @@ export interface IFirestoreEntityStorageConnectorConstructorOptions {
 	entitySchema: string;
 
 	/**
-	 * The type of logging connector to use, defaults to no logging.
+	 * The type of logging component to use, defaults to no logging.
 	 */
-	loggingConnectorType?: string;
+	loggingComponentType?: string;
 
 	/**
 	 * The configuration for the connector.
