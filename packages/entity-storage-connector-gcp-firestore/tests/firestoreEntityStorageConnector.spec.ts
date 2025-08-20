@@ -129,7 +129,7 @@ describe("FirestoreEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_FIRESTORE_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 	});
 
 	afterEach(async () => {

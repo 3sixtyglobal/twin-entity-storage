@@ -71,9 +71,7 @@ export class ScyllaDBViewConnector<T>
 	 * @returns True if the bootstrapping process was successful.
 	 */
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
-		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(
-			nodeLoggingComponentType ?? "logging"
-		);
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		nodeLogging?.log({
 			level: "info",

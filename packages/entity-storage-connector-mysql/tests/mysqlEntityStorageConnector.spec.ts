@@ -204,7 +204,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
 		expect(logs).toBeDefined();
 
@@ -238,7 +238,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -259,7 +259,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -286,7 +286,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -317,7 +317,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 
 		const entityId = "1";
 		const objectSet = {
@@ -351,7 +351,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -386,7 +386,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -437,7 +437,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const item = await entityStorage.get("20000");
 
 		expect(item).toBeUndefined();
@@ -448,7 +448,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const object = {
 			id: "2",
 			value1: "aaa",
@@ -479,7 +479,7 @@ describe("MySqlEntityStorageConnector", () => {
 			config
 		});
 
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const secondaryValue = "zzz";
 		const object = {
 			id: "2",
@@ -510,7 +510,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await expect(entityStorage.remove(undefined as unknown as string)).rejects.toMatchObject({
 			name: "GuardError",
 			message: "guard.string",
@@ -526,7 +526,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 
 		const object = {
 			id: "2",
@@ -557,7 +557,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const idToRemove = "65432";
 		const object = {
 			id: "65432",
@@ -589,7 +589,7 @@ describe("MySqlEntityStorageConnector", () => {
 			config
 		});
 
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const object = {
 			id: "1",
 			value1: "aaa",
@@ -620,7 +620,7 @@ describe("MySqlEntityStorageConnector", () => {
 			config
 		});
 
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const object = {
 			id: "1",
 			value1: "aaa",
@@ -650,7 +650,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const result = await entityStorage.query();
 		expect(result).toBeDefined();
 		expect(result.entities.length).toEqual(0);
@@ -662,7 +662,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entry = {
 			id: "1",
 			value1: "aaa",
@@ -693,7 +693,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 80; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -723,7 +723,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 50; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -755,7 +755,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -792,7 +792,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (30 - i).toString(),
@@ -841,7 +841,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (30 - i).toString(),
@@ -894,7 +894,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -926,7 +926,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 5; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -979,7 +979,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 5; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -1036,7 +1036,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<BlobStorageEntry>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const object = {
 			id: "1",
 			dateCreated: new Date().toISOString(),
@@ -1061,7 +1061,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<BlobStorageEntry>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const object: BlobStorageEntry = {
 			id: "2",
 			dateCreated: new Date().toISOString(),
@@ -1090,7 +1090,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<BlobStorageEntry>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const object = {
 			id: "3",
 			dateCreated: new Date().toISOString(),
@@ -1114,7 +1114,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<BlobStorageEntry>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const object = {
 			id: "4",
 			dateCreated: new Date().toISOString(),

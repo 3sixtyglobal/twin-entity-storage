@@ -88,9 +88,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	 * @returns A promise that resolves to a boolean indicating success.
 	 */
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
-		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(
-			nodeLoggingComponentType ?? "logging"
-		);
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
 			const dbConnection = await this.createConnection();

@@ -72,9 +72,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	 * @returns True if the bootstrapping process was successful.
 	 */
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
-		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(
-			nodeLoggingComponentType ?? "logging"
-		);
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		if (!(await this.dirExists(this._directory))) {
 			await nodeLogging?.log({

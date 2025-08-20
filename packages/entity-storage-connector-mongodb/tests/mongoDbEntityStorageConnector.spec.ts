@@ -118,7 +118,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.collectionDrop();
 	});
 
@@ -169,7 +169,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
 		expect(logs).toBeDefined();
 
@@ -203,7 +203,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet: TestType = {
 			id: entityId,
@@ -237,7 +237,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet: TestType = {
 			id: entityId,
@@ -271,7 +271,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 
 		const entityId = "1";
 		const objectSet: TestType = {
@@ -308,7 +308,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet: TestType = {
 			id: entityId,
@@ -346,7 +346,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet: TestType = {
 			id: entityId,
@@ -400,7 +400,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const item = await entityStorage.get("20000");
 
 		expect(item).toBeNull();
@@ -411,7 +411,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const object: TestType = {
 			id: "2",
 			value1: "aaa",
@@ -445,7 +445,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			config
 		});
 
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const secondaryValue = "zzz";
 		const object: TestType = {
 			id: "2",
@@ -479,7 +479,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await expect(entityStorage.remove(undefined as unknown as string)).rejects.toMatchObject({
 			name: "GuardError",
 			message: "guard.string",
@@ -495,7 +495,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 
 		const object: TestType = {
 			id: "2",
@@ -526,7 +526,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const idToRemove = "65432";
 		const object: TestType = {
 			id: "65432",
@@ -558,7 +558,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			config
 		});
 
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const object: TestType = {
 			id: "1",
 			value1: "aaa",
@@ -589,7 +589,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			config
 		});
 
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const object: TestType = {
 			id: "1",
 			value1: "aaa",
@@ -619,7 +619,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const result = await entityStorage.query();
 		expect(result).toBeDefined();
 		expect(result.entities.length).toEqual(0);
@@ -631,7 +631,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entry: TestType = {
 			id: "1",
 			value1: "aaa",
@@ -666,7 +666,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 80; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -696,7 +696,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 50; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -728,7 +728,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -765,7 +765,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (30 - i).toString(),
@@ -814,7 +814,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (30 - i).toString(),
@@ -867,7 +867,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -899,7 +899,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 5; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -952,7 +952,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 5; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),

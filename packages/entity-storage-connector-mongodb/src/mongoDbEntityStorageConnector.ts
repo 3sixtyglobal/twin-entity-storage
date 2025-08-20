@@ -83,9 +83,7 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 	 * @returns A promise that resolves to a boolean indicating success.
 	 */
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
-		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(
-			nodeLoggingComponentType ?? "logging"
-		);
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
 			await this._client.connect();

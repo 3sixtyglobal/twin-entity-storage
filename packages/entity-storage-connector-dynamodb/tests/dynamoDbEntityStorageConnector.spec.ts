@@ -163,7 +163,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
 		expect(logs).toBeDefined();
 		expect(logs?.length).toEqual(2);
@@ -194,7 +194,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -217,7 +217,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -240,7 +240,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 
 		const entityId = "1";
 		const objectSet = {
@@ -281,7 +281,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const item = await entityStorage.get("20000");
 
 		expect(item).toBeUndefined();
@@ -292,7 +292,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "2", value1: "vvv", value2: 35, value3: undefined });
 		const item = await entityStorage.get("2");
 
@@ -309,7 +309,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			config: TEST_DYNAMODB_CONFIG
 		});
 
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const secondaryValue = "zzz";
 		await entityStorage.set({ id: "300", value1: secondaryValue, value2: 55, value3: undefined });
 		const item = await entityStorage.get(secondaryValue, "value1");
@@ -325,7 +325,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await expect(entityStorage.remove(undefined as unknown as string)).rejects.toMatchObject({
 			name: "GuardError",
 			message: "guard.string",
@@ -341,7 +341,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 
 		await entityStorage.set({ id: "10001", value1: "aaa", value2: 5555, value3: undefined });
 
@@ -355,7 +355,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const idToRemove = "65432";
 		await entityStorage.set({ id: idToRemove, value1: "aaa", value2: 99, value3: undefined });
 		await entityStorage.remove(idToRemove);
@@ -370,7 +370,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			config: TEST_DYNAMODB_CONFIG
 		});
 
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: 99, value3: undefined });
 		await entityStorage.remove("1", [{ property: "value1", value: "aaa1" }]);
 
@@ -384,7 +384,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			config: TEST_DYNAMODB_CONFIG
 		});
 
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: 99, value3: undefined });
 		await entityStorage.remove("1", [{ property: "value1", value: "aaa" }]);
 
@@ -397,7 +397,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const result = await entityStorage.query();
 		expect(result).toBeDefined();
 		expect(result.entities.length).toEqual(0);
@@ -409,7 +409,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: 95, value3: undefined });
 		const result = await entityStorage.query();
 		expect(result).toBeDefined();
@@ -422,7 +422,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 80; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -441,7 +441,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 50; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -462,7 +462,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -488,7 +488,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (30 - i).toString(),
@@ -525,7 +525,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -546,7 +546,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 5; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -587,7 +587,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 5; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -634,7 +634,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -659,7 +659,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -684,7 +684,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 
 		await entityStorage.set({
 			id: "1",
@@ -714,7 +714,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 
 		await entityStorage.set({
 			id: "1",

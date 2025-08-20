@@ -178,7 +178,7 @@ describe("FileEntityStorageConnector", () => {
 				directory: "|\0"
 			}
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
 		expect(logs).toBeDefined();
 		expect(logs?.length).toEqual(2);
@@ -195,7 +195,7 @@ describe("FileEntityStorageConnector", () => {
 				directory: TEST_DIRECTORY
 			}
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
 		expect(logs).toBeDefined();
 		expect(logs?.length).toEqual(2);
@@ -212,8 +212,8 @@ describe("FileEntityStorageConnector", () => {
 				directory: TEST_DIRECTORY
 			}
 		});
-		await entityStorage.bootstrap();
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
+		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
 		expect(logs).toBeDefined();
 		expect(logs?.length).toEqual(3);
@@ -241,7 +241,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
 
 		const file = await readFile(TEST_STORE_NAME, "utf8");
@@ -259,7 +259,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 
 		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" }, [
 			{ property: "value1", value: "aaa" }
@@ -280,7 +280,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
 
 		await entityStorage.set({ id: "1", value1: "ccc", value2: "ddd" });
@@ -317,7 +317,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
 		const item = await entityStorage.get("2");
 
@@ -329,7 +329,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
 		const item = await entityStorage.get("1");
 
@@ -344,7 +344,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
 		const item = await entityStorage.get("aaa", "value1");
 
@@ -374,7 +374,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
 
 		await entityStorage.remove("2");
@@ -390,7 +390,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
 		await entityStorage.remove("1");
 
@@ -405,7 +405,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
 		await entityStorage.remove("1", [{ property: "value1", value: "aaa1" }]);
 
@@ -420,7 +420,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
 		await entityStorage.remove("1", [{ property: "value1", value: "aaa" }]);
 
@@ -435,7 +435,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const result = await entityStorage.query();
 		expect(result).toBeDefined();
 		expect(result.entities.length).toEqual(0);
@@ -447,7 +447,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
 		const result = await entityStorage.query();
 		expect(result).toBeDefined();
@@ -460,7 +460,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
 		const result = await entityStorage.query(undefined, undefined, undefined, undefined, 1);
 		expect(result).toBeDefined();
@@ -473,7 +473,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({ id: (i + 1).toString(), value1: "aaa", value2: "bbb" });
 		}
@@ -488,7 +488,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({ id: (i + 1).toString(), value1: "aaa", value2: "bbb" });
 		}
@@ -504,7 +504,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 100; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -527,7 +527,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({ id: (30 - i).toString(), value1: "aaa", value2: "bbb" });
 		}
@@ -548,7 +548,7 @@ describe("FileEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({ id: (i + 1).toString(), value1: "aaa", value2: "bbb" });
 		}

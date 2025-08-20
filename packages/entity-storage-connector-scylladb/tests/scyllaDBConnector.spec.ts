@@ -209,7 +209,7 @@ describe("ScyllaDBTableConnector", () => {
 				keyspace: "test_keyspace"
 			}
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
 		expect(logs).toBeDefined();
 		expect(logs?.length).toEqual(2);
@@ -225,7 +225,7 @@ describe("ScyllaDBTableConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_SCYLLA_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
 		expect(logs).toBeDefined();
 		expect(logs?.length).toEqual(5);
@@ -259,7 +259,7 @@ describe("ScyllaDBTableConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_SCYLLA_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -586,7 +586,7 @@ describe("ScyllaDBTableConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_SCYLLA_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -611,7 +611,7 @@ describe("ScyllaDBTableConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_SCYLLA_CONFIG
 		});
-		await entityStorage.bootstrap();
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,

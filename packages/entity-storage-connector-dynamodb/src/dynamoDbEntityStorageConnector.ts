@@ -129,9 +129,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @returns True if the bootstrapping process was successful.
 	 */
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
-		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(
-			nodeLoggingComponentType ?? "logging"
-		);
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		if (!(await this.tableExists(this._config.tableName))) {
 			await nodeLogging?.log({

@@ -149,9 +149,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @returns A promise that resolves to a boolean indicating success.
 	 */
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
-		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(
-			nodeLoggingComponentType ?? "logging"
-		);
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		// Create the database if it does not exist
 		try {
