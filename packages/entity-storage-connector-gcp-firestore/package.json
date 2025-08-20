@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-gcp-firestore",
-	"version": "0.0.2-next.6",
+	"version": "0.0.2-next.7",
 	"description": "Entity Storage connector implementation using GCP Firestore storage",
 	"repository": {
 		"type": "git",
@@ -33,12 +33,12 @@
 		"@google-cloud/firestore": "7.11.3",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.0.2-next.6",
+		"@twin.org/entity-storage-models": "0.0.2-next.7",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.0.2-next.6",
+		"@twin.org/entity-storage-connector-memory": "0.0.2-next.7",
 		"@twin.org/logging-connector-entity-storage": "next",
 		"@twin.org/logging-service": "next",
 		"@twin.org/nameof-transformer": "next",
