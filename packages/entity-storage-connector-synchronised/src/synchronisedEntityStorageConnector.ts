@@ -144,15 +144,11 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 	 * The component needs to be started when the node is initialized.
 	 * @param nodeIdentity The identity of the node starting the component.
 	 * @param nodeLoggingComponentType The node logging component type.
-	 * @param componentState A persistent state which can be modified by the method.
 	 * @returns Nothing.
 	 */
 	public async start(
 		nodeIdentity: string,
-		nodeLoggingComponentType: string | undefined,
-		componentState?: {
-			[id: string]: unknown;
-		}
+		nodeLoggingComponentType: string | undefined
 	): Promise<void> {
 		this._nodeIdentity = nodeIdentity;
 
