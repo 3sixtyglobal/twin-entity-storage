@@ -20,7 +20,7 @@
 	"testnet": {
 		"mnemonic": "",
 		"nodeUrl": "https://api.testnet.iota.cafe",
-		"faucetUrl": "https://faucet.devnet.iota.cafe",
+		"faucetUrl": "https://faucet.testnet.iota.cafe",
 		"network": "testnet",
 		"controller": "did:iota:testnet:0x0000.00000",
 		"allowList": [],
