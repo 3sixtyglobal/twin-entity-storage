@@ -2,24 +2,27 @@
 	"mainnet": {
 		"mnemonic": "",
 		"nodeUrl": "https://api.mainnet.iota.cafe",
+		"faucetUrl": "",
 		"network": "mainnet",
-		"controller": "",
+		"controller": "did:iota:0x0000.00000",
 		"allowList": [],
 		"addressIndex": 0
 	},
 	"devnet": {
 		"mnemonic": "",
 		"nodeUrl": "https://api.devnet.iota.cafe",
+		"faucetUrl": "https://faucet.devnet.iota.cafe",
 		"network": "devnet",
-		"controller": "",
+		"controller": "did:iota:devnet:0x0000.00000",
 		"allowList": [],
 		"addressIndex": 0
 	},
 	"testnet": {
 		"mnemonic": "",
 		"nodeUrl": "https://api.testnet.iota.cafe",
+		"faucetUrl": "https://faucet.devnet.iota.cafe",
 		"network": "testnet",
-		"controller": "",
+		"controller": "did:iota:testnet:0x0000.00000",
 		"allowList": [],
 		"addressIndex": 0
 	}
