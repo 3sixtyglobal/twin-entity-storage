@@ -1,0 +1,26 @@
+{
+	"mainnet": {
+		"mnemonic": "",
+		"nodeUrl": "https://api.mainnet.iota.cafe",
+		"network": "mainnet",
+		"controller": "",
+		"allowList": [],
+		"addressIndex": 0
+	},
+	"devnet": {
+		"mnemonic": "",
+		"nodeUrl": "https://api.devnet.iota.cafe",
+		"network": "devnet",
+		"controller": "",
+		"allowList": [],
+		"addressIndex": 0
+	},
+	"testnet": {
+		"mnemonic": "",
+		"nodeUrl": "https://api.testnet.iota.cafe",
+		"network": "testnet",
+		"controller": "",
+		"allowList": [],
+		"addressIndex": 0
+	}
+}

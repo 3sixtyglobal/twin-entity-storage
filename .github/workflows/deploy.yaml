@@ -1,0 +1,157 @@
+# Run this workflow to deploy the on-chain entities that need to be in place
+# for the packages to reference e.g. smart contract deployment ids
+name: Deploy
+
+on:
+  # This workflow is triggered manually from the GitHub UI
+  workflow_dispatch:
+    inputs:
+      # Which branch are we publishing the deployments from?
+      releaseType:
+        description: 'Branch to prepare the deployments on'
+        required: true
+        type: choice
+        options:
+          - '🚧 prerelease (next branch)' # For prereleases (e.g., 0.1.0-next.1)
+          - '🚀 production (main branch)' # For production releases (e.g., 1.0.0, 1.1.0, 1.1.1)
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed for creating/updating branches for deployment updates
+      pull-requests: write # Needed for creating the PR
+      id-token: write # Keep existing permissions for authentication
+
+    steps:
+      # Set branch variable based on release type
+      - name: Set target branch
+        id: set-branch
+        run: |
+          INPUT="${{ github.event.inputs.releaseType }}"
+          if [[ "$INPUT" == *"next"* ]]; then
+            BRANCH="next"
+          elif [[ "$INPUT" == *"main"* ]]; then
+            BRANCH="main"
+          else
+            echo "Error: Unrecognized release type: $INPUT"
+            exit 1
+          fi
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "Using branch: $BRANCH"
+
+      # Clone the repository to the runner
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }} # Using GITHUB_TOKEN makes actions run as github-actions bot
+          ref: ${{ steps.set-branch.outputs.branch }} # Checkout the calculated branch
+          fetch-depth: 0 # Needed for merge operations
+
+      # Import GPG key for signing commits
+      - name: Import GPG key
+        run: |
+          # Import the GPG private key from secrets, which should be base64 encoded
+          echo "$GPG_PRIVATE_KEY" | base64 --decode | gpg --import
+          echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }} # Base64 encoded private key
+          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }} # GPG key ID
+
+      # Set git config once for all subsequent steps
+      - name: Configure Git
+        run: |
+          git config --global user.email "github@twindev.org"
+          git config --global user.name "TWIN GitHub Bot"
+          git config --global user.signingkey "$GPG_KEY_ID"
+          git config --global commit.gpgsign true
+          git config --global tag.gpgsign true
+
+      # Setup Node
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Create a new branch for the deployment
+      - name: Create Deployment Update Branch
+        run: |
+          BRANCH_NAME="release/deploy-${{ steps.set-branch.outputs.branch }}-$(date +%s)"
+          git checkout -b $BRANCH_NAME
+          echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+      # Install dependencies with retry
+      - name: Install dependencies
+        run: |
+          for i in {1..3}; do
+            npm ci && break || {
+              if [ $i -eq 3 ]; then
+                echo "npm ci failed after 3 attempts"
+                exit 1
+              fi
+              echo "npm ci failed, retrying in 30 seconds (attempt $i/3)..."
+              sleep 30
+            }
+          done
+
+      # Run the repo specific deploy actions
+      - name: Run the deploy actions
+        uses: ./.github/workflows/deploy
+        with:
+          branch: ${{ steps.set-branch.outputs.branch }}
+          branch-name: BRANCH_NAME
+          deploy-config-json: ${{ secrets.DEPLOY_CONFIG_JSON }}
+
+      # Stage all changes for commit
+      - name: Commit Changes
+        id: commit
+        run: |
+          # Check if there are any changed files
+          # if not then we can exit early
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No changes to commit. Exiting."
+            exit 0
+          fi
+          git add -A
+          git commit -S -m "chore: prepare deployments for ${{ steps.set-branch.outputs.branch }}"
+          git push origin $BRANCH_NAME
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+
+      # Create a PR with the changes
+      - name: Create Update PR
+        if: steps.commit.outputs.has_changes == 'true'
+        id: create-pr
+        run: |
+          BASE_BRANCH="${{ steps.set-branch.outputs.branch }}"
+          PR_URL=$(gh pr create \
+            --title "chore: prepare deployments for ${{ steps.set-branch.outputs.branch }}" \
+            --body "This PR prepares the deployments of all packages for ${{ steps.set-branch.outputs.branch }}." \
+            --base $BASE_BRANCH \
+            --head ${{ env.BRANCH_NAME }})
+
+          # Extract PR number from URL
+          PR_NUMBER=$(echo $PR_URL | grep -o '[0-9]\+$')
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Automatically approve the PR to speed up the process
+      - name: Approve PR
+        if: steps.create-pr.outputs.pr_number != '' && steps.commit.outputs.has_changes == 'true'
+        run: |
+          gh pr review ${{ steps.create-pr.outputs.pr_number }} --approve
+        env:
+          # We need to use a different token for the approval as you can't approve your own PRs
+          # This token must be from a different user with write access to the repository
+          GH_TOKEN: ${{ secrets.GHA_RELEASE_TOKEN }} # Personal access token from a different user
+
+      # Cleanup: Remove the imported GPG key
+      - name: Cleanup GPG key
+        if: always()
+        run: |
+          FINGERPRINT=$(gpg --list-secret-keys --with-colons "$GPG_KEY_ID" | awk -F: '/fpr:/ {print $10}' | head -1)
+          if [ -n "$FINGERPRINT" ]; then
+            gpg --batch --yes --delete-secret-keys "$FINGERPRINT" || true
+            gpg --batch --yes --delete-keys "$FINGERPRINT" || true
+          fi

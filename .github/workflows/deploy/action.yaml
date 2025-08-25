@@ -1,0 +1,21 @@
+name: 'Deploy'
+description: 'Perform any operations that require some deployment tasks. See deploy-config.json.example for details on the structure of the input data.'
+
+inputs:
+  branch:
+    description: 'The branch the deployment is being performed on.'
+    required: true
+  branch-name:
+    description: 'The full name of the branch the deployment is being created in.'
+    required: true
+  deploy-config-json:
+    description: 'The configuration to use when deploying, stored as JSON.'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: No action
+      shell: bash
+      run: |
+        echo "No prerequisites required for this action. It is a placeholder for the publish prerequisites."
