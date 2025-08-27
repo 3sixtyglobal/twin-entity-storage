@@ -147,7 +147,7 @@ Use descriptive names with appropriate prefixes:
 
 | Type          | Format                | Example                         |
 | ------------- | --------------------- | ------------------------------- |
-| **Features**  | `feat/description`    | `feat/user-authentication`      |
+| **Features**  | `feature/description` | `feature/user-authentication`   |
 | **Bug Fixes** | `bugfix/description`  | `bugfix/memory-leak-fix`        |
 | **Hot Fixes** | `hotfix/description`  | `hotfix/security-vulnerability` |
 | **Chores**    | `chore/description`   | `chore/update-dependencies`     |
