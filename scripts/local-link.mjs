@@ -40,7 +40,7 @@ async function run() {
 		await linkPackage(targetPackage);
 	}
 
-	process.stdout.write(`\nDone.\n`);
+	process.stdout.write('\nDone.\n');
 }
 
 /**
@@ -48,7 +48,7 @@ async function run() {
  * @param targetPackage The target package to link.
  */
 async function linkPackage(targetPackage) {
-	process.stdout.write(`Linking package\n\n`);
+	process.stdout.write('Linking package\n\n');
 
 	// The target package starts with an @ so we have to try and locate it by
 	// looking in the parent folder and assuming the other repos are in
@@ -88,7 +88,7 @@ async function linkPackage(targetPackage) {
  * @param targetPackage The target package to unlink.
  */
 async function unlinkPackage(targetPackage) {
-	process.stdout.write(`Unlinking package\n\n`);
+	process.stdout.write('Unlinking package\n\n');
 
 	const { packageName } = await findPackageDetails(targetPackage);
 
@@ -110,7 +110,7 @@ async function unlinkPackage(targetPackage) {
 		await fs.rename(linkNameBackup, linkName);
 	} else {
 		process.stdout.write(
-			`There is no backup directory, performing npm install to re-instate package\n`
+			'There is no backup directory, performing npm install to re-instate package\n'
 		);
 		await runShellCmd('npm', ['install', targetPackage], process.cwd());
 	}
@@ -154,7 +154,7 @@ async function findPackageDetails(targetPackage) {
 	}
 
 	if (!targetDir) {
-		throw new Error(`Unable to locate target package's directory`);
+		throw new Error('Unable to locate target packages directory');
 	}
 
 	const repoPackageJsonFilename = path.join(targetDir, 'package.json');
@@ -163,7 +163,7 @@ async function findPackageDetails(targetPackage) {
 		packageName = repoPackageJson.name;
 	}
 	if (!packageName) {
-		throw new Error(`Unable to locate target package's name`);
+		throw new Error('Unable to locate target packages name');
 	}
 
 	return { targetDir, packageName };

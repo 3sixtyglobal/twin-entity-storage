@@ -305,6 +305,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 				for (const c of conditions) {
 					const schemaProp = this._entitySchema.properties?.find(p => p.property === c.property);
 					whereQuery.push(
+						// eslint-disable-next-line @typescript-eslint/restrict-template-expressions
 						`c.${String(c.property)} = ${this.propertyToDbValue(c.value, schemaProp?.type)}`
 					);
 				}
@@ -378,15 +379,18 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 				...entity
 			});
 		} catch (err) {
-			if (BaseError.isErrorCode(err, "ResourceNotFoundException")) {
-				throw new GeneralError(
-					this.CLASS_NAME,
-					"containerDoesNotExist",
-					{
-						containerId: this._config.containerId
-					},
-					err
-				);
+			if (BaseError.isAggregateError(err)) {
+				const errors = BaseError.fromAggregate(err);
+				if (BaseError.someErrorCode(errors, "ResourceNotFoundException")) {
+					throw new GeneralError(
+						this.CLASS_NAME,
+						"containerDoesNotExist",
+						{
+							containerId: this._config.containerId
+						},
+						err
+					);
+				}
 			}
 			throw new GeneralError(
 				this.CLASS_NAME,

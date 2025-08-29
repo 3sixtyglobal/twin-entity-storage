@@ -46,7 +46,6 @@ export default {
 	onwarn: message => {
 		if (!['EMPTY_BUNDLE', 'CIRCULAR_DEPENDENCY'].includes(message.code)) {
 			process.stderr.write(`${message}\n`);
-			// eslint-disable-next-line unicorn/no-process-exit
 			process.exit(1);
 		}
 	},

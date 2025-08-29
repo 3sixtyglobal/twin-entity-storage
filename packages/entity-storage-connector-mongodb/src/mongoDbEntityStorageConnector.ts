@@ -299,6 +299,8 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 
 		const collection = await this.getCollection();
 		const entities = await collection
+			// False positive, this is not an array find call
+			// eslint-disable-next-line unicorn/no-array-callback-reference
 			?.find(filter as Filter<Document>, { projection })
 			.sort(sort)
 			.skip(cursorValue)

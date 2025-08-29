@@ -1,6 +1,6 @@
 # Run this workflow to deploy the on-chain entities that need to be in place
 # for the packages to reference e.g. smart contract deployment ids
-name: Deploy
+name: 'Package Deploy'
 
 on:
   # This workflow is triggered manually from the GitHub UI
@@ -96,7 +96,7 @@ jobs:
 
       # Run the repo specific deploy actions
       - name: Run the deploy actions
-        uses: ./.github/workflows/deploy
+        uses: ./.github/workflows/package-deploy
         with:
           branch: ${{ steps.set-branch.outputs.branch }}
           branch-name: BRANCH_NAME

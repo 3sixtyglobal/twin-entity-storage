@@ -605,7 +605,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		);
 
 		const isKey =
-			schemaProp?.isPrimary || (schemaProp?.isSecondary && schemaProp?.property === secondaryIndex);
+			schemaProp?.isPrimary ?? (schemaProp?.isSecondary && schemaProp?.property === secondaryIndex);
 		return {
 			keyCondition: isKey ? comparison : "",
 			filterCondition: !isKey ? comparison : ""

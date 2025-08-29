@@ -1,8 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 /* eslint-disable max-classes-per-file */
-/* eslint-disable jsdoc/require-jsdoc */
-
 import { ComponentFactory, I18n } from "@twin.org/core";
 import {
 	ComparisonOperator,

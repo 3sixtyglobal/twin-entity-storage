@@ -477,7 +477,6 @@ export abstract class AbstractScyllaDBConnector<T> {
 		fieldDescriptor?: Pick<IEntitySchemaProperty<T>, "type" | "format">
 	): unknown {
 		if (fieldDescriptor) {
-			// eslint-disable-next-line no-constant-condition
 			if (fieldDescriptor.type === "string" && fieldDescriptor.format === "json") {
 				return Is.empty(value) ? "null" : this.jsonWrap(value);
 			} else if (fieldDescriptor.format === "uuid") {
@@ -532,7 +531,6 @@ export abstract class AbstractScyllaDBConnector<T> {
 	protected jsonWrap(value: unknown): string {
 		let json = JSON.stringify(value);
 
-		// eslint-disable-next-line no-control-regex
 		json = json.replace(/[\b\0\t\n\r\u001A\\]/g, s => {
 			switch (s) {
 				case "\0":

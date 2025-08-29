@@ -18,6 +18,7 @@
 		"build": "tsc",
 		"dev": "nodemon --watch src --ext ts --exec \"npm run build && npm run bundle:esm\"",
 		"test": "vitest --run --config ./vitest.config.ts --no-cache",
+		"test:build": "tsc -p ./tests/tsconfig.json --noEmit",
 		"coverage": "vitest --run --coverage --config ./vitest.config.ts --no-cache",
 		"bundle:esm": "rollup --config rollup.config.mjs --environment MODULE:esm",
 		"bundle:cjs": "rollup --config rollup.config.mjs --environment MODULE:cjs",
@@ -26,7 +27,7 @@
 		"docs:generate": "typedoc",
 		"docs:api": "ts-to-openapi ./ts-to-openapi.json ./docs/open-api/spec.json",
 		"docs": "npm run docs:clean && npm run docs:generate && npm run docs:api",
-		"dist": "npm run clean && npm run build && npm run test && npm run bundle && npm run docs",
+		"dist": "npm run clean && npm run build && npm run test:build && npm run test && npm run bundle && npm run docs",
 		"dist:no-test": "npm run clean && npm run build && npm run bundle && npm run docs",
 		"prepare": "ts-patch install -s"
 	},
@@ -47,9 +48,9 @@
 		"copyfiles": "2.4.1",
 		"nodemon": "3.1.10",
 		"rimraf": "6.0.1",
-		"rollup": "4.46.3",
+		"rollup": "4.49.0",
 		"ts-patch": "3.3.0",
-		"typedoc": "0.28.10",
+		"typedoc": "0.28.11",
 		"typedoc-plugin-markdown": "4.8.1",
 		"typescript": "5.9.2",
 		"vitest": "3.2.4"

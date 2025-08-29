@@ -38,7 +38,7 @@ async function run() {
 	await generateManifest(targetDirectory, 'prod', packageNames);
 	await generateManifest(targetDirectory, 'prerelease', packageNames);
 
-	process.stdout.write(`\nDone.\n`);
+	process.stdout.write('\nDone.\n');
 }
 
 /**
@@ -85,7 +85,7 @@ async function generateConfig(targetDirectory, releaseType, packageNames) {
 		const packageNameParts = packageName.split('/');
 		config.packages[packageName] = {
 			'package-name': packageNameParts[1],
-			'changelog-path': `docs/changelog.md`
+			'changelog-path': 'docs/changelog.md'
 		};
 
 		const embeddedVersionFiles = ['src/cli.ts', 'tests/cli.spec.ts', 'src/index.ts'];

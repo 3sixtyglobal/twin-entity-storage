@@ -14,7 +14,7 @@
 		"vitest.config.*",
 		"tsconfig.json",
 		"typedoc.json",
-		".eslintrc.cjs",
+		"eslint.config.js",
 		"**/wordlists/**",
 		"changelog.md"
 	],

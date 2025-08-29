@@ -66,7 +66,7 @@ The schema for the entities.
 
 ### start()
 
-> **start**(`nodeIdentity`, `nodeLoggingComponentType`, `componentState?`): `Promise`\<`void`\>
+> **start**(`nodeIdentity`, `nodeLoggingComponentType`): `Promise`\<`void`\>
 
 The component needs to be started when the node is initialized.
 
@@ -83,10 +83,6 @@ The identity of the node starting the component.
 The node logging component type.
 
 `undefined` | `string`
-
-##### componentState?
-
-A persistent state which can be modified by the method.
 
 #### Returns
 
