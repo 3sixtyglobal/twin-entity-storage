@@ -1,5 +1,19 @@
 # @twin.org/entity-storage-rest-client - Changelog
 
+## [0.0.2-next.8](https://github.com/twinfoundation/entity-storage/compare/entity-storage-rest-client-v0.0.2-next.7...entity-storage-rest-client-v0.0.2-next.8) (2025-08-29)
+
+
+### Features
+
+* eslint migration to flat config ([f033b64](https://github.com/twinfoundation/entity-storage/commit/f033b64984c0e6a8129d929c9dd816dcc1b8dab0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.2-next.7 to 0.0.2-next.8
+
 ## [0.0.2-next.7](https://github.com/twinfoundation/entity-storage/compare/entity-storage-rest-client-v0.0.2-next.6...entity-storage-rest-client-v0.0.2-next.7) (2025-08-20)
 
 
