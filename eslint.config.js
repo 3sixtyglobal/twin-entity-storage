@@ -16,6 +16,12 @@ import simpleImportSortPlugin from 'eslint-plugin-simple-import-sort';
 import unicornPlugin from 'eslint-plugin-unicorn';
 import unusedImportsPlugin from 'eslint-plugin-unused-imports';
 import globals from 'globals';
+import { fileExists } from './scripts/common.mjs';
+
+let customModule;
+if (await fileExists('./eslint.config-custom.js')) {
+	customModule = await import('./eslint.config-custom.js');
+}
 
 headerPlugin.rules.header.meta.schema = false;
 
@@ -514,7 +520,23 @@ const jsDocRules = {
 	'jsdoc/valid-types': 'error'
 };
 
-export default [
+const allRules = {
+	tsRules,
+	jsRules,
+	stylisticRules,
+	stylisticJsRules,
+	headerRules,
+	promiseRules,
+	importRules,
+	unicornRules,
+	jsDocRules
+};
+
+if (customModule?.extendRules) {
+	customModule.extendRules(allRules);
+}
+
+const config = [
 	// Global ignores
 	{
 		ignores: [
@@ -637,10 +659,16 @@ export default [
 
 	// Test files
 	{
-		files: ['**/*.spec.ts', '**/setupTestEnv.ts'],
+		files: ['**/tests/**/*.ts'],
 		rules: {
 			'no-console': 'off',
 			'unicorn/no-useless-undefined': 'off'
 		}
 	}
 ];
+
+if (customModule?.extendConfig) {
+	customModule.extendConfig(allRules, config);
+}
+
+export default config;
