@@ -220,36 +220,37 @@ const stylisticJsRules = {
 	'@stylistic/quotes': ['error', 'single', { avoidEscape: true }]
 };
 
+const tsRestrictedSyntax = [
+	{
+		selector: "NewExpression[callee.name='Error']",
+		message:
+			'new Error is disallowed as it is not specific enough, and bypasses the i18n formatting'
+	},
+	{
+		selector: String.raw`ImportDeclaration[source.value=/\.$/]`,
+		message:
+			'Importing from paths ending in "." are not allowed, use specific file import instead to avoid circular dependencies'
+	},
+	{
+		selector: String.raw`ImportDeclaration[source.value=/\..src$/]`,
+		message:
+			'Importing from paths ending in "/src" are not allowed, use specific file import instead to avoid circular dependencies'
+	},
+	{
+		selector: 'PropertyDefinition[value!=null][static=false][key.name!=CLASS_NAME]',
+		message:
+			'Do not use property initializers inline, perform the initialization in the constructor instead'
+	},
+	{
+		selector: 'TSEnumDeclaration',
+		message: 'Do not use enums, instead use iterable union types'
+	}
+];
+
 const tsRules = {
 	'no-empty': 'off',
 	'no-redeclare': 'off',
-	'no-restricted-syntax': [
-		'error',
-		{
-			selector: "NewExpression[callee.name='Error']",
-			message:
-				'new Error is disallowed as it is not specific enough, and bypasses the i18n formatting'
-		},
-		{
-			selector: String.raw`ImportDeclaration[source.value=/\.$/]`,
-			message:
-				'Importing from paths ending in "." are not allowed, use specific file import instead to avoid circular dependencies'
-		},
-		{
-			selector: String.raw`ImportDeclaration[source.value=/\..src$/]`,
-			message:
-				'Importing from paths ending in "/src" are not allowed, use specific file import instead to avoid circular dependencies'
-		},
-		{
-			selector: 'PropertyDefinition[value!=null][static=false][key.name!=CLASS_NAME]',
-			message:
-				'Do not use property initializers inline, perform the initialization in the constructor instead'
-		},
-		{
-			selector: 'TSEnumDeclaration',
-			message: 'Do not use enums, instead use iterable union types'
-		}
-	],
+	'no-restricted-syntax': ['error', ...tsRestrictedSyntax],
 	'no-undef': ['off'],
 	'no-unused-vars': ['off'],
 	'@typescript-eslint/adjacent-overload-signatures': 'error',
@@ -662,7 +663,9 @@ const config = [
 		files: ['**/tests/**/*.ts'],
 		rules: {
 			'no-console': 'off',
-			'unicorn/no-useless-undefined': 'off'
+			'unicorn/no-useless-undefined': 'off',
+			// We don't mind having "new Error" in tests, so we remove the restriction
+			'no-restricted-syntax': ['error', ...tsRestrictedSyntax.slice(1)]
 		}
 	}
 ];
