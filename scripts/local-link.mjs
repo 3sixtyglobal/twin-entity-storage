@@ -5,6 +5,9 @@
  * without using npm commands. When using the <package-name> option, the script
  * will try to find the package in the sibling folders and link it.
  *
+ * You can use wildcards to link multiple packages with similar names.
+ * e.g. npm run local-link "@twin.org/engine*"
+ *
  * Usage:
  * npm run local-link <package-name>
  * or
@@ -34,10 +37,33 @@ async function run() {
 
 	process.stdout.write('\n');
 	const targetPackage = process.argv[2];
+
+	// The target package starts with an @ so we have to try and locate it by
+	// looking in the parent folder and assuming the other repos are in
+	// a sibling folder to this one
+	const packages = await findPackagesDetails(targetPackage);
+
+	const nodeModulesDir = path.resolve('node_modules');
+	process.stdout.write(`Node Modules: ${nodeModulesDir}\n`);
+
 	if (process.argv[3] === 'unlink') {
-		await unlinkPackage(targetPackage);
+		const npmInstallPackages = [];
+		for (const pkg of packages) {
+			const unlinked = await unlinkPackage(nodeModulesDir, pkg.packageName, pkg.targetDir);
+			if (!unlinked) {
+				npmInstallPackages.push(pkg.packageName);
+			}
+		}
+		if (npmInstallPackages.length > 0) {
+			process.stdout.write(
+				'\nThere are no backup directories for some or all of the packages, performing npm install to re-instate packages\n'
+			);
+			await runShellCmd('npm', ['install', ...npmInstallPackages], process.cwd());
+		}
 	} else {
-		await linkPackage(targetPackage);
+		for (const pkg of packages) {
+			await linkPackage(nodeModulesDir, pkg.packageName, pkg.targetDir);
+		}
 	}
 
 	process.stdout.write('\nDone.\n');
@@ -45,18 +71,13 @@ async function run() {
 
 /**
  * Link the specified package.
- * @param targetPackage The target package to link.
+ * @param nodeModulesDir The node_modules directory.
+ * @param packageName The name of the package to link.
+ * @param targetDir The target directory of the package to link.
  */
-async function linkPackage(targetPackage) {
-	process.stdout.write('Linking package\n\n');
+async function linkPackage(nodeModulesDir, packageName, targetDir) {
+	process.stdout.write(`Linking package ${packageName}\n\n`);
 
-	// The target package starts with an @ so we have to try and locate it by
-	// looking in the parent folder and assuming the other repos are in
-	// a sibling folder to this one
-	const { targetDir, packageName } = await findPackageDetails(targetPackage);
-
-	const nodeModulesDir = path.resolve('node_modules');
-	process.stdout.write(`Node Modules: ${nodeModulesDir}\n`);
 	process.stdout.write(`Target package directory: ${targetDir}\n`);
 
 	const currentNodeDir = path.join(nodeModulesDir, packageName);
@@ -64,7 +85,8 @@ async function linkPackage(targetPackage) {
 
 	const isLink = await isSymbolicLink(currentNodeDir);
 	if (isLink) {
-		throw new Error(`The package ${currentNodeDir} is already a symbolic link`);
+		process.stdout.write(`The package ${currentNodeDir} is already a symbolic link, skipping\n`);
+		return;
 	}
 
 	try {
@@ -85,20 +107,19 @@ async function linkPackage(targetPackage) {
 
 /**
  * Unlink the specified package.
- * @param targetPackage The target package to unlink.
+ * @param nodeModulesDir The node_modules directory.
+ * @param packageName The name of the package to unlink.
+ * @param targetDir The target directory of the package to unlink.
+ * @returns True if unlinked, false if restored from backup.
  */
-async function unlinkPackage(targetPackage) {
-	process.stdout.write('Unlinking package\n\n');
-
-	const { packageName } = await findPackageDetails(targetPackage);
-
-	const nodeModulesDir = path.resolve('node_modules');
-	process.stdout.write(`Node Modules: ${nodeModulesDir}\n`);
+async function unlinkPackage(nodeModulesDir, packageName, targetDir) {
+	process.stdout.write(`Unlinking package ${packageName}\n\n`);
 
 	const linkName = path.join(nodeModulesDir, packageName);
 	const isLink = await isSymbolicLink(linkName);
 	if (!isLink) {
-		throw new Error(`The package ${linkName} is not a symbolic link`);
+		process.stdout.write(`The package ${linkName} is not a symbolic link, skipping\n`);
+		return true;
 	}
 
 	process.stdout.write(`Removing link: ${linkName}\n`);
@@ -108,12 +129,9 @@ async function unlinkPackage(targetPackage) {
 	if (await directoryExists(linkNameBackup)) {
 		process.stdout.write(`Renaming backup directory: ${linkNameBackup} to ${linkName}\n`);
 		await fs.rename(linkNameBackup, linkName);
-	} else {
-		process.stdout.write(
-			'There is no backup directory, performing npm install to re-instate package\n'
-		);
-		await runShellCmd('npm', ['install', targetPackage], process.cwd());
+		return true;
 	}
+	return false;
 }
 
 /**
@@ -121,9 +139,8 @@ async function unlinkPackage(targetPackage) {
  * @param targetPackage The target package to find.
  * @returns The package directory and name.
  */
-async function findPackageDetails(targetPackage) {
-	let packageName;
-	let targetDir;
+async function findPackagesDetails(targetPackage) {
+	const packages = [];
 
 	if (targetPackage.startsWith('@')) {
 		process.stdout.write(`Finding package by name: ${targetPackage}\n`);
@@ -131,7 +148,8 @@ async function findPackageDetails(targetPackage) {
 		const repoDirRoot = path.resolve('..');
 		process.stdout.write(`Root repo directory: ${repoDirRoot}\n\n`);
 
-		const packageNameOnly = targetPackage.split('/')[1];
+		const targetPackageParts = targetPackage.split('/');
+		const packageNameOnly = targetPackageParts[1];
 
 		const allRepoDirs = await readdir(repoDirRoot, { withFileTypes: true });
 		for (const repoDir of allRepoDirs) {
@@ -140,33 +158,37 @@ async function findPackageDetails(targetPackage) {
 				if (await fileExists(repoPackageJsonFilename)) {
 					const repoPackageJson = await loadJson(repoPackageJsonFilename);
 					if (Array.isArray(repoPackageJson.workspaces)) {
-						if (repoPackageJson.workspaces.includes(`packages/${packageNameOnly}`)) {
-							targetDir = path.join(repoDirRoot, repoDir.name, 'packages', packageNameOnly);
-						} else if (repoPackageJson.workspaces.includes(`apps/${packageNameOnly}`)) {
-							targetDir = path.join(repoDirRoot, repoDir.name, 'apps', packageNameOnly);
+						for (const workspaceEntry of repoPackageJson.workspaces) {
+							const entryParts = workspaceEntry.split('/');
+							if (new RegExp(packageNameOnly).test(entryParts[1])) {
+								const targetDir = path.join(repoDirRoot, repoDir.name, workspaceEntry);
+								packages.push({ packageName: await getPackageNameFromDir(targetDir), targetDir });
+							}
 						}
 					}
 				}
 			}
 		}
 	} else {
-		targetDir = path.resolve(targetPackage);
+		const targetDir = path.resolve(targetPackage);
+		packages.push({ packageName: await getPackageNameFromDir(targetDir), targetDir });
 	}
 
-	if (!targetDir) {
-		throw new Error('Unable to locate target packages directory');
-	}
+	return packages;
+}
 
+/**
+ * Get the package name from the directory.
+ * @param targetDir The target directory.
+ * @returns The package name.
+ */
+async function getPackageNameFromDir(targetDir) {
 	const repoPackageJsonFilename = path.join(targetDir, 'package.json');
 	if (await fileExists(repoPackageJsonFilename)) {
 		const repoPackageJson = await loadJson(repoPackageJsonFilename);
-		packageName = repoPackageJson.name;
+		return repoPackageJson.name;
 	}
-	if (!packageName) {
-		throw new Error('Unable to locate target packages name');
-	}
-
-	return { targetDir, packageName };
+	throw new Error(`Unable to locate package.json in target directory: ${targetDir}`);
 }
 
 run().catch(err => {
