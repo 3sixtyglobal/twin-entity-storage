@@ -160,7 +160,7 @@ async function findPackagesDetails(targetPackage) {
 					if (Array.isArray(repoPackageJson.workspaces)) {
 						for (const workspaceEntry of repoPackageJson.workspaces) {
 							const entryParts = workspaceEntry.split('/');
-							if (new RegExp(packageNameOnly).test(entryParts[1])) {
+							if (new RegExp(`^${packageNameOnly}`).test(entryParts[1])) {
 								const targetDir = path.join(repoDirRoot, repoDir.name, workspaceEntry);
 								packages.push({ packageName: await getPackageNameFromDir(targetDir), targetDir });
 							}
