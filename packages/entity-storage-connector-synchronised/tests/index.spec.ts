@@ -200,9 +200,9 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 		await connector?.start("test-node-identity", undefined);
 
-		let itemResponseData: IEvent<ISyncItemResponse<TestType>> | undefined;
+		let itemResponseData: IEvent<ISyncItemResponse> | undefined;
 
-		eventBusService.subscribe<ISyncItemResponse<TestType>>(
+		eventBusService.subscribe<ISyncItemResponse>(
 			SynchronisedStorageTopics.LocalItemResponse,
 			async event => {
 				itemResponseData = event;
@@ -241,9 +241,9 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 		await connector?.start("test-node-identity", undefined);
 
-		let itemResponseData: IEvent<ISyncItemResponse<TestType>> | undefined;
+		let itemResponseData: IEvent<ISyncItemResponse> | undefined;
 
-		eventBusService.subscribe<ISyncItemResponse<TestType>>(
+		eventBusService.subscribe<ISyncItemResponse>(
 			SynchronisedStorageTopics.LocalItemResponse,
 			async event => {
 				itemResponseData = event;
@@ -278,10 +278,10 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 		await connector?.start("test-node-identity", undefined);
 
-		let consolidateBatchResponseData1: IEvent<ISyncBatchResponse<TestType>> | undefined;
-		let consolidateBatchResponseData2: IEvent<ISyncBatchResponse<TestType>> | undefined;
+		let consolidateBatchResponseData1: IEvent<ISyncBatchResponse> | undefined;
+		let consolidateBatchResponseData2: IEvent<ISyncBatchResponse> | undefined;
 
-		eventBusService.subscribe<ISyncBatchResponse<TestType>>(
+		eventBusService.subscribe<ISyncBatchResponse>(
 			SynchronisedStorageTopics.BatchResponse,
 			async event => {
 				if (event.data.lastEntry) {
@@ -328,7 +328,7 @@ describe("synchronisedEntityStorageConnector", () => {
 		});
 		await connector?.start("test-node-identity", undefined);
 
-		await eventBusService.publish<ISyncItemSet<TestType>>(SynchronisedStorageTopics.RemoteItemSet, {
+		await eventBusService.publish<ISyncItemSet>(SynchronisedStorageTopics.RemoteItemSet, {
 			storageKey: "test-type-100",
 			entity: {
 				id: "test-id",

@@ -297,7 +297,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		);
 
 		// Subscribe to remote item set events from the synchronised storage and update the local storage
-		this._eventBusComponent.subscribe<ISyncItemSet<T>>(
+		this._eventBusComponent.subscribe<ISyncItemSet>(
 			SynchronisedStorageTopics.RemoteItemSet,
 			async params => {
 				await this.handleRemoteItemSet(params);
@@ -332,7 +332,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 			} catch {}
 
 			// Publish the item response with the entity
-			this._eventBusComponent.publish<ISyncItemResponse<T>>(
+			this._eventBusComponent.publish<ISyncItemResponse>(
 				SynchronisedStorageTopics.LocalItemResponse,
 				{
 					storageKey: this._storageKey,
@@ -348,7 +348,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 	 * @param event The event parameters
 	 * @internal
 	 */
-	private async handleRemoteItemSet(event: IEvent<ISyncItemSet<T>>): Promise<void> {
+	private async handleRemoteItemSet(event: IEvent<ISyncItemSet>): Promise<void> {
 		// Only set the item if it matches the storage key
 		// and it is from another node, remote updates can not change data for this node
 		// That must be done via the regular entity storage methods
@@ -356,7 +356,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 			event.data.storageKey === this._storageKey &&
 			event.data.entity.nodeIdentity !== this._nodeIdentity
 		) {
-			await this._entityStorageConnector.set(event.data.entity);
+			await this._entityStorageConnector.set(event.data.entity as T);
 		}
 	}
 
@@ -414,7 +414,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 				cursor = result.cursor;
 
 				// Publish the batch response with the entities
-				this._eventBusComponent.publish<ISyncBatchResponse<T>>(
+				this._eventBusComponent.publish<ISyncBatchResponse>(
 					SynchronisedStorageTopics.BatchResponse,
 					{
 						storageKey: this._storageKey,
