@@ -72,5 +72,20 @@
 		"dist/types",
 		"locales",
 		"docs"
+	],
+	"keywords": [
+		"twin",
+		"trade",
+		"iota",
+		"framework",
+		"blockchain",
+		"entity-storage",
+		"entity",
+		"storage",
+		"persistence",
+		"database",
+		"service",
+		"microservice",
+		"business-logic"
 	]
 }
