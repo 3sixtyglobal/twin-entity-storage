@@ -220,12 +220,20 @@ const stylisticJsRules = {
 	'@stylistic/quotes': ['error', 'single', { avoidEscape: true }]
 };
 
-const tsRestrictedSyntax = [
+const tsRestrictedSyntaxCommon = [
 	{
 		selector: "NewExpression[callee.name='Error']",
 		message:
 			'new Error is disallowed as it is not specific enough, and bypasses the i18n formatting'
 	},
+	{
+		selector: "MemberExpression[object.name='process'][property.name='env']",
+		message:
+			'Direct access to process.env is not allowed. Use environment variable helpers or configuration instead.'
+	}
+];
+
+const tsRestrictedSyntax = [
 	{
 		selector: String.raw`ImportDeclaration[source.value=/\.$/]`,
 		message:
@@ -250,7 +258,7 @@ const tsRestrictedSyntax = [
 const tsRules = {
 	'no-empty': 'off',
 	'no-redeclare': 'off',
-	'no-restricted-syntax': ['error', ...tsRestrictedSyntax],
+	'no-restricted-syntax': ['error', ...tsRestrictedSyntaxCommon, ...tsRestrictedSyntax],
 	'no-undef': ['off'],
 	'no-unused-vars': ['off'],
 	'@typescript-eslint/adjacent-overload-signatures': 'error',
@@ -664,8 +672,7 @@ const config = [
 		rules: {
 			'no-console': 'off',
 			'unicorn/no-useless-undefined': 'off',
-			// We don't mind having "new Error" in tests, so we remove the restriction
-			'no-restricted-syntax': ['error', ...tsRestrictedSyntax.slice(1)]
+			'no-restricted-syntax': ['error', ...tsRestrictedSyntax]
 		}
 	}
 ];
