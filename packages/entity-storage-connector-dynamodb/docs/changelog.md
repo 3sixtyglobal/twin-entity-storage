@@ -1,5 +1,21 @@
 # @twin.org/entity-storage-connector-dynamodb - Changelog
 
+## [0.0.2-next.9](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-dynamodb-v0.0.2-next.8...entity-storage-connector-dynamodb-v0.0.2-next.9) (2025-10-02)
+
+
+### Features
+
+* add AWS pod authentication mode ([caaae36](https://github.com/twinfoundation/entity-storage/commit/caaae368ca104cd9994e1af7b6c4c20e603c2021))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.2-next.8 to 0.0.2-next.9
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.2-next.8 to 0.0.2-next.9
+
 ## [0.0.2-next.8](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-dynamodb-v0.0.2-next.7...entity-storage-connector-dynamodb-v0.0.2-next.8) (2025-08-29)
 
 

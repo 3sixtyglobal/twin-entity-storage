@@ -1,5 +1,19 @@
 # @twin.org/entity-storage-rest-client - Changelog
 
+## [0.0.2-next.9](https://github.com/twinfoundation/entity-storage/compare/entity-storage-rest-client-v0.0.2-next.8...entity-storage-rest-client-v0.0.2-next.9) (2025-10-02)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-rest-client:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.2-next.8 to 0.0.2-next.9
+
 ## [0.0.2-next.8](https://github.com/twinfoundation/entity-storage/compare/entity-storage-rest-client-v0.0.2-next.7...entity-storage-rest-client-v0.0.2-next.8) (2025-08-29)
 
 
