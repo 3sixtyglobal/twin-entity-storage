@@ -100,16 +100,21 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 			nameof(options.config),
 			options.config
 		);
-		Guards.stringValue(
-			this.CLASS_NAME,
-			nameof(options.config.accessKeyId),
-			options.config.accessKeyId
-		);
-		Guards.stringValue(
-			this.CLASS_NAME,
-			nameof(options.config.secretAccessKey),
-			options.config.secretAccessKey
-		);
+
+		options.config.authMode ??= "credentials";
+
+		if (options.config.authMode === "credentials") {
+			Guards.stringValue(
+				this.CLASS_NAME,
+				nameof(options.config.accessKeyId),
+				options.config.accessKeyId
+			);
+			Guards.stringValue(
+				this.CLASS_NAME,
+				nameof(options.config.secretAccessKey),
+				options.config.secretAccessKey
+			);
+		}
 		Guards.stringValue(this.CLASS_NAME, nameof(options.config.region), options.config.region);
 		Guards.stringValue(this.CLASS_NAME, nameof(options.config.tableName), options.config.tableName);
 
@@ -787,18 +792,29 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @internal
 	 */
 	private createConnectionConfig(): {
-		credentials: {
+		credentials?: {
 			accessKeyId: string;
 			secretAccessKey: string;
 		};
 		endpoint?: string;
 		region: string;
 	} {
+		if (
+			Is.stringValue(this._config.secretAccessKey) &&
+			Is.stringValue(this._config.accessKeyId) &&
+			this._config.authMode === "credentials"
+		) {
+			return {
+				credentials: {
+					accessKeyId: this._config.accessKeyId,
+					secretAccessKey: this._config.secretAccessKey
+				},
+				endpoint: this._config.endpoint,
+				region: this._config.region
+			};
+		}
+
 		return {
-			credentials: {
-				accessKeyId: this._config.accessKeyId,
-				secretAccessKey: this._config.secretAccessKey
-			},
 			endpoint: this._config.endpoint,
 			region: this._config.region
 		};

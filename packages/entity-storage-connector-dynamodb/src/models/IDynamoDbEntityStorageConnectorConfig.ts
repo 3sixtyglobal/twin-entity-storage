@@ -11,14 +11,22 @@ export interface IDynamoDbEntityStorageConnectorConfig {
 	region: string;
 
 	/**
-	 * The AWS access key.
+	 * The authentication mode.
+	 * - "credentials": Use access key ID and secret access key.
+	 * - "pod": Use IAM role attached to the pod (e.g., in EKS).
+	 * @default credentials
 	 */
-	accessKeyId: string;
+	authMode?: "credentials" | "pod";
+
+	/**
+	 * The AWS access key ID.
+	 */
+	accessKeyId?: string;
 
 	/**
 	 * The AWS secret access key.
 	 */
-	secretAccessKey: string;
+	secretAccessKey?: string;
 
 	/**
 	 * The name of the table for the storage.
