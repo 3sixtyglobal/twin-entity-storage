@@ -3,4 +3,3 @@
 export * from "./models/IMySqlEntityStorageConnectorConfig";
 export * from "./models/IMySqlEntityStorageConnectorConstructorOptions";
 export * from "./mysqlEntityStorageConnector";
-
