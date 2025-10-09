@@ -1,5 +1,21 @@
 # @twin.org/entity-storage-connector-dynamodb - Changelog
 
+## [0.0.2-next.10](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-dynamodb-v0.0.2-next.9...entity-storage-connector-dynamodb-v0.0.2-next.10) (2025-10-09)
+
+
+### Features
+
+* add validate-locales ([e66ef0d](https://github.com/twinfoundation/entity-storage/commit/e66ef0de26ca2f82b3fe89bb5c7a15a0978a9644))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.2-next.9 to 0.0.2-next.10
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.2-next.9 to 0.0.2-next.10
+
 ## [0.0.2-next.9](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-dynamodb-v0.0.2-next.8...entity-storage-connector-dynamodb-v0.0.2-next.9) (2025-10-02)
 
 
