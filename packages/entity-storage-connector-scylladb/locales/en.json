@@ -10,19 +10,29 @@
 		"scyllaDBViewConnector": {
 			"viewCreating": "Creating view \"{view}\"",
 			"viewCreated": "Created view \"{view}\"",
-			"viewExists": "Skipping create view \"{view}\" as it already exists",
-			"typeCreated": "Created type \"{typeName}\"",
+			"viewExists": "Skipping create view \"{view}\" as it already exists"
+		},
+		"abstractScyllaDBConnector": {
 			"sql": "SQL: \"{sql}\""
 		}
 	},
 	"error": {
 		"scyllaDBTableConnector": {
 			"tableCreateFailed": "Creating table \"{table}\" failed",
-			"getFailed": "Getting item with \"{id}\" failed",
 			"dropTableFailed": " \"{table}\" cannot be dropped",
 			"truncateTableFailed": " \"{table}\" cannot be dropped",
 			"removeFailed": "Removing item with \"{id}\" failed",
-			"findFailed": "Error while querying data on  \"{table}\""
+			"itemTypeNotDefined": "The item type is not defined",
+			"setFailed": "Setting item with \"{id}\" failed"
+		},
+		"scyllaDBViewConnector": {
+			"viewCreateFailed": "Creating view \"{view}\" failed",
+			"notSupported": "The operation is not supported \"{methodName}\""
+		},
+		"abstractScyllaDBConnector": {
+			"getFailed": "Getting item with \"{id}\" failed",
+			"findFailed": "Error while querying data on  \"{table}\"",
+			"parseJSONFailed": "Parsing JSON failed for field \"{name}\" with value \"{value}\""
 		}
 	}
 }

@@ -17,7 +17,8 @@
 			"comparisonNotSupported": "Comparison operator \"{comparison}\" is not supported",
 			"conditionalNotSupported": "Conditional operator \"{operator}\" is not supported",
 			"sortSingle": "You can only sort by a single property",
-			"sortNotIndexed": "The property \"{property}\" is not indexed and cannot be used for sorting"
+			"sortNotIndexed": "The property \"{property}\" is not indexed and cannot be used for sorting",
+			"propertyNotFound": "The property \"{property}\" was not found on the entity schema"
 		}
 	}
 }

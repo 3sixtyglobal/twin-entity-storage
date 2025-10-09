@@ -38,8 +38,8 @@ export interface IEntityStorageComponent<T = unknown> extends IComponent {
 	 * @param orderBy The order for the results.
 	 * @param orderByDirection The direction for the order, defaults to ascending.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @param userIdentity The user identity to use with storage operations.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
@@ -50,7 +50,7 @@ export interface IEntityStorageComponent<T = unknown> extends IComponent {
 		orderByDirection?: SortDirection,
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number,
+		limit?: number,
 		userIdentity?: string
 	): Promise<{
 		/**

@@ -299,7 +299,7 @@ export async function entityStorageList(
 		request.query?.orderByDirection,
 		HttpParameterHelper.objectFromString(request.query?.properties),
 		request.query?.cursor,
-		Coerce.number(request.query?.pageSize),
+		Coerce.number(request.query?.limit),
 		httpRequestContext.userIdentity
 	);
 	return {

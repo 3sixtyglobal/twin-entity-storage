@@ -21,15 +21,15 @@ import type { IMemoryEntityStorageConnectorConstructorOptions } from "./models/I
  */
 export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
 	/**
-	 * Default Page Size for cursor.
-	 * @internal
-	 */
-	private static readonly _DEFAULT_PAGE_SIZE: number = 40;
-
-	/**
 	 * Runtime name for the class.
 	 */
-	public readonly CLASS_NAME: string = nameof<MemoryEntityStorageConnector>();
+	public static readonly CLASS_NAME: string = nameof<MemoryEntityStorageConnector>();
+
+	/**
+	 * Default limit for the number of items to return.
+	 * @internal
+	 */
+	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
 	 * The schema for the entity.
@@ -54,8 +54,12 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 	 * @param options The options for the connector.
 	 */
 	constructor(options: IMemoryEntityStorageConnectorConstructorOptions) {
-		Guards.object(this.CLASS_NAME, nameof(options), options);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.entitySchema), options.entitySchema);
+		Guards.object(MemoryEntityStorageConnector.CLASS_NAME, nameof(options), options);
+		Guards.stringValue(
+			MemoryEntityStorageConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
+		);
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 		this._store = [];
@@ -81,7 +85,7 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(MemoryEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		const index = this.findItem(id, secondaryIndex, conditions);
 		return index >= 0 ? this._store[index] : undefined;
@@ -94,7 +98,7 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 	 * @returns The id of the entity.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
-		Guards.object<T>(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object<T>(MemoryEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
@@ -120,7 +124,7 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		id: string,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(MemoryEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		const index = this.findItem(id, undefined, conditions);
 
@@ -134,8 +138,8 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -147,7 +151,7 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		}[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{
 		/**
 		 * The entities, which can be partial if a limited keys list was provided.
@@ -161,7 +165,7 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		let allEntities = this._store.slice();
 
 		const entities = [];
-		const finalPageSize = pageSize ?? MemoryEntityStorageConnector._DEFAULT_PAGE_SIZE;
+		const finalLimit = limit ?? MemoryEntityStorageConnector._DEFAULT_LIMIT;
 		let nextCursor: string | undefined;
 
 		if (allEntities.length > 0) {
@@ -174,9 +178,9 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 			const startIndex = Coerce.number(cursor) ?? 0;
 
 			for (let i = startIndex; i < allEntities.length; i++) {
-				if (EntityConditions.check(allEntities[i], conditions) && entities.length < finalPageSize) {
+				if (EntityConditions.check(allEntities[i], conditions) && entities.length < finalLimit) {
 					entities.push(ObjectHelper.pick(allEntities[i], properties));
-					if (entities.length >= finalPageSize) {
+					if (entities.length >= finalLimit) {
 						if (i < allEntities.length - 1) {
 							nextCursor = (i + 1).toString();
 						}

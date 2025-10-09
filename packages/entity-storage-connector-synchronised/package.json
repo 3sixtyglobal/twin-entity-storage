@@ -15,10 +15,11 @@
 	},
 	"scripts": {
 		"clean": "rimraf dist coverage docs/reference",
-		"build": "tsc",
+		"build": "tspc",
 		"dev": "nodemon --watch src --ext ts --exec \"npm run build && npm run bundle:esm\"",
 		"test": "vitest --run --config ./vitest.config.ts --no-cache",
-		"test:build": "tsc -p ./tests/tsconfig.json --noEmit",
+		"test:build": "tspc -p ./tests/tsconfig.json --noEmit",
+		"validate-locales": "validate-locales",
 		"coverage": "vitest --run --coverage --config ./vitest.config.ts --no-cache",
 		"bundle:esm": "rollup --config rollup.config.mjs --environment MODULE:esm",
 		"bundle:cjs": "rollup --config rollup.config.mjs --environment MODULE:cjs",
@@ -26,9 +27,8 @@
 		"docs:clean": "rimraf docs/reference",
 		"docs:generate": "typedoc",
 		"docs": "npm run docs:clean && npm run docs:generate",
-		"dist": "npm run clean && npm run build && npm run test:build && npm run test && npm run bundle && npm run docs",
-		"dist:no-test": "npm run clean && npm run build && npm run bundle && npm run docs",
-		"prepare": "ts-patch install -s"
+		"dist": "npm run clean && npm run build && npm run validate-locales && npm run test:build && npm run test && npm run bundle && npm run docs",
+		"dist:no-test": "npm run clean && npm run build && npm run bundle && npm run docs"
 	},
 	"dependencies": {
 		"@twin.org/core": "next",
@@ -42,21 +42,22 @@
 	"devDependencies": {
 		"@twin.org/nameof-transformer": "next",
 		"@twin.org/nameof-vitest-plugin": "next",
+		"@twin.org/validate-locales": "next",
 		"@twin.org/entity-storage-connector-memory": "0.0.2-next.9",
 		"@twin.org/event-bus-connector-local": "next",
 		"@twin.org/event-bus-service": "next",
-		"@types/node": "24.5.2",
+		"@types/node": "24.7.0",
 		"@vitest/coverage-v8": "3.2.4",
 		"copyfiles": "2.4.1",
-		"dotenv": "17.2.2",
+		"dotenv": "17.2.3",
 		"rimraf": "6.0.1",
-		"rollup": "4.52.3",
+		"rollup": "4.52.4",
 		"rollup-plugin-copy": "3.5.0",
 		"ts-patch": "3.3.0",
 		"nodemon": "3.1.10",
 		"typedoc": "0.28.13",
 		"typedoc-plugin-markdown": "4.9.0",
-		"typescript": "5.9.2",
+		"typescript": "5.9.3",
 		"vitest": "3.2.4"
 	},
 	"main": "./dist/cjs/index.cjs",
@@ -91,5 +92,9 @@
 		"connector",
 		"adapter",
 		"integration"
-	]
+	],
+	"bugs": {
+		"url": "git+https://github.com/twinfoundation/entity-storage/issues"
+	},
+	"homepage": "https://twindev.org"
 }

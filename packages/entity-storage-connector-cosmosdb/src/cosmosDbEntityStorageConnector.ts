@@ -43,10 +43,15 @@ import type { ICosmosDbEntityStorageConnectorConstructorOptions } from "./models
  */
 export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
 	/**
+	 * Runtime name for the class.
+	 */
+	public static readonly CLASS_NAME: string = nameof<CosmosDbEntityStorageConnector>();
+
+	/**
 	 * Limit the number of entities when finding.
 	 * @internal
 	 */
-	private static readonly _PAGE_SIZE: number = 40;
+	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
 	 * Partition id field name.
@@ -65,11 +70,6 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @internal
 	 */
 	private static readonly _PARTITION_ID_VALUE: string = "1";
-
-	/**
-	 * Runtime name for the class.
-	 */
-	public readonly CLASS_NAME: string = nameof<CosmosDbEntityStorageConnector>();
 
 	/**
 	 * The schema for the entity.
@@ -106,22 +106,34 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @param options The options for the connector.
 	 */
 	constructor(options: ICosmosDbEntityStorageConnectorConstructorOptions) {
-		Guards.object(this.CLASS_NAME, nameof(options), options);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.entitySchema), options.entitySchema);
+		Guards.object(CosmosDbEntityStorageConnector.CLASS_NAME, nameof(options), options);
+		Guards.stringValue(
+			CosmosDbEntityStorageConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
+		);
 		Guards.object<ICosmosDbEntityStorageConnectorConfig>(
-			this.CLASS_NAME,
+			CosmosDbEntityStorageConnector.CLASS_NAME,
 			nameof(options.config),
 			options.config
 		);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.endpoint), options.config.endpoint);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.key), options.config.key);
 		Guards.stringValue(
-			this.CLASS_NAME,
+			CosmosDbEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.endpoint),
+			options.config.endpoint
+		);
+		Guards.stringValue(
+			CosmosDbEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.key),
+			options.config.key
+		);
+		Guards.stringValue(
+			CosmosDbEntityStorageConnector.CLASS_NAME,
 			nameof(options.config.databaseId),
 			options.config.databaseId
 		);
 		Guards.stringValue(
-			this.CLASS_NAME,
+			CosmosDbEntityStorageConnector.CLASS_NAME,
 			nameof(options.config.containerId),
 			options.config.containerId
 		);
@@ -155,7 +167,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 		try {
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: CosmosDbEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "databaseCreating",
 				data: {
@@ -166,11 +178,15 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 			const { resource: databaseDefinition } = await this._client.databases.createIfNotExists({
 				id: this._config.databaseId
 			});
-			Guards.stringValue(this.CLASS_NAME, nameof(databaseDefinition?.id), databaseDefinition?.id);
+			Guards.stringValue(
+				CosmosDbEntityStorageConnector.CLASS_NAME,
+				nameof(databaseDefinition?.id),
+				databaseDefinition?.id
+			);
 
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: CosmosDbEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "databaseExists",
 				data: {
@@ -181,9 +197,9 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 			if (BaseError.isErrorCode(error, "Conflict")) {
 				await nodeLogging?.log({
 					level: "info",
-					source: this.CLASS_NAME,
+					source: CosmosDbEntityStorageConnector.CLASS_NAME,
 					ts: Date.now(),
-					message: "databaseAlreadyExists",
+					message: "databaseExists",
 					data: {
 						databaseId: this._config.databaseId
 					}
@@ -191,7 +207,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 			} else {
 				await nodeLogging?.log({
 					level: "error",
-					source: this.CLASS_NAME,
+					source: CosmosDbEntityStorageConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "databaseCreateFailed",
 					error: BaseError.fromError(error),
@@ -221,7 +237,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 			if (containerDefinition) {
 				await nodeLogging?.log({
 					level: "info",
-					source: this.CLASS_NAME,
+					source: CosmosDbEntityStorageConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "containerExists",
 					data: {
@@ -231,7 +247,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 			} else {
 				await nodeLogging?.log({
 					level: "error",
-					source: this.CLASS_NAME,
+					source: CosmosDbEntityStorageConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "containerNotExisting",
 					data: {
@@ -243,7 +259,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 		} catch (error) {
 			await nodeLogging?.log({
 				level: "error",
-				source: this.CLASS_NAME,
+				source: CosmosDbEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "containerCreateFailed",
 				error: BaseError.fromError(error),
@@ -277,7 +293,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(CosmosDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		try {
 			// No secondary index or conditions
@@ -327,16 +343,16 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 		} catch (err) {
 			if (BaseError.isErrorCode(err, "NotFound")) {
 				throw new GeneralError(
-					this.CLASS_NAME,
+					CosmosDbEntityStorageConnector.CLASS_NAME,
 					"containerDoesNotExist",
 					{
-						container: this._config.containerId
+						containerId: this._config.containerId
 					},
 					err
 				);
 			}
 			throw new GeneralError(
-				this.CLASS_NAME,
+				CosmosDbEntityStorageConnector.CLASS_NAME,
 				"getFailed",
 				{
 					id
@@ -354,7 +370,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @returns The id of the entity.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
-		Guards.object<T>(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object<T>(CosmosDbEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
@@ -383,7 +399,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 				const errors = BaseError.fromAggregate(err);
 				if (BaseError.someErrorCode(errors, "ResourceNotFoundException")) {
 					throw new GeneralError(
-						this.CLASS_NAME,
+						CosmosDbEntityStorageConnector.CLASS_NAME,
 						"containerDoesNotExist",
 						{
 							containerId: this._config.containerId
@@ -393,7 +409,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 				}
 			}
 			throw new GeneralError(
-				this.CLASS_NAME,
+				CosmosDbEntityStorageConnector.CLASS_NAME,
 				"setFailed",
 				{
 					id
@@ -413,7 +429,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 		id: string,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(CosmosDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		try {
 			const item = await this._container.item(
@@ -437,7 +453,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 				return;
 			}
 			throw new GeneralError(
-				this.CLASS_NAME,
+				CosmosDbEntityStorageConnector.CLASS_NAME,
 				"removeFailed",
 				{
 					id
@@ -452,8 +468,8 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -462,16 +478,16 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 		sortProperties?: { property: keyof T; sortDirection: SortDirection }[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{ entities: Partial<T>[]; cursor?: string }> {
 		const sql = "";
 		try {
-			const returnSize = pageSize ?? CosmosDbEntityStorageConnector._PAGE_SIZE;
+			const returnSize = limit ?? CosmosDbEntityStorageConnector._DEFAULT_LIMIT;
 
 			let orderByClause: string = "";
 			if (Array.isArray(sortProperties)) {
 				if (sortProperties.length > 1) {
-					throw new GeneralError(this.CLASS_NAME, "sortSingle");
+					throw new GeneralError(CosmosDbEntityStorageConnector.CLASS_NAME, "sortSingle");
 				}
 				for (const sortProperty of sortProperties) {
 					const propertySchema = this._entitySchema.properties?.find(
@@ -483,7 +499,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 							!propertySchema.isSecondary &&
 							!propertySchema.sortDirection)
 					) {
-						throw new GeneralError(this.CLASS_NAME, "sortNotIndexed", {
+						throw new GeneralError(CosmosDbEntityStorageConnector.CLASS_NAME, "sortNotIndexed", {
 							property: sortProperty.property
 						});
 					}
@@ -522,7 +538,12 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 				cursor: feedResponse.continuationToken
 			};
 		} catch (err) {
-			throw new GeneralError(this.CLASS_NAME, "queryFailed", { sql }, err);
+			throw new GeneralError(
+				CosmosDbEntityStorageConnector.CLASS_NAME,
+				"queryFailed",
+				{ sql },
+				err
+			);
 		}
 	}
 
@@ -665,7 +686,7 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 			return `c.${propName} IN ${attributeName}`;
 		}
 
-		throw new GeneralError(this.CLASS_NAME, "comparisonNotSupported", {
+		throw new GeneralError(CosmosDbEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {
 			comparison: comparator.comparison
 		});
 	}
@@ -733,7 +754,9 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 			return "OR";
 		}
 
-		throw new GeneralError(this.CLASS_NAME, "conditionalNotSupported", { operator });
+		throw new GeneralError(CosmosDbEntityStorageConnector.CLASS_NAME, "conditionalNotSupported", {
+			operator
+		});
 	}
 
 	/**

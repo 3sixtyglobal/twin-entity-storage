@@ -12,6 +12,14 @@ Interface describing an entity storage component.
 
 `T` = `unknown`
 
+## Indexable
+
+\[`key`: `string`\]: `any`
+
+All methods are optional, so we introduce an index signature to allow
+any additional properties or methods, which removes the TypeScript error where
+the class has no properties in common with the type.
+
 ## Methods
 
 ### set()
@@ -106,7 +114,7 @@ Nothing.
 
 ### query()
 
-> **query**(`conditions?`, `orderBy?`, `orderByDirection?`, `properties?`, `cursor?`, `pageSize?`, `userIdentity?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
+> **query**(`conditions?`, `orderBy?`, `orderByDirection?`, `properties?`, `cursor?`, `limit?`, `userIdentity?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 
 Query all the entities which match the conditions.
 
@@ -140,9 +148,9 @@ The optional properties to return, defaults to all.
 
 `string`
 
-The cursor to request the next page of entities.
+The cursor to request the next chunk of entities.
 
-##### pageSize?
+##### limit?
 
 `number`
 

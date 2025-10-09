@@ -31,15 +31,15 @@ import type { IMySqlEntityStorageConnectorConstructorOptions } from "./models/IM
  */
 export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
 	/**
+	 * Runtime name for the class.
+	 */
+	public static readonly CLASS_NAME: string = nameof<MySqlEntityStorageConnector>();
+
+	/**
 	 * Limit the number of entities when finding.
 	 * @internal
 	 */
-	private static readonly _PAGE_SIZE: number = 40;
-
-	/**
-	 * Runtime name for the class.
-	 */
-	public readonly CLASS_NAME: string = nameof<MySqlEntityStorageConnector>();
+	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
 	 * The schema for the entity.
@@ -64,18 +64,42 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	 * @param options The options for the connector.
 	 */
 	constructor(options: IMySqlEntityStorageConnectorConstructorOptions) {
-		Guards.object(this.CLASS_NAME, nameof(options), options);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.entitySchema), options.entitySchema);
+		Guards.object(MySqlEntityStorageConnector.CLASS_NAME, nameof(options), options);
+		Guards.stringValue(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
+		);
 		Guards.object<IMySqlEntityStorageConnectorConfig>(
-			this.CLASS_NAME,
+			MySqlEntityStorageConnector.CLASS_NAME,
 			nameof(options.config),
 			options.config
 		);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.host), options.config.host);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.user), options.config.user);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.password), options.config.password);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.database), options.config.database);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.tableName), options.config.tableName);
+		Guards.stringValue(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.host),
+			options.config.host
+		);
+		Guards.stringValue(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.user),
+			options.config.user
+		);
+		Guards.stringValue(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.password),
+			options.config.password
+		);
+		Guards.stringValue(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.database),
+			options.config.database
+		);
+		Guards.stringValue(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.tableName),
+			options.config.tableName
+		);
 
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 
@@ -95,11 +119,11 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: MySqlEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "databaseCreating",
 				data: {
-					database: this._config.database
+					databaseName: this._config.database
 				}
 			});
 
@@ -108,11 +132,11 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: MySqlEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "databaseExists",
 				data: {
-					database: this._config.database
+					databaseName: this._config.database
 				}
 			});
 
@@ -122,22 +146,22 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: MySqlEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "tableExists",
 				data: {
-					table: this._config.tableName
+					tableName: this._config.tableName
 				}
 			});
 		} catch (error) {
 			await nodeLogging?.log({
 				level: "error",
-				source: this.CLASS_NAME,
+				source: MySqlEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "databaseCreateFailed",
 				error: BaseError.fromError(error),
 				data: {
-					database: this._config.database
+					databaseName: this._config.database
 				}
 			});
 			return false;
@@ -166,7 +190,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(MySqlEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		try {
 			const dbConnection = await this.createConnection();
@@ -202,7 +226,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			}
 		} catch (err) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				MySqlEntityStorageConnector.CLASS_NAME,
 				"getFailed",
 				{
 					id
@@ -220,7 +244,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	 * @returns The id of the entity.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
-		Guards.object<T>(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object<T>(MySqlEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
@@ -259,7 +283,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			);
 		} catch (err) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				MySqlEntityStorageConnector.CLASS_NAME,
 				"setFailed",
 				{
 					id
@@ -279,7 +303,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		id: string,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(MySqlEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		try {
 			const dbConnection = await this.createConnection();
@@ -301,7 +325,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			}
 		} catch (err) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				MySqlEntityStorageConnector.CLASS_NAME,
 				"removeFailed",
 				{
 					id
@@ -316,8 +340,8 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -326,11 +350,11 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		sortProperties?: { property: keyof T; sortDirection: SortDirection }[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{ entities: Partial<T>[]; cursor?: string }> {
 		const sql = "";
 		try {
-			const returnSize = pageSize ?? MySqlEntityStorageConnector._PAGE_SIZE;
+			const returnSize = limit ?? MySqlEntityStorageConnector._DEFAULT_LIMIT;
 
 			let orderByClause: string = "";
 			if (Array.isArray(sortProperties)) {
@@ -361,7 +385,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 						: undefined
 			};
 		} catch (err) {
-			throw new GeneralError(this.CLASS_NAME, "queryFailed", { sql }, err);
+			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "queryFailed", { sql }, err);
 		}
 	}
 
@@ -502,7 +526,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			return `JSON_CONTAINS(\`${prop}\`, ?)`;
 		}
 
-		throw new GeneralError(this.CLASS_NAME, "comparisonNotSupported", {
+		throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {
 			comparison: comparator.comparison
 		});
 	}
@@ -544,7 +568,9 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			return "OR";
 		}
 
-		throw new GeneralError(this.CLASS_NAME, "conditionalNotSupported", { operator });
+		throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "conditionalNotSupported", {
+			operator
+		});
 	}
 
 	/**
@@ -578,7 +604,10 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		};
 
 		if (!entitySchema.properties) {
-			throw new GeneralError(this.CLASS_NAME, "entitySchemaPropertiesUndefined");
+			throw new GeneralError(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				"entitySchemaPropertiesUndefined"
+			);
 		}
 
 		const primaryKeys: string[] = [];

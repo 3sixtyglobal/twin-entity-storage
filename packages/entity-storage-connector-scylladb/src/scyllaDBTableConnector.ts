@@ -24,14 +24,15 @@ export class ScyllaDBTableConnector<T = unknown>
 	/**
 	 * Runtime name for the class.
 	 */
-	public readonly CLASS_NAME: string = nameof<ScyllaDBTableConnector>();
+	public static readonly CLASS_NAME: string = nameof<ScyllaDBTableConnector>();
 
 	/**
 	 * Create a new instance of ScyllaDBTableConnector.
 	 * @param options The options for the connector.
 	 */
+	// eslint-disable-next-line @typescript-eslint/no-useless-constructor
 	constructor(options: IScyllaDBTableConnectorConstructorOptions) {
-		super(options, nameof(ScyllaDBTableConnector));
+		super(options);
 	}
 
 	/**
@@ -44,7 +45,7 @@ export class ScyllaDBTableConnector<T = unknown>
 
 		nodeLogging?.log({
 			level: "info",
-			source: this.CLASS_NAME,
+			source: ScyllaDBTableConnector.CLASS_NAME,
 			ts: Date.now(),
 			message: "tableCreating",
 			data: { table: this._fullTableName }
@@ -81,7 +82,7 @@ export class ScyllaDBTableConnector<T = unknown>
 
 						await nodeLogging?.log({
 							level: "info",
-							source: this.CLASS_NAME,
+							source: ScyllaDBTableConnector.CLASS_NAME,
 							ts: Date.now(),
 							message: "sql",
 							data: { sql }
@@ -91,7 +92,7 @@ export class ScyllaDBTableConnector<T = unknown>
 
 						await nodeLogging?.log({
 							level: "info",
-							source: this.CLASS_NAME,
+							source: ScyllaDBTableConnector.CLASS_NAME,
 							ts: Date.now(),
 							message: "typeCreated",
 							data: { typeName: subTypeSchemaRef }
@@ -124,7 +125,7 @@ export class ScyllaDBTableConnector<T = unknown>
 
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: ScyllaDBTableConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "sql",
 				data: { sql }
@@ -134,7 +135,7 @@ export class ScyllaDBTableConnector<T = unknown>
 
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: ScyllaDBTableConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "tableCreated",
 				data: { table: this._fullTableName }
@@ -143,7 +144,7 @@ export class ScyllaDBTableConnector<T = unknown>
 			if (BaseError.isErrorCode(err, "ResourceInUseException")) {
 				await nodeLogging?.log({
 					level: "info",
-					source: this.CLASS_NAME,
+					source: ScyllaDBTableConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "tableExists",
 					data: { table: this._fullTableName }
@@ -151,7 +152,7 @@ export class ScyllaDBTableConnector<T = unknown>
 			} else {
 				await nodeLogging?.log({
 					level: "error",
-					source: this.CLASS_NAME,
+					source: ScyllaDBTableConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "tableCreateFailed",
 					error: err as IError,
@@ -169,7 +170,7 @@ export class ScyllaDBTableConnector<T = unknown>
 	 * @param conditions The optional conditions to match for the entities.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
-		Guards.object<T>(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object<T>(ScyllaDBTableConnector.CLASS_NAME, nameof(entity), entity);
 
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
@@ -205,7 +206,7 @@ export class ScyllaDBTableConnector<T = unknown>
 
 			await this._logging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: ScyllaDBTableConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "sql",
 				data: { sql }
@@ -216,8 +217,8 @@ export class ScyllaDBTableConnector<T = unknown>
 			await this.execute(connection, sql, propValues);
 		} catch (error) {
 			throw new GeneralError(
-				this.CLASS_NAME,
-				"entityStorage.setFailed",
+				ScyllaDBTableConnector.CLASS_NAME,
+				"setFailed",
 				{
 					id
 				},
@@ -237,7 +238,7 @@ export class ScyllaDBTableConnector<T = unknown>
 		id: string,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(ScyllaDBTableConnector.CLASS_NAME, nameof(id), id);
 
 		let connection;
 
@@ -251,9 +252,9 @@ export class ScyllaDBTableConnector<T = unknown>
 
 			await this._logging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: ScyllaDBTableConnector.CLASS_NAME,
 				ts: Date.now(),
-				message: "entityStorage.sqlRemove",
+				message: "sql",
 				data: { sql }
 			});
 
@@ -262,7 +263,7 @@ export class ScyllaDBTableConnector<T = unknown>
 			await this.execute(connection, sql, conditionValues);
 		} catch (error) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				ScyllaDBTableConnector.CLASS_NAME,
 				"removeFailed",
 				{
 					id
@@ -286,7 +287,7 @@ export class ScyllaDBTableConnector<T = unknown>
 			await connection.execute(`DROP TABLE IF EXISTS "${this._fullTableName}"`);
 		} catch (error) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				ScyllaDBTableConnector.CLASS_NAME,
 				"dropTableFailed",
 				{ table: this._fullTableName },
 				error
@@ -308,7 +309,7 @@ export class ScyllaDBTableConnector<T = unknown>
 			await connection.execute(`TRUNCATE TABLE "${this._fullTableName}"`);
 		} catch (error) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				ScyllaDBTableConnector.CLASS_NAME,
 				"truncateTableFailed",
 				{ table: this._fullTableName },
 				error
@@ -378,7 +379,7 @@ export class ScyllaDBTableConnector<T = unknown>
 				break;
 			case "object":
 				if (!logicalField.itemTypeRef) {
-					throw new GeneralError(this.CLASS_NAME, "itemTypeNotDefined", {
+					throw new GeneralError(ScyllaDBTableConnector.CLASS_NAME, "itemTypeNotDefined", {
 						type: logicalField.type,
 						table: this._fullTableName
 					});
@@ -387,7 +388,7 @@ export class ScyllaDBTableConnector<T = unknown>
 				break;
 			case "array":
 				if (!logicalField.itemType && !logicalField.itemTypeRef) {
-					throw new GeneralError(this.CLASS_NAME, "itemTypeNotDefined", {
+					throw new GeneralError(ScyllaDBTableConnector.CLASS_NAME, "itemTypeNotDefined", {
 						type: logicalField.type,
 						table: this._fullTableName
 					});

@@ -1,4 +1,4 @@
-# Class: EntityStorageClient\<T\>
+# Class: EntityStorageRestClient\<T\>
 
 Client for performing entity storage through to REST endpoints.
 
@@ -20,7 +20,7 @@ Client for performing entity storage through to REST endpoints.
 
 ### Constructor
 
-> **new EntityStorageClient**\<`T`\>(`config`): `EntityStorageClient`\<`T`\>
+> **new EntityStorageRestClient**\<`T`\>(`config`): `EntityStorageRestClient`\<`T`\>
 
 Create a new instance of EntityStorageClient.
 
@@ -34,7 +34,7 @@ The configuration for the client.
 
 #### Returns
 
-`EntityStorageClient`\<`T`\>
+`EntityStorageRestClient`\<`T`\>
 
 #### Overrides
 
@@ -44,13 +44,9 @@ The configuration for the client.
 
 ### CLASS\_NAME
 
-> `readonly` **CLASS\_NAME**: `string`
+> `readonly` `static` **CLASS\_NAME**: `string`
 
 Runtime name for the class.
-
-#### Implementation of
-
-`IEntityStorageComponent.CLASS_NAME`
 
 ## Methods
 
@@ -140,7 +136,7 @@ Nothing.
 
 ### query()
 
-> **query**(`conditions?`, `orderBy?`, `orderByDirection?`, `properties?`, `cursor?`, `pageSize?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
+> **query**(`conditions?`, `orderBy?`, `orderByDirection?`, `properties?`, `cursor?`, `limit?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 
 Query all the entities which match the conditions.
 
@@ -174,9 +170,9 @@ The optional properties to return, defaults to all.
 
 `string`
 
-The cursor to request the next page of entities.
+The cursor to request the next chunk of entities.
 
-##### pageSize?
+##### limit?
 
 `number`
 

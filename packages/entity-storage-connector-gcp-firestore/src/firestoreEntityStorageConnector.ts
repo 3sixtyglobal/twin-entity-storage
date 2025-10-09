@@ -40,15 +40,15 @@ import type { IValueType } from "./models/IValueType";
  */
 export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
 	/**
+	 * Runtime name for the class.
+	 */
+	public static readonly CLASS_NAME: string = nameof<FirestoreEntityStorageConnector>();
+
+	/**
 	 * Limit the number of entities when finding.
 	 * @internal
 	 */
-	private static readonly _PAGE_SIZE: number = 40;
-
-	/**
-	 * Runtime name for the class.
-	 */
-	public readonly CLASS_NAME: string = nameof<FirestoreEntityStorageConnector>();
+	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
 	 * The schema for the entity.
@@ -85,16 +85,24 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	 * @param options The options for the connector.
 	 */
 	constructor(options: IFirestoreEntityStorageConnectorConstructorOptions) {
-		Guards.object(this.CLASS_NAME, nameof(options), options);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.entitySchema), options.entitySchema);
+		Guards.object(FirestoreEntityStorageConnector.CLASS_NAME, nameof(options), options);
+		Guards.stringValue(
+			FirestoreEntityStorageConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
+		);
 		Guards.object<IFirestoreEntityStorageConnectorConfig>(
-			this.CLASS_NAME,
+			FirestoreEntityStorageConnector.CLASS_NAME,
 			nameof(options.config),
 			options.config
 		);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.projectId), options.config.projectId);
 		Guards.stringValue(
-			this.CLASS_NAME,
+			FirestoreEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.projectId),
+			options.config.projectId
+		);
+		Guards.stringValue(
+			FirestoreEntityStorageConnector.CLASS_NAME,
 			nameof(options.config.collectionName),
 			options.config.collectionName
 		);
@@ -102,7 +110,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		let credentials: JWTInput | undefined;
 		if (!Is.empty(options.config.credentials)) {
 			Guards.stringBase64(
-				this.CLASS_NAME,
+				FirestoreEntityStorageConnector.CLASS_NAME,
 				nameof(options.config.credentials),
 				options.config.credentials
 			);
@@ -144,7 +152,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		try {
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: FirestoreEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "firestoreCreating",
 				data: {
@@ -161,7 +169,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: FirestoreEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "firestoreCreated",
 				data: {
@@ -174,7 +182,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		} catch (err) {
 			await nodeLogging?.log({
 				level: "error",
-				source: this.CLASS_NAME,
+				source: FirestoreEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "firestoreCreationFailed",
 				error: BaseError.fromError(err),
@@ -207,7 +215,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(FirestoreEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		try {
 			if (!Is.stringValue(secondaryIndex) && !Is.arrayValue(conditions)) {
@@ -240,7 +248,12 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 				return querySnapshot.docs[0].data() as T;
 			}
 		} catch (err) {
-			throw new GeneralError(this.CLASS_NAME, "getEntityFailed", { id }, err);
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"getEntityFailed",
+				{ id },
+				err
+			);
 		}
 	}
 
@@ -251,7 +264,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	 * @returns Nothing.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
-		Guards.object(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object(FirestoreEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
@@ -296,7 +309,12 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 				});
 			}
 		} catch (err) {
-			throw new GeneralError(this.CLASS_NAME, "setEntityFailed", { entity }, err);
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"setEntityFailed",
+				{ id: entity.id },
+				err
+			);
 		}
 	}
 
@@ -310,7 +328,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		id: string,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(FirestoreEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		try {
 			const docRef = this._collection.doc(id);
@@ -338,7 +356,12 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 				});
 			}
 		} catch (err) {
-			throw new GeneralError(this.CLASS_NAME, "removeEntityFailed", { id }, err);
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"removeEntityFailed",
+				{ id },
+				err
+			);
 		}
 	}
 
@@ -347,8 +370,8 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk.
 	 * @returns The matching entities and a cursor for the next page.
 	 */
 	public async query(
@@ -356,7 +379,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		sortProperties?: { property: keyof T; sortDirection: SortDirection }[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{
 		/**
 		 * The entities, which can be partial if a limited keys list was provided.
@@ -395,9 +418,9 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 				queryDescription.push(`Cursor: ${cursor}`);
 			}
 
-			const limit = pageSize ?? FirestoreEntityStorageConnector._PAGE_SIZE;
-			query = query.limit(limit);
-			queryDescription.push(`Limit: ${limit}`);
+			const finalLimit = limit ?? FirestoreEntityStorageConnector._DEFAULT_LIMIT;
+			query = query.limit(finalLimit);
+			queryDescription.push(`Limit: ${finalLimit}`);
 
 			if (properties) {
 				query = query.select(...(properties as string[]));
@@ -408,7 +431,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 			const entities = querySnapshot.docs.map((doc: DocumentSnapshot) => doc.data() as T);
 
 			let nextCursor: string | undefined;
-			if (entities.length === limit) {
+			if (entities.length === finalLimit) {
 				nextCursor = querySnapshot.docs[querySnapshot.docs.length - 1].ref.path;
 			}
 
@@ -418,7 +441,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 			};
 		} catch (err) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				FirestoreEntityStorageConnector.CLASS_NAME,
 				"queryFailed",
 				{ queryDescription: queryDescription.join("; ") },
 				err
@@ -440,7 +463,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 			await this.deleteQueryBatch(query, batchSize);
 		} catch (error) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				FirestoreEntityStorageConnector.CLASS_NAME,
 				"collectionDeleteFailed",
 				{ collectionName: this._config.collectionName },
 				error
@@ -483,7 +506,11 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 			case ComparisonOperator.Includes:
 				return query.where(property as string, "array-contains", value);
 			default:
-				throw new GeneralError(this.CLASS_NAME, "unsupportedComparisonOperator", { comparison });
+				throw new GeneralError(
+					FirestoreEntityStorageConnector.CLASS_NAME,
+					"unsupportedComparisonOperator",
+					{ comparison }
+				);
 		}
 	}
 

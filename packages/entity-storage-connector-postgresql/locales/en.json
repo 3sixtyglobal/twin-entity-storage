@@ -8,14 +8,14 @@
 	},
 	"error": {
 		"postgreSqlEntityStorageConnector": {
+			"databaseCreateFailed": "Unable to create database \"{databaseName}\"",
 			"setFailed": "Unable to set entity \"{id}\"",
 			"getFailed": "Unable to get entity \"{id}\"",
 			"removeFailed": "Unable to remove entity \"{id}\"",
 			"queryFailed": "The query failed",
 			"comparisonNotSupported": "Comparison operator \"{comparison}\" is not supported",
 			"conditionalNotSupported": "Conditional operator \"{operator}\" is not supported",
-			"sortSingle": "You can only sort by a single property",
-			"sortNotIndexed": "The property \"{property}\" is not indexed and cannot be used for sorting"
+			"entitySchemaPropertiesUndefined": "The entity schema properties are undefined"
 		}
 	}
 }

@@ -48,10 +48,15 @@ import type { IDynamoDbEntityStorageConnectorConstructorOptions } from "./models
  */
 export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
 	/**
+	 * Runtime name for the class.
+	 */
+	public static readonly CLASS_NAME: string = nameof<DynamoDbEntityStorageConnector>();
+
+	/**
 	 * Limit the number of entities when finding.
 	 * @internal
 	 */
-	private static readonly _PAGE_SIZE: number = 40;
+	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
 	 * Partition id field name.
@@ -64,11 +69,6 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @internal
 	 */
 	private static readonly _PARTITION_ID_VALUE: string = "1";
-
-	/**
-	 * Runtime name for the class.
-	 */
-	public readonly CLASS_NAME: string = nameof<DynamoDbEntityStorageConnector>();
 
 	/**
 	 * The schema for the entity.
@@ -93,10 +93,14 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @param options The options for the connector.
 	 */
 	constructor(options: IDynamoDbEntityStorageConnectorConstructorOptions) {
-		Guards.object(this.CLASS_NAME, nameof(options), options);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.entitySchema), options.entitySchema);
+		Guards.object(DynamoDbEntityStorageConnector.CLASS_NAME, nameof(options), options);
+		Guards.stringValue(
+			DynamoDbEntityStorageConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
+		);
 		Guards.object<IDynamoDbEntityStorageConnectorConfig>(
-			this.CLASS_NAME,
+			DynamoDbEntityStorageConnector.CLASS_NAME,
 			nameof(options.config),
 			options.config
 		);
@@ -105,18 +109,26 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 
 		if (options.config.authMode === "credentials") {
 			Guards.stringValue(
-				this.CLASS_NAME,
+				DynamoDbEntityStorageConnector.CLASS_NAME,
 				nameof(options.config.accessKeyId),
 				options.config.accessKeyId
 			);
 			Guards.stringValue(
-				this.CLASS_NAME,
+				DynamoDbEntityStorageConnector.CLASS_NAME,
 				nameof(options.config.secretAccessKey),
 				options.config.secretAccessKey
 			);
 		}
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.region), options.config.region);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.tableName), options.config.tableName);
+		Guards.stringValue(
+			DynamoDbEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.region),
+			options.config.region
+		);
+		Guards.stringValue(
+			DynamoDbEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.tableName),
+			options.config.tableName
+		);
 
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 
@@ -139,7 +151,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		if (!(await this.tableExists(this._config.tableName))) {
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: DynamoDbEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "tableCreating",
 				data: {
@@ -235,7 +247,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 
 				await nodeLogging?.log({
 					level: "info",
-					source: this.CLASS_NAME,
+					source: DynamoDbEntityStorageConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "tableCreated",
 					data: {
@@ -246,7 +258,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 				if (BaseError.isErrorCode(err, "ResourceInUseException")) {
 					await nodeLogging?.log({
 						level: "info",
-						source: this.CLASS_NAME,
+						source: DynamoDbEntityStorageConnector.CLASS_NAME,
 						ts: Date.now(),
 						message: "tableExists",
 						data: {
@@ -256,7 +268,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 				} else {
 					await nodeLogging?.log({
 						level: "error",
-						source: this.CLASS_NAME,
+						source: DynamoDbEntityStorageConnector.CLASS_NAME,
 						ts: Date.now(),
 						message: "tableCreateFailed",
 						error: BaseError.fromError(err),
@@ -270,7 +282,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		} else {
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: DynamoDbEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "tableExists",
 				data: {
@@ -302,7 +314,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(DynamoDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		try {
 			const docClient = this.createDocClient();
@@ -357,16 +369,16 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		} catch (err) {
 			if (BaseError.isErrorCode(err, "ResourceNotFoundException")) {
 				throw new GeneralError(
-					this.CLASS_NAME,
+					DynamoDbEntityStorageConnector.CLASS_NAME,
 					"tableDoesNotExist",
 					{
-						table: this._config.tableName
+						tableName: this._config.tableName
 					},
 					err
 				);
 			}
 			throw new GeneralError(
-				this.CLASS_NAME,
+				DynamoDbEntityStorageConnector.CLASS_NAME,
 				"getFailed",
 				{
 					id
@@ -383,7 +395,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @returns The id of the entity.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
-		Guards.object<T>(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object<T>(DynamoDbEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
@@ -419,7 +431,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 
 			if (BaseError.isErrorCode(err, "ResourceNotFoundException")) {
 				throw new GeneralError(
-					this.CLASS_NAME,
+					DynamoDbEntityStorageConnector.CLASS_NAME,
 					"tableDoesNotExist",
 					{
 						tableName: this._config.tableName
@@ -429,7 +441,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 			}
 
 			throw new GeneralError(
-				this.CLASS_NAME,
+				DynamoDbEntityStorageConnector.CLASS_NAME,
 				"setFailed",
 				{
 					id
@@ -449,7 +461,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		id: string,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(DynamoDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		try {
 			const docClient = this.createDocClient();
@@ -476,17 +488,17 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 			}
 			if (BaseError.isErrorCode(err, "ResourceNotFoundException")) {
 				throw new GeneralError(
-					this.CLASS_NAME,
+					DynamoDbEntityStorageConnector.CLASS_NAME,
 					"tableDoesNotExist",
 					{
-						table: this._config.tableName
+						tableName: this._config.tableName
 					},
 					err
 				);
 			}
 
 			throw new GeneralError(
-				this.CLASS_NAME,
+				DynamoDbEntityStorageConnector.CLASS_NAME,
 				"removeFailed",
 				{
 					id
@@ -501,8 +513,8 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -514,7 +526,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		}[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{
 		/**
 		 * The entities, which can be partial if a limited keys list was provided.
@@ -525,7 +537,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		 */
 		cursor?: string;
 	}> {
-		return this.internalQuery(conditions, sortProperties, properties, cursor, pageSize);
+		return this.internalQuery(conditions, sortProperties, properties, cursor, limit);
 	}
 
 	/**
@@ -687,7 +699,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 			return `${propName} IN ${attributeName}`;
 		}
 
-		throw new GeneralError(this.CLASS_NAME, "comparisonNotSupported", {
+		throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {
 			comparison: comparator.comparison
 		});
 	}
@@ -728,7 +740,9 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 			return "OR";
 		}
 
-		throw new GeneralError(this.CLASS_NAME, "conditionalNotSupported", { operator });
+		throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "conditionalNotSupported", {
+			operator
+		});
 	}
 
 	/**
@@ -843,8 +857,8 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @param secondaryIndex The secondary index to use for the query.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
@@ -858,7 +872,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		}[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number,
+		limit?: number,
 		secondaryIndex?: string
 	): Promise<{
 		/**
@@ -871,7 +885,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		cursor?: string;
 	}> {
 		try {
-			const returnSize = pageSize ?? DynamoDbEntityStorageConnector._PAGE_SIZE;
+			const returnSize = limit ?? DynamoDbEntityStorageConnector._DEFAULT_LIMIT;
 
 			let indexName: string | undefined = Is.stringValue(secondaryIndex)
 				? `${secondaryIndex}Index`
@@ -882,7 +896,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 			let scanAscending = true;
 			if (Is.arrayValue(sortProperties)) {
 				if (sortProperties.length > 1) {
-					throw new GeneralError(this.CLASS_NAME, "sortSingle");
+					throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "sortSingle");
 				}
 
 				for (const sortProperty of sortProperties) {
@@ -895,7 +909,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 							!propertySchema.isSecondary &&
 							Is.empty(propertySchema.sortDirection))
 					) {
-						throw new GeneralError(this.CLASS_NAME, "sortNotIndexed", {
+						throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "sortNotIndexed", {
 							property: sortProperty.property
 						});
 					}
@@ -967,15 +981,20 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		} catch (err) {
 			if (BaseError.isErrorCode(err, "ResourceNotFoundException")) {
 				throw new GeneralError(
-					this.CLASS_NAME,
+					DynamoDbEntityStorageConnector.CLASS_NAME,
 					"tableDoesNotExist",
 					{
-						table: this._config.tableName
+						tableName: this._config.tableName
 					},
 					err
 				);
 			}
-			throw new GeneralError(this.CLASS_NAME, "queryFailed", undefined, err);
+			throw new GeneralError(
+				DynamoDbEntityStorageConnector.CLASS_NAME,
+				"queryFailed",
+				undefined,
+				err
+			);
 		}
 	}
 
@@ -1002,7 +1021,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 				const schemaProp = this._entitySchema.properties?.find(p => p.property === c.property);
 
 				if (Is.undefined(schemaProp)) {
-					throw new GeneralError(this.CLASS_NAME, "propertyNotFound", {
+					throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "propertyNotFound", {
 						property: c.property
 					});
 				}

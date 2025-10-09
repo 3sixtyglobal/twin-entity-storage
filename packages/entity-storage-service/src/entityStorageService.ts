@@ -24,7 +24,7 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 	/**
 	 * Runtime name for the class.
 	 */
-	public readonly CLASS_NAME: string = nameof<EntityStorageService>();
+	public static readonly CLASS_NAME: string = nameof<EntityStorageService>();
 
 	/**
 	 * The entity storage for items.
@@ -43,7 +43,11 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 	 * @param options The dependencies for the entity storage service.
 	 */
 	constructor(options: IEntityStorageServiceConstructorOptions) {
-		Guards.string(this.CLASS_NAME, nameof(options.entityStorageType), options.entityStorageType);
+		Guards.string(
+			EntityStorageService.CLASS_NAME,
+			nameof(options.entityStorageType),
+			options.entityStorageType
+		);
 		this._entityStorage = EntityStorageConnectorFactory.get<IEntityStorageConnector<T>>(
 			options.entityStorageType
 		);
@@ -57,14 +61,14 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 	 * @returns The id of the entity.
 	 */
 	public async set(entity: T, userIdentity?: string): Promise<void> {
-		Guards.object(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object(EntityStorageService.CLASS_NAME, nameof(entity), entity);
 
 		const conditions: {
 			property: keyof T;
 			value: unknown;
 		}[] = [];
 		if (this._partitionPerUser) {
-			Guards.stringValue(this.CLASS_NAME, nameof(userIdentity), userIdentity);
+			Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(userIdentity), userIdentity);
 			conditions.push({
 				property: "userIdentity" as keyof T,
 				value: userIdentity
@@ -87,7 +91,7 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 		secondaryIndex?: keyof T,
 		userIdentity?: string
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(id), id);
 
 		return this.internalGet(id, secondaryIndex, userIdentity);
 	}
@@ -99,14 +103,14 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 	 * @returns Nothing.
 	 */
 	public async remove(id: string, userIdentity?: string): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(id), id);
 
 		const conditions: {
 			property: keyof T;
 			value: unknown;
 		}[] = [];
 		if (this._partitionPerUser) {
-			Guards.stringValue(this.CLASS_NAME, nameof(userIdentity), userIdentity);
+			Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(userIdentity), userIdentity);
 			conditions.push({
 				property: "userIdentity" as keyof T,
 				value: userIdentity
@@ -122,8 +126,8 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 	 * @param orderBy The order for the results.
 	 * @param orderByDirection The direction for the order, defaults to ascending.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @param userIdentity The user identity to use with storage operations.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
@@ -134,7 +138,7 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 		orderByDirection?: SortDirection,
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number,
+		limit?: number,
 		userIdentity?: string
 	): Promise<{
 		/**
@@ -152,7 +156,7 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 		};
 
 		if (this._partitionPerUser) {
-			Guards.stringValue(this.CLASS_NAME, nameof(userIdentity), userIdentity);
+			Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(userIdentity), userIdentity);
 			finalConditions.conditions.push({
 				property: "userIdentity",
 				comparison: ComparisonOperator.Equals,
@@ -171,7 +175,7 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 				: undefined,
 			properties,
 			cursor,
-			pageSize
+			limit
 		);
 
 		for (const entity of result.entities) {
@@ -197,7 +201,7 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 		const conditions: EntityCondition<T>[] = [];
 
 		if (this._partitionPerUser) {
-			Guards.stringValue(this.CLASS_NAME, nameof(userIdentity), userIdentity);
+			Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(userIdentity), userIdentity);
 			conditions.push({
 				property: "userIdentity",
 				comparison: ComparisonOperator.Equals,
@@ -242,7 +246,7 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 		}
 
 		if (Is.empty(entity)) {
-			throw new NotFoundError(this.CLASS_NAME, "entityNotFound", id);
+			throw new NotFoundError(EntityStorageService.CLASS_NAME, "entityNotFound", id);
 		}
 
 		ObjectHelper.propertyDelete(entity, "userIdentity");

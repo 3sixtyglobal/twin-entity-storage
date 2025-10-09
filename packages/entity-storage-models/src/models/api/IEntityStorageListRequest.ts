@@ -31,9 +31,9 @@ export interface IEntityStorageListRequest {
 		properties?: string;
 
 		/**
-		 * The number of entries to return per page.
+		 * Limit the number of entities to return.
 		 */
-		pageSize?: number | string;
+		limit?: string;
 
 		/**
 		 * The cursor to get next chunk of data, returned in previous response.

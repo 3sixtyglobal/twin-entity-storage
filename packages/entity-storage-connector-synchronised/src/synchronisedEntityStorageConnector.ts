@@ -42,7 +42,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 	/**
 	 * Runtime name for the class.
 	 */
-	public readonly CLASS_NAME: string = nameof<SynchronisedEntityStorageConnector>();
+	public static readonly CLASS_NAME: string = nameof<SynchronisedEntityStorageConnector>();
 
 	/**
 	 * The schema for the entity.
@@ -86,13 +86,17 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 	 */
 	constructor(options: ISynchronisedEntityStorageConnectorConstructorOptions) {
 		Guards.object<ISynchronisedEntityStorageConnectorConstructorOptions>(
-			this.CLASS_NAME,
+			SynchronisedEntityStorageConnector.CLASS_NAME,
 			nameof(options),
 			options
 		);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.entitySchema), options.entitySchema);
 		Guards.stringValue(
-			this.CLASS_NAME,
+			SynchronisedEntityStorageConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
+		);
+		Guards.stringValue(
+			SynchronisedEntityStorageConnector.CLASS_NAME,
 			nameof(options.entityStorageConnectorType),
 			options.entityStorageConnectorType
 		);
@@ -113,15 +117,23 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 				prop => prop.property === requiredProperty
 			);
 			if (Is.empty(foundProperty)) {
-				throw new GeneralError(this.CLASS_NAME, "missingRequiredProperty", { requiredProperty });
+				throw new GeneralError(
+					SynchronisedEntityStorageConnector.CLASS_NAME,
+					"missingRequiredProperty",
+					{ requiredProperty }
+				);
 			} else if (
 				Is.empty(foundProperty.isPrimary) &&
 				Is.empty(foundProperty.isSecondary) &&
 				Is.empty(foundProperty.sortDirection)
 			) {
-				throw new GeneralError(this.CLASS_NAME, "missingRequiredPropertySort", {
-					requiredProperty
-				});
+				throw new GeneralError(
+					SynchronisedEntityStorageConnector.CLASS_NAME,
+					"missingRequiredPropertySort",
+					{
+						requiredProperty
+					}
+				);
 			}
 		}
 
@@ -175,7 +187,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(SynchronisedEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		return this._entityStorageConnector.get(id, secondaryIndex, conditions);
 	}
@@ -187,7 +199,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 	 * @returns The id of the entity.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
-		Guards.object<T>(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object<T>(SynchronisedEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
 		if (Is.stringValue(this._nodeIdentity)) {
 			// Make sure the entity has the required properties
@@ -219,7 +231,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		id: string,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(SynchronisedEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		if (Is.stringValue(this._nodeIdentity)) {
 			await this._entityStorageConnector.remove(id, conditions);
@@ -242,8 +254,8 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -255,7 +267,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 		}[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{
 		/**
 		 * The entities, which can be partial if a limited keys list was provided.
@@ -271,7 +283,7 @@ export class SynchronisedEntityStorageConnector<T extends ISynchronisedEntity = 
 			sortProperties,
 			properties,
 			cursor,
-			pageSize
+			limit
 		);
 	}
 

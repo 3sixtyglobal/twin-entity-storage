@@ -213,9 +213,9 @@ describe("MySqlEntityStorageConnector", () => {
 		expect(logs?.[1].message).toEqual("databaseExists");
 		expect(logs?.[2].message).toEqual("tableExists");
 
-		expect(I18n.hasMessage("info.mysqlEntityStorageConnector.databaseCreating")).toEqual(true);
-		expect(I18n.hasMessage("info.mysqlEntityStorageConnector.databaseExists")).toEqual(true);
-		expect(I18n.hasMessage("info.mysqlEntityStorageConnector.tableExists")).toEqual(true);
+		expect(I18n.hasMessage("info.mySqlEntityStorageConnector.databaseCreating")).toEqual(true);
+		expect(I18n.hasMessage("info.mySqlEntityStorageConnector.databaseExists")).toEqual(true);
+		expect(I18n.hasMessage("info.mySqlEntityStorageConnector.tableExists")).toEqual(true);
 	});
 
 	test("can fail to set an item with no entity", async () => {

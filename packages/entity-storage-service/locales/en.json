@@ -1,7 +1,7 @@
 {
 	"error": {
 		"entityStorageService": {
-			"entityNotFound": "Could not find entity with id \"{id}\""
+			"entityNotFound": "Could not find entity with id \"{notFoundId}\""
 		}
 	}
 }

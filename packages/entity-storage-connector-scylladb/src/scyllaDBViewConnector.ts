@@ -25,7 +25,7 @@ export class ScyllaDBViewConnector<T>
 	/**
 	 * Runtime name for the class.
 	 */
-	public readonly CLASS_NAME: string = nameof<ScyllaDBViewConnector<T>>();
+	public static readonly CLASS_NAME: string = nameof<ScyllaDBViewConnector<unknown>>();
 
 	/**
 	 * The view descriptor.
@@ -45,14 +45,11 @@ export class ScyllaDBViewConnector<T>
 	 */
 	constructor(options: IScyllaDBViewConnectorConstructorOptions) {
 		// We need this conversion so that types can match in the superclass and reuse the get method
-		super(
-			{
-				loggingComponentType: options.loggingComponentType,
-				entitySchema: options.viewSchema,
-				config: options.config
-			},
-			nameof(ScyllaDBViewConnector)
-		);
+		super({
+			loggingComponentType: options.loggingComponentType,
+			entitySchema: options.viewSchema,
+			config: options.config
+		});
 
 		this._viewSchema = EntitySchemaHelper.getSchema<T>(options.viewSchema);
 
@@ -75,7 +72,7 @@ export class ScyllaDBViewConnector<T>
 
 		nodeLogging?.log({
 			level: "info",
-			source: this.CLASS_NAME,
+			source: ScyllaDBViewConnector.CLASS_NAME,
 			ts: Date.now(),
 			message: "viewCreating",
 			data: { view: this._fullTableName }
@@ -105,7 +102,7 @@ export class ScyllaDBViewConnector<T>
 
 			nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: ScyllaDBViewConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "viewCreated",
 				data: { view: this._fullTableName }
@@ -114,7 +111,7 @@ export class ScyllaDBViewConnector<T>
 			if (BaseError.isErrorCode(err, "ResourceInUseException")) {
 				nodeLogging?.log({
 					level: "info",
-					source: this.CLASS_NAME,
+					source: ScyllaDBViewConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "viewExists",
 					data: { view: this._fullTableName }
@@ -122,7 +119,7 @@ export class ScyllaDBViewConnector<T>
 			} else {
 				nodeLogging?.log({
 					level: "error",
-					source: this.CLASS_NAME,
+					source: ScyllaDBViewConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "viewCreateFailed",
 					error: err as IError,
@@ -139,7 +136,9 @@ export class ScyllaDBViewConnector<T>
 	 * @param entity The entity to set.
 	 */
 	public async set(entity: T): Promise<void> {
-		throw new NotSupportedError(this.CLASS_NAME, "set", {});
+		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
+			methodName: "set"
+		});
 	}
 
 	/**
@@ -147,6 +146,8 @@ export class ScyllaDBViewConnector<T>
 	 * @param id The id of the entity to remove.
 	 */
 	public async remove(id: string): Promise<void> {
-		throw new NotSupportedError(this.CLASS_NAME, "remove", {});
+		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
+			methodName: "remove"
+		});
 	}
 }

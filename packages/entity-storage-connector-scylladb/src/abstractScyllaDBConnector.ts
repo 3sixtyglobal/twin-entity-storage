@@ -25,16 +25,15 @@ import type { IScyllaDBTableConfig } from "./models/IScyllaDBTableConfig";
  */
 export abstract class AbstractScyllaDBConnector<T> {
 	/**
+	 * Runtime name for the class.
+	 */
+	public static readonly CLASS_NAME: string = nameof<AbstractScyllaDBConnector<unknown>>();
+
+	/**
 	 * Limit the number of entities when finding.
 	 * @internal
 	 */
-	protected static readonly PAGE_SIZE: number = 40;
-
-	/**
-	 * Runtime name for the class.
-	 * @internal
-	 */
-	public readonly CLASS_NAME: string;
+	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
 	 * The name of the database table.
@@ -72,28 +71,38 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @param options.loggingComponentType The type of logging component to use, defaults to no logging.
 	 * @param options.entitySchema The name of the entity schema.
 	 * @param options.config The configuration for the connector.
-	 * @param className The name of the derived class.
 	 */
-	constructor(
-		options: {
-			loggingComponentType?: string;
-			entitySchema: string;
-			config: IScyllaDBTableConfig;
-		},
-		className: string
-	) {
-		this.CLASS_NAME = className;
-
-		Guards.object(this.CLASS_NAME, nameof(options), options);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.entitySchema), options.entitySchema);
-		Guards.object<IScyllaDBConfig>(this.CLASS_NAME, nameof(options.config), options.config);
-		Guards.arrayValue(this.CLASS_NAME, nameof(options.config.hosts), options.config.hosts);
+	constructor(options: {
+		loggingComponentType?: string;
+		entitySchema: string;
+		config: IScyllaDBTableConfig;
+	}) {
+		Guards.object(AbstractScyllaDBConnector.CLASS_NAME, nameof(options), options);
 		Guards.stringValue(
-			this.CLASS_NAME,
+			AbstractScyllaDBConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
+		);
+		Guards.object<IScyllaDBConfig>(
+			AbstractScyllaDBConnector.CLASS_NAME,
+			nameof(options.config),
+			options.config
+		);
+		Guards.arrayValue(
+			AbstractScyllaDBConnector.CLASS_NAME,
+			nameof(options.config.hosts),
+			options.config.hosts
+		);
+		Guards.stringValue(
+			AbstractScyllaDBConnector.CLASS_NAME,
 			nameof(options.config.localDataCenter),
 			options.config.localDataCenter
 		);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.keyspace), options.config.keyspace);
+		Guards.stringValue(
+			AbstractScyllaDBConnector.CLASS_NAME,
+			nameof(options.config.keyspace),
+			options.config.keyspace
+		);
 
 		this._logging = ComponentFactory.getIfExists(options.loggingComponentType ?? "logging");
 
@@ -126,7 +135,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(AbstractScyllaDBConnector.CLASS_NAME, nameof(id), id);
 
 		let connection;
 		try {
@@ -140,7 +149,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 			await this._logging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: AbstractScyllaDBConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "sql",
 				data: { sql }
@@ -155,7 +164,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 			}
 		} catch (error) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				AbstractScyllaDBConnector.CLASS_NAME,
 				"getFailed",
 				{
 					id
@@ -172,8 +181,8 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -185,7 +194,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 		}[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{
 		/**
 		 * The entities, which can be partial if a limited keys list was provided.
@@ -198,7 +207,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 	}> {
 		let connection;
 		try {
-			let returnSize = pageSize ?? AbstractScyllaDBConnector.PAGE_SIZE;
+			let returnSize = limit ?? AbstractScyllaDBConnector._DEFAULT_LIMIT;
 			let sql = `SELECT * FROM "${this._fullTableName}"`;
 
 			if (Is.array(properties)) {
@@ -299,7 +308,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 			await this._logging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: AbstractScyllaDBConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "sql",
 				data: { sql }
@@ -318,7 +327,12 @@ export abstract class AbstractScyllaDBConnector<T> {
 				cursor: Is.stringValue(result.pageState) ? result.pageState : undefined
 			};
 		} catch (error) {
-			throw new GeneralError(this.CLASS_NAME, "findFailed", { table: this._fullTableName }, error);
+			throw new GeneralError(
+				AbstractScyllaDBConnector.CLASS_NAME,
+				"findFailed",
+				{ table: this._fullTableName },
+				error
+			);
 		} finally {
 			await this.closeConnection(connection);
 		}
@@ -371,7 +385,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 		sql: string,
 		params: unknown[],
 		pageState?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<CassandraTypes.ResultSet> {
 		return new Promise<CassandraTypes.ResultSet>((resolve, reject) => {
 			const rows: CassandraTypes.Row[] = [];
@@ -382,7 +396,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 				{
 					prepare: true,
 					autoPage: false,
-					fetchSize: pageSize ?? AbstractScyllaDBConnector.PAGE_SIZE,
+					fetchSize: limit ?? AbstractScyllaDBConnector._DEFAULT_LIMIT,
 					pageState
 				},
 				(n: number, row: CassandraTypes.Row) => {
@@ -453,7 +467,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 			try {
 				return JSON.parse(value as string);
 			} catch {
-				throw new GeneralError(this.CLASS_NAME, "parseJSONFailed", {
+				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "parseJSONFailed", {
 					name: fieldDescriptor.property,
 					value
 				});

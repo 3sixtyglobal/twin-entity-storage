@@ -22,15 +22,15 @@ import type { IMongoDbEntityStorageConnectorConstructorOptions } from "./models/
  */
 export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
 	/**
+	 * Runtime name for the class.
+	 */
+	public static readonly CLASS_NAME: string = nameof<MongoDbEntityStorageConnector>();
+
+	/**
 	 * Limit the number of entities when finding.
 	 * @internal
 	 */
-	private static readonly _PAGE_SIZE: number = 40;
-
-	/**
-	 * Runtime name for the class.
-	 */
-	public readonly CLASS_NAME: string = nameof<MongoDbEntityStorageConnector>();
+	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
 	 * The schema for the entity.
@@ -55,17 +55,29 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 	 * @param options The options for the connector.
 	 */
 	constructor(options: IMongoDbEntityStorageConnectorConstructorOptions) {
-		Guards.object(this.CLASS_NAME, nameof(options), options);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.entitySchema), options.entitySchema);
+		Guards.object(MongoDbEntityStorageConnector.CLASS_NAME, nameof(options), options);
+		Guards.stringValue(
+			MongoDbEntityStorageConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
+		);
 		Guards.object<IMongoDbEntityStorageConnectorConfig>(
-			this.CLASS_NAME,
+			MongoDbEntityStorageConnector.CLASS_NAME,
 			nameof(options.config),
 			options.config
 		);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.host), options.config.host);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.database), options.config.database);
 		Guards.stringValue(
-			this.CLASS_NAME,
+			MongoDbEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.host),
+			options.config.host
+		);
+		Guards.stringValue(
+			MongoDbEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.database),
+			options.config.database
+		);
+		Guards.stringValue(
+			MongoDbEntityStorageConnector.CLASS_NAME,
 			nameof(options.config.collection),
 			options.config.collection
 		);
@@ -90,11 +102,11 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: MongoDbEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "databaseCreating",
 				data: {
-					database: this._config.database
+					databaseName: this._config.database
 				}
 			});
 
@@ -103,11 +115,11 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: MongoDbEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "databaseExists",
 				data: {
-					database: this._config.database
+					databaseName: this._config.database
 				}
 			});
 
@@ -115,22 +127,22 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: MongoDbEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "collectionExists",
 				data: {
-					collection: this._config.collection
+					collectionName: this._config.collection
 				}
 			});
 		} catch (error) {
 			await nodeLogging?.log({
 				level: "error",
-				source: this.CLASS_NAME,
+				source: MongoDbEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "databaseCreateFailed",
 				error: BaseError.fromError(error),
 				data: {
-					database: this._config.database
+					databaseName: this._config.database
 				}
 			});
 			return false;
@@ -159,7 +171,7 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(MongoDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
 		try {
 			const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
 			const query: { [key in keyof T]?: unknown } = Is.empty(secondaryIndex)
@@ -177,7 +189,7 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 			return result as T | undefined;
 		} catch (err) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				MongoDbEntityStorageConnector.CLASS_NAME,
 				"getFailed",
 				{
 					id
@@ -194,7 +206,7 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 	 * @returns The id of the entity.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
-		Guards.object<T>(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object<T>(MongoDbEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
@@ -218,7 +230,7 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 			);
 		} catch (err) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				MongoDbEntityStorageConnector.CLASS_NAME,
 				"setFailed",
 				{
 					id
@@ -238,7 +250,7 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 		id: string,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(MongoDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		try {
 			const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
@@ -253,7 +265,7 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 			const collection = await this.getCollection();
 			await collection.deleteOne(query);
 		} catch (err) {
-			throw new GeneralError(this.CLASS_NAME, "removeFailed", { id }, err);
+			throw new GeneralError(MongoDbEntityStorageConnector.CLASS_NAME, "removeFailed", { id }, err);
 		}
 	}
 
@@ -262,8 +274,8 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -272,9 +284,9 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 		sortProperties?: { property: keyof T; sortDirection: SortDirection }[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{ entities: Partial<T>[]; cursor?: string }> {
-		const returnSize = pageSize ?? MongoDbEntityStorageConnector._PAGE_SIZE;
+		const returnSize = limit ?? MongoDbEntityStorageConnector._DEFAULT_LIMIT;
 
 		const filter: Filter<T> = {};
 		if (conditions) {
@@ -414,7 +426,11 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 			case ComparisonOperator.Includes:
 				return { $elemMatch: { $eq: value } };
 			default:
-				throw new GeneralError(this.CLASS_NAME, "unsupportedComparisonOperator", { comparison });
+				throw new GeneralError(
+					MongoDbEntityStorageConnector.CLASS_NAME,
+					"unsupportedComparisonOperator",
+					{ comparison }
+				);
 		}
 	}
 }

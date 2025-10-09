@@ -6,7 +6,7 @@ import {
 	type IBaseRestClientConfig,
 	type INoContentResponse
 } from "@twin.org/api-models";
-import { Guards } from "@twin.org/core";
+import { Coerce, Guards } from "@twin.org/core";
 import type { EntityCondition, SortDirection } from "@twin.org/entity";
 import type {
 	IEntityStorageComponent,
@@ -22,18 +22,21 @@ import { nameof } from "@twin.org/nameof";
 /**
  * Client for performing entity storage through to REST endpoints.
  */
-export class EntityStorageClient<T> extends BaseRestClient implements IEntityStorageComponent<T> {
+export class EntityStorageRestClient<T>
+	extends BaseRestClient
+	implements IEntityStorageComponent<T>
+{
 	/**
 	 * Runtime name for the class.
 	 */
-	public readonly CLASS_NAME: string = nameof<EntityStorageClient<T>>();
+	public static readonly CLASS_NAME: string = nameof<EntityStorageRestClient<unknown>>();
 
 	/**
 	 * Create a new instance of EntityStorageClient.
 	 * @param config The configuration for the client.
 	 */
 	constructor(config: IBaseRestClientConfig) {
-		super(nameof<EntityStorageClient<T>>(), config, "entity-storage");
+		super(nameof<EntityStorageRestClient<T>>(), config, "entity-storage");
 	}
 
 	/**
@@ -42,7 +45,7 @@ export class EntityStorageClient<T> extends BaseRestClient implements IEntitySto
 	 * @returns The id of the entity.
 	 */
 	public async set(entity: T): Promise<void> {
-		Guards.object(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object(EntityStorageRestClient.CLASS_NAME, nameof(entity), entity);
 
 		await this.fetch<IEntityStorageSetRequest, INoContentResponse>("/", "POST", {
 			body: entity
@@ -56,7 +59,7 @@ export class EntityStorageClient<T> extends BaseRestClient implements IEntitySto
 	 * @returns The object if it can be found or undefined.
 	 */
 	public async get(id: string, secondaryIndex?: keyof T): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(EntityStorageRestClient.CLASS_NAME, nameof(id), id);
 
 		const response = await this.fetch<IEntityStorageGetRequest, IEntityStorageGetResponse>(
 			"/:id",
@@ -80,7 +83,7 @@ export class EntityStorageClient<T> extends BaseRestClient implements IEntitySto
 	 * @returns Nothing.
 	 */
 	public async remove(id: string): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(EntityStorageRestClient.CLASS_NAME, nameof(id), id);
 
 		await this.fetch<IEntityStorageRemoveRequest, INoContentResponse>("/:id", "DELETE", {
 			pathParams: {
@@ -95,8 +98,8 @@ export class EntityStorageClient<T> extends BaseRestClient implements IEntitySto
 	 * @param orderBy The order for the results.
 	 * @param orderByDirection The direction for the order, defaults to ascending.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -106,7 +109,7 @@ export class EntityStorageClient<T> extends BaseRestClient implements IEntitySto
 		orderByDirection?: SortDirection,
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{
 		/**
 		 * The entities, which can be partial if a limited keys list was provided.
@@ -126,7 +129,7 @@ export class EntityStorageClient<T> extends BaseRestClient implements IEntitySto
 					orderBy: orderBy as string,
 					orderByDirection,
 					properties: HttpParameterHelper.arrayToString(properties),
-					pageSize,
+					limit: Coerce.string(limit),
 					cursor
 				}
 			}

@@ -24,15 +24,15 @@ import type { IFileEntityStorageConnectorConstructorOptions } from "./models/IFi
  */
 export class FileEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
 	/**
-	 * Default Page Size for cursor.
-	 * @internal
-	 */
-	private static readonly _DEFAULT_PAGE_SIZE: number = 20;
-
-	/**
 	 * Runtime name for the class.
 	 */
-	public readonly CLASS_NAME: string = nameof<FileEntityStorageConnector>();
+	public static readonly CLASS_NAME: string = nameof<FileEntityStorageConnector>();
+
+	/**
+	 * Default limit for number of items to return.
+	 * @internal
+	 */
+	private static readonly _DEFAULT_LIMIT: number = 20;
 
 	/**
 	 * The schema for the entity.
@@ -57,10 +57,18 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	 * @param options The options for the connector.
 	 */
 	constructor(options: IFileEntityStorageConnectorConstructorOptions) {
-		Guards.object(this.CLASS_NAME, nameof(options), options);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.entitySchema), options.entitySchema);
-		Guards.object(this.CLASS_NAME, nameof(options.config), options.config);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.directory), options.config.directory);
+		Guards.object(FileEntityStorageConnector.CLASS_NAME, nameof(options), options);
+		Guards.stringValue(
+			FileEntityStorageConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
+		);
+		Guards.object(FileEntityStorageConnector.CLASS_NAME, nameof(options.config), options.config);
+		Guards.stringValue(
+			FileEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.directory),
+			options.config.directory
+		);
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 		this._directory = path.resolve(options.config.directory);
@@ -77,7 +85,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		if (!(await this.dirExists(this._directory))) {
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: FileEntityStorageConnector.CLASS_NAME,
 				message: "directoryCreating",
 				data: {
 					directory: this._directory
@@ -89,7 +97,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 
 				await nodeLogging?.log({
 					level: "info",
-					source: this.CLASS_NAME,
+					source: FileEntityStorageConnector.CLASS_NAME,
 					message: "directoryCreated",
 					data: {
 						directory: this._directory
@@ -98,7 +106,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 			} catch (err) {
 				await nodeLogging?.log({
 					level: "error",
-					source: this.CLASS_NAME,
+					source: FileEntityStorageConnector.CLASS_NAME,
 					message: "directoryCreateFailed",
 					data: {
 						directory: this._directory
@@ -110,7 +118,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		} else {
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: FileEntityStorageConnector.CLASS_NAME,
 				message: "directoryExists",
 				data: {
 					directory: this._directory
@@ -140,7 +148,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(FileEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		const store = await this.readStore();
 
@@ -156,7 +164,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	 * @returns The id of the entity.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
-		Guards.object<T>(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object<T>(FileEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
@@ -187,7 +195,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		id: string,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(FileEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
 		const store = await this.readStore();
 
@@ -204,8 +212,8 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -217,7 +225,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		}[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{
 		/**
 		 * The entities, which can be partial if a limited keys list was provided.
@@ -231,7 +239,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		let allEntities = await this.readStore();
 
 		const entities = [];
-		const finalPageSize = pageSize ?? FileEntityStorageConnector._DEFAULT_PAGE_SIZE;
+		const finalLimit = limit ?? FileEntityStorageConnector._DEFAULT_LIMIT;
 		let nextCursor: string | undefined;
 
 		if (allEntities.length > 0) {
@@ -244,9 +252,9 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 			const startIndex = Coerce.number(cursor) ?? 0;
 
 			for (let i = startIndex; i < allEntities.length; i++) {
-				if (EntityConditions.check(allEntities[i], conditions) && entities.length < finalPageSize) {
+				if (EntityConditions.check(allEntities[i], conditions) && entities.length < finalLimit) {
 					entities.push(ObjectHelper.pick(allEntities[i], properties));
-					if (entities.length >= finalPageSize) {
+					if (entities.length >= finalLimit) {
 						if (i < allEntities.length - 1) {
 							nextCursor = (i + 1).toString();
 						}
