@@ -32,7 +32,7 @@ export class EntityStorageRestClient<T>
 	public static readonly CLASS_NAME: string = nameof<EntityStorageRestClient<unknown>>();
 
 	/**
-	 * Create a new instance of EntityStorageRestClient
+	 * Create a new instance of EntityStorageRestClient.
 	 * @param config The configuration for the client.
 	 */
 	constructor(config: IBaseRestClientConfig) {
