@@ -3,7 +3,8 @@
 		"postgreSqlEntityStorageConnector": {
 			"databaseCreating": "Database \"{databaseName}\" creating",
 			"databaseExists": "Database \"{databaseName}\" created or it already exists",
-			"tableExists": "Database \"{tableName}\" created or it already exists"
+			"tableCreating": "Table \"{tableName}\" creating",
+			"tableExists": "Table \"{tableName}\" created or it already exists"
 		}
 	},
 	"error": {

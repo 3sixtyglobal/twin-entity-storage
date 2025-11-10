@@ -3,7 +3,7 @@
 import path from "node:path";
 import { Coerce, Guards, Is } from "@twin.org/core";
 import * as dotenv from "dotenv";
-import type { IFirestoreEntityStorageConnectorConfig } from "../src/models/IFirestoreEntityStorageConnectorConfig";
+import type { IFirestoreEntityStorageConnectorConfig } from "../src/models/IFirestoreEntityStorageConnectorConfig.js";
 
 dotenv.config({
 	path: [path.join(__dirname, ".env"), path.join(__dirname, ".env.dev")],

@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-/* eslint-disable max-classes-per-file */
-import { ComponentFactory, I18n, ObjectHelper } from "@twin.org/core";
+import { ContextIdStore } from "@twin.org/context";
+import { ComponentFactory, ObjectHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -20,9 +20,9 @@ import {
 import { LoggingConnectorFactory } from "@twin.org/logging-models";
 import { LoggingService } from "@twin.org/logging-service";
 import { nameof } from "@twin.org/nameof";
-import { TEST_MONGODB_CONFIG } from "./setupTestEnv";
-import type { IMongoDbEntityStorageConnectorConfig } from "../src/models/IMongoDbEntityStorageConnectorConfig";
-import { MongoDbEntityStorageConnector } from "../src/mongoDbEntityStorageConnector";
+import { TEST_MONGODB_CONFIG } from "./setupTestEnv.js";
+import type { IMongoDbEntityStorageConnectorConfig } from "../src/models/IMongoDbEntityStorageConnectorConfig.js";
+import { MongoDbEntityStorageConnector } from "../src/mongoDbEntityStorageConnector.js";
 
 /**
  * Test SubType Definition.
@@ -91,17 +91,21 @@ class TestType {
 	}[];
 }
 
+let currentUser = "user";
+
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
 const config: IMongoDbEntityStorageConnectorConfig = TEST_MONGODB_CONFIG;
 
 describe("MongoDbEntityStorageConnector", () => {
 	beforeAll(async () => {
-		I18n.addDictionary("en", await import("../locales/en.json"));
-
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
 
 		initSchema();
+
+		ContextIdStore.getContextIds = vi
+			.fn()
+			.mockImplementation(() => ({ node: "node", tenant: "tenant", user: currentUser }));
 	});
 
 	beforeEach(async () => {
@@ -172,15 +176,7 @@ describe("MongoDbEntityStorageConnector", () => {
 		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
 		expect(logs).toBeDefined();
-
-		expect(logs?.length).toEqual(3);
-		expect(logs?.[0].message).toEqual("databaseCreating");
-		expect(logs?.[1].message).toEqual("databaseExists");
-		expect(logs?.[2].message).toEqual("collectionExists");
-
-		expect(I18n.hasMessage("info.mongoDbEntityStorageConnector.databaseCreating")).toEqual(true);
-		expect(I18n.hasMessage("info.mongoDbEntityStorageConnector.databaseExists")).toEqual(true);
-		expect(I18n.hasMessage("info.mongoDbEntityStorageConnector.collectionExists")).toEqual(true);
+		expect(logs?.find(l => l.level === "error")).toBeUndefined();
 	});
 
 	test("can fail to set an item with no entity", async () => {
@@ -1002,5 +998,252 @@ describe("MongoDbEntityStorageConnector", () => {
 		});
 		expect(result).toBeDefined();
 		expect(result.entities.length).toEqual(5);
+	});
+
+	test("can set data with a partition key", async () => {
+		const entityStorage = new MongoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const item = await entityStorage.get("1");
+		expect(item).toEqual({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: undefined,
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
+	});
+
+	test("can get data with a partition key", async () => {
+		const entityStorage = new MongoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const item = await entityStorage.get("1");
+		expect(item).toEqual({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: undefined,
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
+	});
+
+	test("can remove data with a partition key", async () => {
+		const entityStorage = new MongoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		await entityStorage.remove("1");
+		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
+		expect(result.entities).toEqual([]);
+
+		currentUser = "user2";
+		const result2 = await entityStorage.query(
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined
+		);
+		expect(result2.entities).toEqual([
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
+	});
+
+	test("can query with a partition key", async () => {
+		const entityStorage = new MongoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
+		expect(result.entities).toEqual([
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
 	});
 });

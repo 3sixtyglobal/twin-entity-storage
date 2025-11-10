@@ -3,7 +3,7 @@
 import path from "node:path";
 import { Guards } from "@twin.org/core";
 import * as dotenv from "dotenv";
-import type { ICosmosDbEntityStorageConnectorConfig } from "../src/models/ICosmosDbEntityStorageConnectorConfig";
+import type { ICosmosDbEntityStorageConnectorConfig } from "../src/models/ICosmosDbEntityStorageConnectorConfig.js";
 
 dotenv.config({
 	path: [path.join(__dirname, ".env"), path.join(__dirname, ".env.dev")],

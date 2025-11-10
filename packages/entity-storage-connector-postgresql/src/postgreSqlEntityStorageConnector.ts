@@ -1,7 +1,9 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
 import {
 	BaseError,
+	Coerce,
 	ComponentFactory,
 	GeneralError,
 	Guards,
@@ -16,15 +18,16 @@ import {
 	EntitySchemaPropertyType,
 	type IComparator,
 	type IEntitySchema,
+	type IEntitySchemaProperty,
 	LogicalOperator,
 	SortDirection
 } from "@twin.org/entity";
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import postgres from "postgres";
-import type { IPostgreSqlEntityStorageConnectorConfig } from "./models/IPostgreSqlEntityStorageConnectorConfig";
-import type { IPostgreSqlEntityStorageConnectorConstructorOptions } from "./models/IPostgreSqlEntityStorageConnectorConstructorOptions";
+import postgres, { type ParameterOrJSON } from "postgres";
+import type { IPostgreSqlEntityStorageConnectorConfig } from "./models/IPostgreSqlEntityStorageConnectorConfig.js";
+import type { IPostgreSqlEntityStorageConnectorConstructorOptions } from "./models/IPostgreSqlEntityStorageConnectorConstructorOptions.js";
 
 /**
  * Class for performing entity storage operations using ql.
@@ -42,10 +45,34 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
+	 * Partition id field name.
+	 * @internal
+	 */
+	private static readonly _PARTITION_KEY: string = "partitionId";
+
+	/**
+	 * Partition id field value.
+	 * @internal
+	 */
+	private static readonly _PARTITION_KEY_VALUE: string = "root";
+
+	/**
 	 * The schema for the entity.
 	 * @internal
 	 */
 	private readonly _entitySchema: IEntitySchema<T>;
+
+	/**
+	 * The keys to use from the context ids to create partitions.
+	 * @internal
+	 */
+	private readonly _partitionContextIds?: string[];
+
+	/**
+	 * The primary key property.
+	 * @internal
+	 */
+	private readonly _primaryKeyProperty: IEntitySchemaProperty<T>;
 
 	/**
 	 * The configuration for the connector.
@@ -102,6 +129,8 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 		);
 
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
+		this._partitionContextIds = options.partitionContextIds;
+		this._primaryKeyProperty = EntitySchemaHelper.getPrimaryKey(this._entitySchema);
 
 		this._config = options.config;
 	}
@@ -117,50 +146,58 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 		try {
 			const dbConnection = await this.createConnection();
 
-			await nodeLogging?.log({
-				level: "info",
-				source: PostgreSqlEntityStorageConnector.CLASS_NAME,
-				ts: Date.now(),
-				message: "databaseCreating",
-				data: {
-					databaseName: this._config.database
-				}
-			});
-
-			const res = await dbConnection.unsafe(
-				`SELECT datname FROM pg_catalog.pg_database WHERE datname = '${this._config.database}'`
-			);
-			if (res.length === 0) {
+			const databaseExists = await this.databaseExists();
+			if (!databaseExists) {
+				await nodeLogging?.log({
+					level: "info",
+					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "databaseCreating",
+					data: {
+						databaseName: this._config.database
+					}
+				});
 				await dbConnection.unsafe(`CREATE DATABASE "${this._config.database}";`);
+				await this.waitForDatabaseExists();
+			} else {
+				await nodeLogging?.log({
+					level: "info",
+					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "databaseExists",
+					data: {
+						databaseName: this._config.database
+					}
+				});
 			}
 
-			await nodeLogging?.log({
-				level: "info",
-				source: PostgreSqlEntityStorageConnector.CLASS_NAME,
-				ts: Date.now(),
-				message: "databaseExists",
-				data: {
-					databaseName: this._config.database
-				}
-			});
+			const tableExists = await this.tableExists();
 
-			const tableExistsQuery = `SELECT to_regclass('${this._config.tableName}')`;
-			const tableExistsResult = await dbConnection.unsafe(tableExistsQuery);
+			if (!tableExists) {
+				await nodeLogging?.log({
+					level: "info",
+					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "tableCreating",
+					data: {
+						tableName: this._config.tableName
+					}
+				});
 
-			if (!tableExistsResult[0].to_regclass) {
-				const createTableQuery = `CREATE TABLE IF NOT EXISTS ${this._config.tableName} (${this.mapPostgreSqlProperties(this._entitySchema)})`;
+				const createTableQuery = `CREATE TABLE ${this._config.tableName} (${this.mapPostgreSqlProperties(this._entitySchema)})`;
 				await dbConnection.unsafe(createTableQuery);
+				await this.waitForTableExists();
+			} else {
+				await nodeLogging?.log({
+					level: "info",
+					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "tableExists",
+					data: {
+						tableName: this._config.tableName
+					}
+				});
 			}
-
-			await nodeLogging?.log({
-				level: "info",
-				source: PostgreSqlEntityStorageConnector.CLASS_NAME,
-				ts: Date.now(),
-				message: "tableExists",
-				data: {
-					tableName: this._config.tableName
-				}
-			});
 		} catch (error) {
 			await nodeLogging?.log({
 				level: "error",
@@ -176,6 +213,14 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 		}
 
 		return true;
+	}
+
+	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return PostgreSqlEntityStorageConnector.CLASS_NAME;
 	}
 
 	/**
@@ -200,22 +245,27 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	): Promise<T | undefined> {
 		Guards.stringValue(PostgreSqlEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		try {
 			const dbConnection = await this.createConnection();
 
 			const whereClauses: string[] = [];
 			const values: unknown[] = [];
 
+			whereClauses.push(`"${PostgreSqlEntityStorageConnector._PARTITION_KEY}" = $1`);
+			values.push(partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE);
+
 			if (secondaryIndex) {
-				whereClauses.push(`"${String(secondaryIndex)}" = $1`);
+				whereClauses.push(`"${String(secondaryIndex)}" = $2`);
 				values.push(id);
 			} else {
-				const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
-				whereClauses.push(`"${primaryKey.property}" = $1`);
+				whereClauses.push(`"${this._primaryKeyProperty.property as string}" = $2`);
 				values.push(id);
 			}
 
-			if (conditions) {
+			if (Is.arrayValue(conditions)) {
 				for (const condition of conditions) {
 					whereClauses.push(`"${String(condition.property)}" = $${values.length + 1}`);
 					values.push(condition.value);
@@ -223,9 +273,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 			}
 
 			const query = `SELECT * FROM "${this._config.tableName}" WHERE ${whereClauses.join(" AND ")} LIMIT 1`;
+
 			const rows = await dbConnection.unsafe(query, values as postgres.ParameterOrJSON<never>[]);
 
-			if (Array.isArray(rows) && rows.length === 1) {
+			if (Is.array(rows) && rows.length === 1) {
 				if (this._entitySchema.properties) {
 					for (const prop of this._entitySchema.properties) {
 						const row = rows[0] as unknown as { [key: string]: unknown };
@@ -247,7 +298,9 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 						}
 					}
 				}
-				return rows[0] as T;
+				const entity = ObjectHelper.removeEmptyProperties(rows[0] as T, { removeNull: true });
+				ObjectHelper.propertyDelete(entity, PostgreSqlEntityStorageConnector._PARTITION_KEY);
+				return entity;
 			}
 		} catch (err) {
 			throw new GeneralError(
@@ -271,10 +324,12 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(PostgreSqlEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
-		const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
-		const id = entity[primaryKey.property as keyof T] as unknown as string;
+		const id = entity[this._primaryKeyProperty.property] as unknown as string;
 
 		try {
 			if (Is.arrayValue(conditions)) {
@@ -283,23 +338,49 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 					return;
 				}
 			}
-			const columns = Object.keys(entity as object)
-				.map(key => `"${key}"`)
-				.join(", ");
-			// eslint-disable-next-line no-confusing-arrow
-			const values = Object.values(entity as object).map(value =>
-				value === undefined ? null : value
+
+			const finalEntity = ObjectHelper.clone(entity);
+
+			const props = [...(this._entitySchema.properties ?? [])];
+			props.unshift({
+				property: PostgreSqlEntityStorageConnector._PARTITION_KEY as keyof T,
+				type: EntitySchemaPropertyType.String
+			});
+
+			ObjectHelper.propertySet(
+				finalEntity,
+				PostgreSqlEntityStorageConnector._PARTITION_KEY,
+				partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
 			);
-			const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
+
+			ObjectHelper.propertySet(
+				finalEntity,
+				PostgreSqlEntityStorageConnector._PARTITION_KEY,
+				partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
+			);
+
+			const keys: string[] = [];
+			const values: unknown[] = [];
+
+			for (const prop of props) {
+				if (!(Is.empty(finalEntity[prop.property]) && (prop.optional ?? false))) {
+					keys.push(prop.property as string);
+					if (finalEntity[prop.property] === undefined) {
+						values.push(null);
+					} else {
+						values.push(finalEntity[prop.property]);
+					}
+				}
+			}
+
+			let sql = `INSERT INTO "${this._config.tableName}"`;
+			sql += ` (${keys.map(key => `"${key}"`).join(", ")})`;
+			sql += ` VALUES (${values.map((_, i) => `$${i + 1}`).join(", ")})`;
+			sql += ` ON CONFLICT ("${PostgreSqlEntityStorageConnector._PARTITION_KEY}", "${this._primaryKeyProperty.property as string}")`;
+			sql += ` DO UPDATE SET ${keys.map(key => `"${key}" = EXCLUDED."${key}"`).join(", ")};`;
 
 			const dbConnection = await this.createConnection();
-			await dbConnection.unsafe(
-				`INSERT INTO "${this._config.tableName}" (${columns}) VALUES (${placeholders}) ON CONFLICT ("${primaryKey.property}") DO UPDATE SET ${columns
-					.split(", ")
-					.map(col => `${col} = EXCLUDED.${col}`)
-					.join(", ")};`,
-				values
-			);
+			await dbConnection.unsafe(sql, values as ParameterOrJSON<never>[]);
 		} catch (err) {
 			throw new GeneralError(
 				PostgreSqlEntityStorageConnector.CLASS_NAME,
@@ -324,23 +405,37 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	): Promise<void> {
 		Guards.stringValue(PostgreSqlEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		try {
 			const dbConnection = await this.createConnection();
 
 			const itemData = await this.get(id);
 			if (Is.notEmpty(itemData)) {
-				const values: unknown[] = [id];
-				let whereClauses: string[] = [];
+				const values: unknown[] = [];
+				const whereClauses: string[] = [];
+
+				whereClauses.push(
+					`"${this._primaryKeyProperty.property as string}" = $${values.length + 1}`
+				);
+				values.push(id);
+
+				whereClauses.push(
+					`"${PostgreSqlEntityStorageConnector._PARTITION_KEY}" = $${values.length + 1}`
+				);
+				values.push(partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE);
 
 				if (Is.arrayValue(conditions)) {
-					whereClauses = conditions.map(condition => {
-						values.push(condition.value);
-						return `"${String(condition.property)}" = $${values.length}`;
-					});
+					whereClauses.push(
+						...conditions.map(condition => {
+							values.push(condition.value);
+							return `"${String(condition.property)}" = $${values.length}`;
+						})
+					);
 				}
 
-				const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
-				const query = `DELETE FROM "${this._config.tableName}" WHERE "${primaryKey.property}" = $1${whereClauses.length > 0 ? ` AND ${whereClauses.join(" AND ")}` : ""}`;
+				const query = `DELETE FROM "${this._config.tableName}" WHERE ${whereClauses.join(" AND ")}`;
 				await dbConnection.unsafe(query, values as postgres.ParameterOrJSON<never>[]);
 			}
 		} catch (err) {
@@ -372,12 +467,15 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 		cursor?: string,
 		limit?: number
 	): Promise<{ entities: Partial<T>[]; cursor?: string }> {
-		const sql = "";
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		let sql = "";
 		try {
 			const returnSize = limit ?? PostgreSqlEntityStorageConnector._DEFAULT_LIMIT;
 
 			let orderByClause: string = "";
-			if (Array.isArray(sortProperties)) {
+			if (Is.arrayValue(sortProperties)) {
 				const orderClauses: string[] = [];
 				for (const sortProperty of sortProperties) {
 					const direction = sortProperty.sortDirection === SortDirection.Ascending ? "ASC" : "DESC";
@@ -389,13 +487,31 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 			const whereClauses: string[] = [];
 			const values: unknown[] = [];
 
-			if (conditions) {
-				this.buildQueryParameters("", conditions, whereClauses, values);
+			const finalConditions: EntityCondition<T> = {
+				conditions: [],
+				logicalOperator: LogicalOperator.And
+			};
+
+			finalConditions.conditions.push({
+				property: PostgreSqlEntityStorageConnector._PARTITION_KEY,
+				comparison: ComparisonOperator.Equals,
+				value: partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
+			});
+
+			if (!Is.empty(conditions)) {
+				finalConditions.conditions.push(conditions);
 			}
 
-			const query = `SELECT ${properties ? properties.map(p => `"${String(p)}"`).join(", ") : "*"} FROM "${this._config.tableName}" ${whereClauses.length > 0 ? `WHERE ${whereClauses.join(" AND ")}` : ""} ${orderByClause} LIMIT ${returnSize} OFFSET ${cursor ? Number(cursor) : 0}::integer`;
+			this.buildQueryParameters("", finalConditions, whereClauses, values, 1);
+
+			const startIndex = Coerce.number(cursor) ?? 0;
+
+			sql = `SELECT ${properties ? properties.map(p => `"${String(p)}"`).join(", ") : "*"} FROM "${this._config.tableName}"`;
+			sql += ` WHERE ${whereClauses.join(" AND ")}`;
+			sql += ` ${orderByClause} LIMIT ${returnSize} OFFSET ${startIndex}`;
+
 			const dbConnection = await this.createConnection();
-			const rows = await dbConnection.unsafe(query, values as postgres.ParameterOrJSON<never>[]);
+			const rows = await dbConnection.unsafe(sql, values as postgres.ParameterOrJSON<never>[]);
 
 			if (this._entitySchema.properties) {
 				for (const row of rows) {
@@ -405,7 +521,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 						if (
 							(prop.type === EntitySchemaPropertyType.Object ||
 								prop.type === EntitySchemaPropertyType.Array) &&
-							typeof row[propColumn] === "string"
+							Is.string(row[propColumn])
 						) {
 							const rowValue = JSON.parse(row[propColumn] as string);
 							delete row[propColumn];
@@ -417,11 +533,18 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 					}
 				}
 			}
+
+			const entities = rows as unknown as Partial<T>[];
+			for (let i = 0; i < entities.length; i++) {
+				ObjectHelper.propertyDelete(entities[i], PostgreSqlEntityStorageConnector._PARTITION_KEY);
+				entities[i] = ObjectHelper.removeEmptyProperties(entities[i], { removeNull: true });
+			}
+
 			return {
-				entities: rows as unknown as Partial<T>[],
+				entities,
 				cursor:
-					Array.isArray(rows) && rows.length === returnSize
-						? String((cursor ? Number(cursor) : 0) + returnSize)
+					Is.array(rows) && rows.length === returnSize
+						? Coerce.string(startIndex + returnSize)
 						: undefined
 			};
 		} catch (err) {
@@ -440,10 +563,94 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	 */
 	public async tableDrop(): Promise<void> {
 		try {
+			const tableExists = await this.tableExists();
+			if (!tableExists) {
+				return;
+			}
 			const dbConnection = await this.createConnection();
 			await dbConnection.unsafe(`DROP TABLE ${this._config.tableName};`);
+
+			await this.waitForTableNotExists();
 		} catch {
 			// Ignore errors
+		}
+	}
+
+	/**
+	 * Check if the database exists.
+	 * @returns True if the database exists, false otherwise.
+	 * @internal
+	 */
+	private async databaseExists(): Promise<boolean> {
+		try {
+			const dbConnection = await this.createConnection();
+			const res = await dbConnection.unsafe(
+				`SELECT datname FROM pg_catalog.pg_database WHERE datname = '${this._config.database}'`
+			);
+			return res.length > 0;
+		} catch {
+			return false;
+		}
+	}
+
+	/**
+	 * Wait for a database to exist.
+	 * @returns Nothing.
+	 * @internal
+	 */
+	private async waitForDatabaseExists(): Promise<void> {
+		for (let attempt = 0; attempt < 20; attempt++) {
+			const databaseExists = await this.databaseExists();
+			if (databaseExists) {
+				break;
+			}
+			await new Promise(resolve => setTimeout(resolve, 250));
+		}
+	}
+
+	/**
+	 * Check if the table exists.
+	 * @returns True if the table exists, false otherwise.
+	 * @internal
+	 */
+	private async tableExists(): Promise<boolean> {
+		try {
+			const dbConnection = await this.createConnection();
+			const tableExistsQuery = `SELECT to_regclass('${this._config.tableName}')`;
+			const tableExistsResult = await dbConnection.unsafe(tableExistsQuery);
+			return tableExistsResult[0].to_regclass !== null;
+		} catch {
+			return false;
+		}
+	}
+
+	/**
+	 * Wait for a table to exist.
+	 * @returns Nothing.
+	 * @internal
+	 */
+	private async waitForTableExists(): Promise<void> {
+		for (let attempt = 0; attempt < 20; attempt++) {
+			const tableExists = await this.tableExists();
+			if (tableExists) {
+				break;
+			}
+			await new Promise(resolve => setTimeout(resolve, 250));
+		}
+	}
+
+	/**
+	 * Wait for a table to not exist.
+	 * @returns Nothing.
+	 * @internal
+	 */
+	private async waitForTableNotExists(): Promise<void> {
+		for (let attempt = 0; attempt < 20; attempt++) {
+			const tableExists = await this.tableExists();
+			if (!tableExists) {
+				break;
+			}
+			await new Promise(resolve => setTimeout(resolve, 250));
 		}
 	}
 
@@ -453,12 +660,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	 * @internal
 	 */
 	private async createConnection(): Promise<postgres.Sql> {
-		if (this._connection) {
-			return this._connection;
+		if (Is.empty(this._connection)) {
+			this._connection = postgres(this.createConnectionConfig());
 		}
-		const newConnection = await postgres(this.createConnectionConfig());
-		this._connection = newConnection;
-		return newConnection;
+		return this._connection;
 	}
 
 	/**
@@ -481,13 +686,15 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	 * @param condition The conditions to create the query from.
 	 * @param whereClauses The where clauses to use in the query.
 	 * @param values The values to use in the query.
+	 * @param valueIndex The current value index.
 	 * @internal
 	 */
 	private buildQueryParameters(
 		objectPath: string,
 		condition: EntityCondition<T> | undefined,
 		whereClauses: string[],
-		values: unknown[]
+		values: unknown[],
+		valueIndex: number
 	): void {
 		if (Is.undefined(condition)) {
 			return;
@@ -500,8 +707,9 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 			const joinConditions: string[] = condition.conditions.map(c => {
 				const subWhereClauses: string[] = [];
 				const subValues: unknown[] = [];
-				this.buildQueryParameters(objectPath, c, subWhereClauses, subValues);
+				this.buildQueryParameters(objectPath, c, subWhereClauses, subValues, valueIndex);
 				values.push(...subValues);
+				valueIndex += subValues.length;
 				return subWhereClauses.join(" AND ");
 			});
 
@@ -515,7 +723,13 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 		}
 
 		const schemaProp = this._entitySchema.properties?.find(p => p.property === condition.property);
-		const comparison = this.mapComparisonOperator(objectPath, condition, schemaProp?.type, values);
+		const comparison = this.mapComparisonOperator(
+			objectPath,
+			condition,
+			schemaProp?.type,
+			values,
+			valueIndex
+		);
 		whereClauses.push(comparison);
 	}
 
@@ -525,6 +739,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	 * @param comparator The operator to map.
 	 * @param type The type of the property.
 	 * @param values The values to use in the query.
+	 * @param valueIndex The current value index.
 	 * @returns The comparison expression.
 	 * @throws GeneralError if the comparison operator is not supported.
 	 * @internal
@@ -533,21 +748,20 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 		objectPath: string,
 		comparator: IComparator,
 		type: EntitySchemaPropertyType | undefined,
-		values: unknown[]
+		values: unknown[],
+		valueIndex: number
 	): string {
 		let prop = objectPath;
 		if (prop.length > 0) {
 			prop += ".";
 		}
 
-		prop += comparator.property as string;
+		prop += comparator.property;
 
 		if (comparator.comparison === ComparisonOperator.In) {
-			const inValues = Array.isArray(comparator.value) ? comparator.value : [comparator.value];
+			const inValues = Is.array(comparator.value) ? comparator.value : [comparator.value];
 			values.push(...inValues.map(val => this.propertyToDbValue(val, type)));
-			const placeholders = inValues
-				.map((_, index) => `$${values.length - inValues.length + index + 1}`)
-				.join(", ");
+			const placeholders = inValues.map((_, index) => `$${valueIndex + index}`).join(", ");
 			return `"${prop}" IN (${placeholders})`;
 		}
 		const dbValue = this.propertyToDbValue(comparator.value, type);
@@ -559,21 +773,21 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 				.slice(1)
 				.map((p, i, arr) => (i === arr.length - 1 ? `->> '${p}'` : `-> '${p}'`))
 				.join("");
-			return `("${comparator.property.split(".")[0]}"::jsonb ${jsonPath}) = $${values.length}`;
+			return `("${comparator.property.split(".")[0]}"::jsonb ${jsonPath}) = $${valueIndex}`;
 		} else if (comparator.comparison === ComparisonOperator.Equals) {
-			return `"${prop}" = $${values.length}`;
+			return `"${prop}" = $${valueIndex}`;
 		} else if (comparator.comparison === ComparisonOperator.NotEquals) {
-			return `"${prop}" <> $${values.length}`;
+			return `"${prop}" <> $${valueIndex}`;
 		} else if (comparator.comparison === ComparisonOperator.GreaterThan) {
-			return `"${prop}" > $${values.length}`;
+			return `"${prop}" > $${valueIndex}`;
 		} else if (comparator.comparison === ComparisonOperator.LessThan) {
-			return `"${prop}" < $${values.length}`;
+			return `"${prop}" < $${valueIndex}`;
 		} else if (comparator.comparison === ComparisonOperator.GreaterThanOrEqual) {
-			return `"${prop}" >= $${values.length}`;
+			return `"${prop}" >= $${valueIndex}`;
 		} else if (comparator.comparison === ComparisonOperator.LessThanOrEqual) {
-			return `"${prop}" <= $${values.length}`;
+			return `"${prop}" <= $${valueIndex}`;
 		} else if (comparator.comparison === ComparisonOperator.Includes) {
-			return `EXISTS (SELECT 1 FROM jsonb_array_elements("${prop}") elem WHERE elem @> $${values.length}::jsonb)`;
+			return `EXISTS (SELECT 1 FROM jsonb_array_elements("${prop}") elem WHERE elem @> $${valueIndex}::jsonb)`;
 		}
 
 		throw new GeneralError(PostgreSqlEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {
@@ -664,7 +878,16 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 
 		const primaryKeys: string[] = [];
 
-		const columnDefinitions = entitySchema.properties
+		const props: IEntitySchemaProperty<T>[] = [...entitySchema.properties];
+
+		props.unshift({
+			property: PostgreSqlEntityStorageConnector._PARTITION_KEY as keyof T,
+			type: EntitySchemaPropertyType.String,
+			optional: false,
+			isPrimary: true
+		});
+
+		const columnDefinitions = props
 			.map(prop => {
 				const sqlType = sqlTypeMap[prop.type] || "TEXT";
 				const columnName = String(prop.property);
@@ -679,7 +902,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 			.join(", ");
 
 		const primaryKeyDefinition =
-			primaryKeys.length > 0 ? `, PRIMARY KEY (${primaryKeys.join(", ")})` : "";
+			primaryKeys.length > 0 ? `, PRIMARY KEY ("${primaryKeys.join('", "')}")` : "";
 		return columnDefinitions + primaryKeyDefinition;
 	}
 }

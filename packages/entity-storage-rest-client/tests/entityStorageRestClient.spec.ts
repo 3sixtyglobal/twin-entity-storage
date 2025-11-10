@@ -1,6 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { EntityStorageRestClient } from "../src/entityStorageRestClient";
+import { EntityStorageRestClient } from "../src/entityStorageRestClient.js";
 
 describe("EntityStorageRestClient", () => {
 	test("Can create an instance", async () => {

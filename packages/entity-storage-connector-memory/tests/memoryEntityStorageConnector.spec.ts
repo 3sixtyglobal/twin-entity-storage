@@ -1,6 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-/* eslint-disable max-classes-per-file */
+import { ContextIdStore } from "@twin.org/context";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -10,7 +10,7 @@ import {
 	property
 } from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
-import { MemoryEntityStorageConnector } from "../src/memoryEntityStorageConnector";
+import { MemoryEntityStorageConnector } from "../src/memoryEntityStorageConnector.js";
 
 /**
  * Test SubType Definition.
@@ -73,9 +73,15 @@ class TestType {
 	}[];
 }
 
+let currentUser = "user";
+
 describe("MemoryEntityStorageConnector", () => {
 	beforeAll(async () => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
+
+		ContextIdStore.getContextIds = vi
+			.fn()
+			.mockImplementation(() => ({ node: "node", tenant: "tenant", user: currentUser }));
 	});
 
 	test("can fail to construct when there are no options", async () => {
@@ -504,5 +510,259 @@ describe("MemoryEntityStorageConnector", () => {
 		});
 		expect(result).toBeDefined();
 		expect(result.entities.length).toEqual(5);
+	});
+
+	test("can set data with a partition key", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"]
+		});
+
+		currentUser = "user";
+
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		console.log(JSON.stringify(entityStorage.getStore(), null, 2));
+
+		expect(entityStorage.getStore()).toEqual([
+			{
+				partitionId: "node/tenant/user",
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			{
+				partitionId: "node/tenant/user2",
+				id: "1",
+				value1: "bbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
+	});
+
+	test("can get data with a partition key", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"]
+		});
+
+		currentUser = "user";
+
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbb",
+				value2: 8888,
+				value3: { field1: new Date().toISOString() },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+
+		const item = await entityStorage.get("1");
+		expect(item).toEqual({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: undefined,
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
+	});
+
+	test("can remove data with a partition key", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"]
+		});
+
+		currentUser = "user";
+
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbb",
+				value2: 8888,
+				value3: { field1: new Date().toISOString() },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		await entityStorage.remove("1");
+		expect(entityStorage.getStore()).toEqual([
+			{
+				partitionId: "node/tenant/user2",
+				id: "1",
+				value1: "bbb",
+				value2: 8888,
+				value3: { field1: expect.any(String) },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
+	});
+
+	test("can query with a partition key", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"]
+		});
+
+		currentUser = "user";
+
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
+		expect(result.entities).toEqual([
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
 	});
 });

@@ -1,6 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { Guards, Is, NotFoundError, ObjectHelper } from "@twin.org/core";
+import { Guards, Is, NotFoundError } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	type EntityCondition,
@@ -14,7 +14,7 @@ import {
 	type IEntityStorageConnector
 } from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
-import type { IEntityStorageServiceConstructorOptions } from "./models/IEntityStorageServiceConstructorOptions";
+import type { IEntityStorageServiceConstructorOptions } from "./models/IEntityStorageServiceConstructorOptions.js";
 
 /**
  * Class for performing entity service operations.
@@ -33,12 +33,6 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 	private readonly _entityStorage: IEntityStorageConnector<T>;
 
 	/**
-	 * Include the user identity when performing storage operations, this allow separation of data per user, default to false.
-	 * @internal
-	 */
-	private readonly _partitionPerUser: boolean;
-
-	/**
 	 * Create a new instance of EntityStorageService.
 	 * @param options The dependencies for the entity storage service.
 	 */
@@ -51,73 +45,48 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 		this._entityStorage = EntityStorageConnectorFactory.get<IEntityStorageConnector<T>>(
 			options.entityStorageType
 		);
-		this._partitionPerUser = options.config?.partitionPerUser ?? false;
+	}
+
+	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return EntityStorageService.CLASS_NAME;
 	}
 
 	/**
 	 * Set an entity.
 	 * @param entity The entity to set.
-	 * @param userIdentity The user identity to use with storage operations.
 	 * @returns The id of the entity.
 	 */
-	public async set(entity: T, userIdentity?: string): Promise<void> {
+	public async set(entity: T): Promise<void> {
 		Guards.object(EntityStorageService.CLASS_NAME, nameof(entity), entity);
 
-		const conditions: {
-			property: keyof T;
-			value: unknown;
-		}[] = [];
-		if (this._partitionPerUser) {
-			Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(userIdentity), userIdentity);
-			conditions.push({
-				property: "userIdentity" as keyof T,
-				value: userIdentity
-			});
-			ObjectHelper.propertySet(entity, "userIdentity", userIdentity);
-		}
-
-		return this._entityStorage.set(entity, conditions);
+		return this._entityStorage.set(entity, undefined);
 	}
 
 	/**
 	 * Get an entity.
 	 * @param id The id of the entity to get, or the index value if secondaryIndex is set.
 	 * @param secondaryIndex Get the item using a secondary index.
-	 * @param userIdentity The user identity to use with storage operations.
 	 * @returns The object if it can be found or undefined.
 	 */
-	public async get(
-		id: string,
-		secondaryIndex?: keyof T,
-		userIdentity?: string
-	): Promise<T | undefined> {
+	public async get(id: string, secondaryIndex?: keyof T): Promise<T | undefined> {
 		Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(id), id);
 
-		return this.internalGet(id, secondaryIndex, userIdentity);
+		return this.internalGet(id, secondaryIndex);
 	}
 
 	/**
 	 * Remove the entity.
 	 * @param id The id of the entity to remove.
-	 * @param userIdentity The user identity to use with storage operations.
 	 * @returns Nothing.
 	 */
-	public async remove(id: string, userIdentity?: string): Promise<void> {
+	public async remove(id: string): Promise<void> {
 		Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(id), id);
 
-		const conditions: {
-			property: keyof T;
-			value: unknown;
-		}[] = [];
-		if (this._partitionPerUser) {
-			Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(userIdentity), userIdentity);
-			conditions.push({
-				property: "userIdentity" as keyof T,
-				value: userIdentity
-			});
-		}
-
-		await this._entityStorage.remove(id, conditions);
+		await this._entityStorage.remove(id);
 	}
 
 	/**
@@ -128,7 +97,6 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 	 * @param properties The optional properties to return, defaults to all.
 	 * @param cursor The cursor to request the next chunk of entities.
 	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
-	 * @param userIdentity The user identity to use with storage operations.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -138,8 +106,7 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 		orderByDirection?: SortDirection,
 		properties?: (keyof T)[],
 		cursor?: string,
-		limit?: number,
-		userIdentity?: string
+		limit?: number
 	): Promise<{
 		/**
 		 * The entities, which can be partial if a limited keys list was provided.
@@ -150,26 +117,8 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 		 */
 		cursor?: string;
 	}> {
-		const finalConditions: EntityCondition<T> = {
-			conditions: [],
-			logicalOperator: LogicalOperator.And
-		};
-
-		if (this._partitionPerUser) {
-			Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(userIdentity), userIdentity);
-			finalConditions.conditions.push({
-				property: "userIdentity",
-				comparison: ComparisonOperator.Equals,
-				value: userIdentity
-			});
-		}
-
-		if (!Is.empty(conditions)) {
-			finalConditions.conditions.push(conditions);
-		}
-
 		const result = await this._entityStorage.query(
-			finalConditions.conditions.length > 0 ? finalConditions : undefined,
+			conditions,
 			Is.stringValue(orderBy)
 				? [{ property: orderBy, sortDirection: orderByDirection ?? SortDirection.Ascending }]
 				: undefined,
@@ -178,10 +127,6 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 			limit
 		);
 
-		for (const entity of result.entities) {
-			ObjectHelper.propertyDelete(entity, "userIdentity");
-		}
-
 		return result;
 	}
 
@@ -189,25 +134,12 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 	 * Get an entity.
 	 * @param id The id of the entity to get, or the index value if secondaryIndex is set.
 	 * @param secondaryIndex Get the item using a secondary index.
-	 * @param userIdentity The user identity to use with storage operations.
 	 * @returns The object if it can be found or throws.
 	 * @internal
 	 */
-	private async internalGet(
-		id: string,
-		secondaryIndex?: keyof T,
-		userIdentity?: string
-	): Promise<T> {
+	private async internalGet(id: string, secondaryIndex?: keyof T): Promise<T> {
 		const conditions: EntityCondition<T>[] = [];
 
-		if (this._partitionPerUser) {
-			Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(userIdentity), userIdentity);
-			conditions.push({
-				property: "userIdentity",
-				comparison: ComparisonOperator.Equals,
-				value: userIdentity
-			});
-		}
 		if (Is.stringValue(secondaryIndex)) {
 			conditions.push({
 				property: secondaryIndex,
@@ -248,8 +180,6 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 		if (Is.empty(entity)) {
 			throw new NotFoundError(EntityStorageService.CLASS_NAME, "entityNotFound", id);
 		}
-
-		ObjectHelper.propertyDelete(entity, "userIdentity");
 
 		return entity;
 	}

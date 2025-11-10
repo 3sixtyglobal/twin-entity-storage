@@ -1,5 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
 import { Coerce, Guards, Is, ObjectHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
@@ -7,6 +8,7 @@ import {
 	EntitySchemaFactory,
 	EntitySchemaHelper,
 	EntitySorter,
+	LogicalOperator,
 	type EntityCondition,
 	type IEntitySchema,
 	type IEntitySchemaProperty,
@@ -14,7 +16,7 @@ import {
 } from "@twin.org/entity";
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
-import type { IMemoryEntityStorageConnectorConstructorOptions } from "./models/IMemoryEntityStorageConnectorConstructorOptions";
+import type { IMemoryEntityStorageConnectorConstructorOptions } from "./models/IMemoryEntityStorageConnectorConstructorOptions.js";
 
 /**
  * Class for performing entity storage operations in-memory.
@@ -32,10 +34,22 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
+	 * Partition key for the operation.
+	 * @internal
+	 */
+	private static readonly _PARTITION_KEY: string = "partitionId";
+
+	/**
 	 * The schema for the entity.
 	 * @internal
 	 */
 	private readonly _entitySchema: IEntitySchema<T>;
+
+	/**
+	 * The keys to use from the context ids to create partitions.
+	 * @internal
+	 */
+	private readonly _partitionContextIds?: string[];
 
 	/**
 	 * The primary key.
@@ -61,8 +75,17 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 			options.entitySchema
 		);
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
+		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 		this._store = [];
+	}
+
+	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return MemoryEntityStorageConnector.CLASS_NAME;
 	}
 
 	/**
@@ -87,8 +110,25 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 	): Promise<T | undefined> {
 		Guards.stringValue(MemoryEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
-		const index = this.findItem(id, secondaryIndex, conditions);
-		return index >= 0 ? this._store[index] : undefined;
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const finalConditions = conditions ?? [];
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.push({
+				property: MemoryEntityStorageConnector._PARTITION_KEY as keyof T,
+				value: partitionKey
+			});
+		}
+
+		const index = this.findItem(id, secondaryIndex, finalConditions);
+		const item = index >= 0 ? ObjectHelper.clone(this._store[index]) : undefined;
+
+		if (Is.objectValue(item)) {
+			ObjectHelper.propertyDelete(item, MemoryEntityStorageConnector._PARTITION_KEY);
+		}
+
+		return item;
 	}
 
 	/**
@@ -100,17 +140,35 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(MemoryEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
+		const finalConditions = conditions ?? [];
+		const finalEntity = ObjectHelper.clone(entity);
+
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.push({
+				property: MemoryEntityStorageConnector._PARTITION_KEY as keyof T,
+				value: partitionKey
+			});
+			ObjectHelper.propertySet(
+				finalEntity,
+				MemoryEntityStorageConnector._PARTITION_KEY,
+				partitionKey
+			);
+		}
+
 		const existingIndex = this.findItem(
-			entity[this._primaryKey.property] as string,
+			finalEntity[this._primaryKey.property] as string,
 			undefined,
-			conditions
+			finalConditions
 		);
 		if (existingIndex >= 0) {
-			this._store[existingIndex] = entity;
+			this._store[existingIndex] = finalEntity;
 		} else {
-			this._store.push(entity);
+			this._store.push(finalEntity);
 		}
 	}
 
@@ -126,7 +184,18 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 	): Promise<void> {
 		Guards.stringValue(MemoryEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
-		const index = this.findItem(id, undefined, conditions);
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const finalConditions = conditions ?? [];
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.push({
+				property: MemoryEntityStorageConnector._PARTITION_KEY as keyof T,
+				value: partitionKey
+			});
+		}
+
+		const index = this.findItem(id, undefined, finalConditions);
 
 		if (index >= 0) {
 			this._store.splice(index, 1);
@@ -162,7 +231,27 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		 */
 		cursor?: string;
 	}> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		let allEntities = this._store.slice();
+
+		const finalConditions: EntityCondition<T> = {
+			conditions: [],
+			logicalOperator: LogicalOperator.And
+		};
+
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.conditions.push({
+				property: MemoryEntityStorageConnector._PARTITION_KEY,
+				comparison: ComparisonOperator.Equals,
+				value: partitionKey
+			});
+		}
+
+		if (!Is.empty(conditions)) {
+			finalConditions.conditions.push(conditions);
+		}
 
 		const entities = [];
 		const finalLimit = limit ?? MemoryEntityStorageConnector._DEFAULT_LIMIT;
@@ -178,8 +267,13 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 			const startIndex = Coerce.number(cursor) ?? 0;
 
 			for (let i = startIndex; i < allEntities.length; i++) {
-				if (EntityConditions.check(allEntities[i], conditions) && entities.length < finalLimit) {
-					entities.push(ObjectHelper.pick(allEntities[i], properties));
+				if (
+					EntityConditions.check(allEntities[i], finalConditions) &&
+					entities.length < finalLimit
+				) {
+					const entity = ObjectHelper.clone(ObjectHelper.pick(allEntities[i], properties));
+					ObjectHelper.propertyDelete(entity, MemoryEntityStorageConnector._PARTITION_KEY);
+					entities.push(entity);
 					if (entities.length >= finalLimit) {
 						if (i < allEntities.length - 1) {
 							nextCursor = (i + 1).toString();

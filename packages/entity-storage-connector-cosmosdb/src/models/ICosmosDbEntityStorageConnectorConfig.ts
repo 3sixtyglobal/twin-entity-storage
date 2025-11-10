@@ -24,4 +24,9 @@ export interface ICosmosDbEntityStorageConnectorConfig {
 	 * The ID of the container for the storage.
 	 */
 	containerId: string;
+
+	/**
+	 * The offer throughput for the container.
+	 */
+	offerThroughput?: number;
 }

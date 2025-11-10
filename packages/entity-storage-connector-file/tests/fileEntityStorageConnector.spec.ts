@@ -1,7 +1,8 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { readFile, rm } from "node:fs/promises";
-import { ComponentFactory, Converter, I18n, RandomHelper } from "@twin.org/core";
+import { ContextIdStore } from "@twin.org/context";
+import { ComponentFactory, Converter, RandomHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -20,8 +21,8 @@ import {
 import { LoggingConnectorFactory } from "@twin.org/logging-models";
 import { LoggingService } from "@twin.org/logging-service";
 import { nameof } from "@twin.org/nameof";
-import { FileEntityStorageConnector } from "../src/fileEntityStorageConnector";
-import type { IFileEntityStorageConnectorConfig } from "../src/models/IFileEntityStorageConnectorConfig";
+import { FileEntityStorageConnector } from "../src/fileEntityStorageConnector.js";
+import type { IFileEntityStorageConnectorConfig } from "../src/models/IFileEntityStorageConnectorConfig.js";
 
 /**
  * Test Type Definition.
@@ -47,6 +48,8 @@ class TestType {
 	public value2!: string;
 }
 
+let currentUser = "user";
+
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
 
 const TEST_DIRECTORY_ROOT = "./.tmp/";
@@ -55,10 +58,12 @@ const TEST_STORE_NAME = `${TEST_DIRECTORY}/store.json`;
 
 describe("FileEntityStorageConnector", () => {
 	beforeAll(async () => {
-		I18n.addDictionary("en", await import("../locales/en.json"));
-
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 		initSchema();
+
+		ContextIdStore.getContextIds = vi
+			.fn()
+			.mockImplementation(() => ({ node: "node", tenant: "tenant", user: currentUser }));
 	});
 
 	beforeEach(() => {
@@ -184,8 +189,6 @@ describe("FileEntityStorageConnector", () => {
 		expect(logs?.length).toEqual(2);
 		expect(logs?.[0].message).toEqual("directoryCreating");
 		expect(logs?.[1].message).toEqual("directoryCreateFailed");
-		expect(I18n.hasMessage("info.fileEntityStorageConnector.directoryCreating")).toEqual(true);
-		expect(I18n.hasMessage("error.fileEntityStorageConnector.directoryCreateFailed")).toEqual(true);
 	});
 
 	test("can bootstrap and create directory", async () => {
@@ -201,8 +204,6 @@ describe("FileEntityStorageConnector", () => {
 		expect(logs?.length).toEqual(2);
 		expect(logs?.[0].message).toEqual("directoryCreating");
 		expect(logs?.[1].message).toEqual("directoryCreated");
-		expect(I18n.hasMessage("info.fileEntityStorageConnector.directoryCreating")).toEqual(true);
-		expect(I18n.hasMessage("info.fileEntityStorageConnector.directoryCreated")).toEqual(true);
 	});
 
 	test("can bootstrap and skip existing directory", async () => {
@@ -218,7 +219,6 @@ describe("FileEntityStorageConnector", () => {
 		expect(logs).toBeDefined();
 		expect(logs?.length).toEqual(3);
 		expect(logs?.[2].message).toEqual("directoryExists");
-		expect(I18n.hasMessage("info.fileEntityStorageConnector.directoryExists")).toEqual(true);
 	});
 
 	test("can fail to set an item with no entity", async () => {
@@ -558,5 +558,170 @@ describe("FileEntityStorageConnector", () => {
 		expect(result.entities[0].id).toEqual("1");
 		expect(result.entities[0].value1).toEqual("aaa");
 		expect(result.entities[0].value2).toBeUndefined();
+	});
+
+	test("can set data with a partition key", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: "7777"
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbb",
+				value2: "8888"
+			},
+			undefined
+		);
+
+		const file = await readFile(TEST_STORE_NAME, "utf8");
+		const store = JSON.parse(file);
+		expect(store).toEqual([
+			{
+				partitionId: "node/tenant/user",
+				id: "1",
+				value1: "aaa",
+				value2: "7777"
+			},
+			{
+				partitionId: "node/tenant/user2",
+				id: "1",
+				value1: "bbb",
+				value2: "8888"
+			}
+		]);
+	});
+
+	test("can get data with a partition key", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: "7777"
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbb",
+				value2: "8888"
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const item = await entityStorage.get("1");
+		expect(item).toEqual({
+			id: "1",
+			value1: "aaa",
+			value2: "7777"
+		});
+	});
+
+	test("can remove data with a partition key", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: "7777"
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbb",
+				value2: "8888"
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		await entityStorage.remove("1");
+
+		const file = await readFile(TEST_STORE_NAME, "utf8");
+		const store = JSON.parse(file);
+		expect(store).toEqual([
+			{
+				id: "1",
+				partitionId: "node/tenant/user2",
+				value1: "bbb",
+				value2: "8888"
+			}
+		]);
+	});
+
+	test("can query with a partition key", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: "7777"
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: "8888"
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
+		expect(result.entities).toEqual([
+			{
+				id: "1",
+				value1: "aaa",
+				value2: "7777"
+			}
+		]);
 	});
 });

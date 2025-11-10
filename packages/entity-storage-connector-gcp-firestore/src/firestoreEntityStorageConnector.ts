@@ -1,13 +1,12 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import {
-	type CollectionReference,
-	type DocumentData,
 	type DocumentSnapshot,
 	Firestore,
 	type Query,
 	type Settings
 } from "@google-cloud/firestore";
+import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
 import {
 	BaseError,
 	ComponentFactory,
@@ -20,6 +19,7 @@ import {
 import {
 	ComparisonOperator,
 	type EntityCondition,
+	EntityConditions,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
 	type IEntitySchema,
@@ -30,10 +30,8 @@ import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import type { JWTInput } from "google-auth-library";
-import type { IEntityWithIndexing } from "./models/IEntityWithIndexing";
-import type { IFirestoreEntityStorageConnectorConfig } from "./models/IFirestoreEntityStorageConnectorConfig";
-import type { IFirestoreEntityStorageConnectorConstructorOptions } from "./models/IFirestoreEntityStorageConnectorConstructorOptions";
-import type { IValueType } from "./models/IValueType";
+import type { IFirestoreEntityStorageConnectorConfig } from "./models/IFirestoreEntityStorageConnectorConfig.js";
+import type { IFirestoreEntityStorageConnectorConstructorOptions } from "./models/IFirestoreEntityStorageConnectorConstructorOptions.js";
 
 /**
  * Class for performing entity storage operations using Firestore.
@@ -57,6 +55,12 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	private readonly _entitySchema: IEntitySchema<T>;
 
 	/**
+	 * The keys to use from the context ids to create partitions.
+	 * @internal
+	 */
+	private readonly _partitionContextIds?: string[];
+
+	/**
 	 * The primary key.
 	 * @internal
 	 */
@@ -73,12 +77,6 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	 * @internal
 	 */
 	private readonly _firestoreClient: Firestore;
-
-	/**
-	 * The Firestore collection.
-	 * @internal
-	 */
-	private readonly _collection: CollectionReference;
 
 	/**
 	 * Create a new instance of FirestoreEntityStorageConnector.
@@ -121,6 +119,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 
 		this._config = options.config;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
+		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 
 		const firestoreOptions: Settings = {
@@ -138,7 +137,22 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		}
 
 		this._firestoreClient = new Firestore(firestoreOptions);
-		this._collection = this._firestoreClient.collection(this._config.collectionName);
+	}
+
+	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return FirestoreEntityStorageConnector.CLASS_NAME;
+	}
+
+	/**
+	 * Get the schema for the entities.
+	 * @returns The schema for the entities.
+	 */
+	public getSchema(): IEntitySchema {
+		return this._entitySchema as IEntitySchema;
 	}
 
 	/**
@@ -196,14 +210,6 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	}
 
 	/**
-	 * Get the schema for the entities.
-	 * @returns The schema for the entities.
-	 */
-	public getSchema(): IEntitySchema {
-		return this._entitySchema as IEntitySchema;
-	}
-
-	/**
 	 * Get an entity.
 	 * @param id The id of the entity to get.
 	 * @param secondaryIndex The optional secondary index to use.
@@ -217,9 +223,14 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	): Promise<T | undefined> {
 		Guards.stringValue(FirestoreEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		try {
-			if (!Is.stringValue(secondaryIndex) && !Is.arrayValue(conditions)) {
-				const docRef = this._collection.doc(id);
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+
+			if (!Is.arrayValue(conditions)) {
+				const docRef = collection.doc(id);
 				const doc = await docRef.get();
 
 				if (doc.exists) {
@@ -227,8 +238,8 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 				}
 			}
 
-			// Use secondaryIndex and/or conditions to construct a query
-			let query: Query = this._collection;
+			// Use conditions to construct a query
+			let query: Query = collection;
 
 			if (secondaryIndex) {
 				query = query.where(secondaryIndex as string, "==", id);
@@ -245,7 +256,8 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 
 			const querySnapshot = await query.limit(1).get();
 			if (!querySnapshot.empty) {
-				return querySnapshot.docs[0].data() as T;
+				const entity = querySnapshot.docs[0].data() as T;
+				return entity;
 			}
 		} catch (err) {
 			throw new GeneralError(
@@ -266,44 +278,39 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object(FirestoreEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
 		try {
-			const id = entity[this._primaryKey.property as keyof T] as string;
+			const id = entity[this._primaryKey.property] as string;
 
-			const entityCopy = { ...entity } as T & Partial<IEntityWithIndexing>;
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
 
-			// Handle indexing field
-			if (entityCopy.valueArray && Is.array(entityCopy.valueArray)) {
-				const valueArrayFields = entityCopy.valueArray
-					.filter((item): item is IValueType => Is.notEmpty(item))
-					.map(item => `${item.field}:${item.value}`);
-				entityCopy.valueArrayFields = valueArrayFields;
-			}
-
-			const docRef = this._collection.doc(id);
+			const docRef = collection.doc(id);
 
 			if (!Is.arrayValue(conditions)) {
-				await docRef.set(entityCopy as DocumentData);
+				await docRef.set(entity);
 			} else {
 				await this._firestoreClient.runTransaction(async transaction => {
 					const docSnapshot = await transaction.get(docRef);
 
 					if (!docSnapshot.exists) {
-						transaction.set(docRef, entityCopy as DocumentData);
+						transaction.set(docRef, entity);
 					} else {
 						const data = docSnapshot.data() as T;
 
-						let conditionsMet = true;
-						for (const condition of conditions) {
-							if (data[condition.property] !== condition.value) {
-								conditionsMet = false;
-								break;
-							}
-						}
-
-						if (conditionsMet) {
-							transaction.set(docRef, entityCopy as DocumentData);
+						if (
+							EntityConditions.check(data, {
+								conditions: conditions.map(c => ({
+									property: c.property as string,
+									comparison: ComparisonOperator.Equals,
+									value: c.value
+								}))
+							})
+						) {
+							transaction.set(docRef, entity);
 						}
 					}
 				});
@@ -330,8 +337,12 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	): Promise<void> {
 		Guards.stringValue(FirestoreEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		try {
-			const docRef = this._collection.doc(id);
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const docRef = collection.doc(id);
 
 			if (!Is.arrayValue(conditions)) {
 				await docRef.delete();
@@ -341,15 +352,15 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 
 					if (docSnapshot.exists) {
 						const data = docSnapshot.data() as T;
-						let conditionsMet = true;
-						for (const condition of conditions) {
-							if (data[condition.property] !== condition.value) {
-								conditionsMet = false;
-								break;
-							}
-						}
-
-						if (conditionsMet) {
+						if (
+							EntityConditions.check(data, {
+								conditions: conditions.map(c => ({
+									property: c.property as string,
+									comparison: ComparisonOperator.Equals,
+									value: c.value
+								}))
+							})
+						) {
 							transaction.delete(docRef);
 						}
 					}
@@ -392,10 +403,14 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	}> {
 		const queryDescription: string[] = [];
 
-		try {
-			let query = this._collection as Query;
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-			if (conditions) {
+		try {
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			let query = collection as Query;
+
+			if (!Is.empty(conditions)) {
 				query = this.applyConditions(query, conditions);
 				queryDescription.push(`Conditions: ${JSON.stringify(conditions)}`);
 			}
@@ -455,7 +470,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	 * @internal
 	 */
 	public async collectionDelete(): Promise<void> {
-		const collection = this._collection;
+		const collection = this._firestoreClient.collection(this.collectionName());
 		const batchSize = 500;
 		const query = collection.limit(batchSize);
 
@@ -490,21 +505,22 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		const { property, value, comparison } = condition;
 		switch (comparison) {
 			case ComparisonOperator.Equals:
-				return query.where(property as string, "==", value);
+				return query.where(property, "==", value);
 			case ComparisonOperator.NotEquals:
-				return query.where(property as string, "!=", value);
+				return query.where(property, "!=", value);
 			case ComparisonOperator.GreaterThan:
-				return query.where(property as string, ">", value);
+				return query.where(property, ">", value);
 			case ComparisonOperator.LessThan:
-				return query.where(property as string, "<", value);
+				return query.where(property, "<", value);
 			case ComparisonOperator.GreaterThanOrEqual:
-				return query.where(property as string, ">=", value);
+				return query.where(property, ">=", value);
 			case ComparisonOperator.LessThanOrEqual:
-				return query.where(property as string, "<=", value);
+				return query.where(property, "<=", value);
 			case ComparisonOperator.In:
-				return query.where(property as string, "in", value as unknown[]);
+				return query.where(property, "in", value as unknown[]);
 			case ComparisonOperator.Includes:
-				return query.where(property as string, "array-contains", value);
+				return query.where(property, "array-contains", value);
+			case ComparisonOperator.NotIncludes:
 			default:
 				throw new GeneralError(
 					FirestoreEntityStorageConnector.CLASS_NAME,
@@ -536,5 +552,14 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		if (snapshot.size === batchSize) {
 			await this.deleteQueryBatch(query, batchSize);
 		}
+	}
+
+	/**
+	 * Get the collection name based on partition key.
+	 * @returns The collection name.
+	 * @internal
+	 */
+	private collectionName(partitionKey?: string): string {
+		return `${this._config.collectionName}_${partitionKey ?? "default"}`;
 	}
 }

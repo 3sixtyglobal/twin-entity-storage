@@ -15,6 +15,7 @@ import {
 	PutCommand
 } from "@aws-sdk/lib-dynamodb";
 import { type NativeAttributeValue, unmarshall } from "@aws-sdk/util-dynamodb";
+import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
 import {
 	BaseError,
 	Coerce,
@@ -40,8 +41,8 @@ import {
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import type { IDynamoDbEntityStorageConnectorConfig } from "./models/IDynamoDbEntityStorageConnectorConfig";
-import type { IDynamoDbEntityStorageConnectorConstructorOptions } from "./models/IDynamoDbEntityStorageConnectorConstructorOptions";
+import type { IDynamoDbEntityStorageConnectorConfig } from "./models/IDynamoDbEntityStorageConnectorConfig.js";
+import type { IDynamoDbEntityStorageConnectorConstructorOptions } from "./models/IDynamoDbEntityStorageConnectorConstructorOptions.js";
 
 /**
  * Class for performing entity storage operations using Dynamo DB.
@@ -62,19 +63,25 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * Partition id field name.
 	 * @internal
 	 */
-	private static readonly _PARTITION_ID_NAME: string = "partitionId";
+	private static readonly _PARTITION_KEY: string = "partitionId";
 
 	/**
 	 * Partition id field value.
 	 * @internal
 	 */
-	private static readonly _PARTITION_ID_VALUE: string = "1";
+	private static readonly _PARTITION_KEY_VALUE: string = "root";
 
 	/**
 	 * The schema for the entity.
 	 * @internal
 	 */
 	private readonly _entitySchema: IEntitySchema<T>;
+
+	/**
+	 * The keys to use from the context ids to create partitions.
+	 * @internal
+	 */
+	private readonly _partitionContextIds?: string[];
 
 	/**
 	 * The primary key.
@@ -131,6 +138,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		);
 
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
+		this._partitionContextIds = options.partitionContextIds;
 
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 
@@ -138,6 +146,22 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		this._config.endpoint = Is.stringValue(this._config.endpoint)
 			? this._config.endpoint
 			: undefined;
+	}
+
+	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return DynamoDbEntityStorageConnector.CLASS_NAME;
+	}
+
+	/**
+	 * Get the schema for the entities.
+	 * @returns The schema for the entities.
+	 */
+	public getSchema(): IEntitySchema {
+		return this._entitySchema as IEntitySchema;
 	}
 
 	/**
@@ -175,11 +199,11 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 				// We always add a partition key to the table as a non optional hash key
 				// is always required when querying using sort parameters
 				tableParams.AttributeDefinitions?.push({
-					AttributeName: DynamoDbEntityStorageConnector._PARTITION_ID_NAME,
+					AttributeName: DynamoDbEntityStorageConnector._PARTITION_KEY,
 					AttributeType: "S"
 				});
 				tableParams.KeySchema?.push({
-					AttributeName: DynamoDbEntityStorageConnector._PARTITION_ID_NAME,
+					AttributeName: DynamoDbEntityStorageConnector._PARTITION_KEY,
 					KeyType: "HASH"
 				});
 
@@ -208,7 +232,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 								IndexName: `${prop.property as string}Index`,
 								KeySchema: [
 									{
-										AttributeName: DynamoDbEntityStorageConnector._PARTITION_ID_NAME,
+										AttributeName: DynamoDbEntityStorageConnector._PARTITION_KEY,
 										KeyType: "HASH"
 									},
 									{
@@ -295,14 +319,6 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	}
 
 	/**
-	 * Get the schema for the entities.
-	 * @returns The schema for the entities.
-	 */
-	public getSchema(): IEntitySchema {
-		return this._entitySchema as IEntitySchema;
-	}
-
-	/**
 	 * Get an entity.
 	 * @param id The id of the entity to get, or the index value if secondaryIndex is set.
 	 * @param secondaryIndex Get the item using a secondary index.
@@ -316,6 +332,9 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	): Promise<T | undefined> {
 		Guards.stringValue(DynamoDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		try {
 			const docClient = this.createDocClient();
 
@@ -323,15 +342,15 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 				const getCommand = new GetCommand({
 					TableName: this._config.tableName,
 					Key: {
-						[DynamoDbEntityStorageConnector._PARTITION_ID_NAME]:
-							DynamoDbEntityStorageConnector._PARTITION_ID_VALUE,
+						[DynamoDbEntityStorageConnector._PARTITION_KEY]:
+							partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE,
 						[this._primaryKey.property]: id
 					}
 				});
 
 				const response = await docClient.send(getCommand);
 
-				delete response.Item?.[DynamoDbEntityStorageConnector._PARTITION_ID_NAME];
+				delete response.Item?.[DynamoDbEntityStorageConnector._PARTITION_KEY];
 				return response.Item as T;
 			}
 
@@ -362,7 +381,8 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 				undefined,
 				undefined,
 				1,
-				secondaryIndex as string
+				secondaryIndex as string,
+				partitionKey
 			);
 
 			return queryResult.entities[0] as T;
@@ -397,6 +417,9 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(DynamoDbEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
 		const id = entity[this._primaryKey.property];
@@ -410,8 +433,8 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 			const putCommand = new PutCommand({
 				TableName: this._config.tableName,
 				Item: {
-					[DynamoDbEntityStorageConnector._PARTITION_ID_NAME]:
-						DynamoDbEntityStorageConnector._PARTITION_ID_VALUE,
+					[DynamoDbEntityStorageConnector._PARTITION_KEY]:
+						partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE,
 					...entity
 				} as { [id: string]: unknown },
 				// Only set the condition expression if we have conditions to match
@@ -463,6 +486,9 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	): Promise<void> {
 		Guards.stringValue(DynamoDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		try {
 			const docClient = this.createDocClient();
 
@@ -472,8 +498,8 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 			const deleteCommand = new DeleteCommand({
 				TableName: this._config.tableName,
 				Key: {
-					[DynamoDbEntityStorageConnector._PARTITION_ID_NAME]:
-						DynamoDbEntityStorageConnector._PARTITION_ID_VALUE,
+					[DynamoDbEntityStorageConnector._PARTITION_KEY]:
+						partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE,
 					[this._primaryKey.property as string]: id
 				},
 				ConditionExpression: conditionExpression,
@@ -537,7 +563,18 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		 */
 		cursor?: string;
 	}> {
-		return this.internalQuery(conditions, sortProperties, properties, cursor, limit);
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		return this.internalQuery(
+			conditions,
+			sortProperties,
+			properties,
+			cursor,
+			limit,
+			undefined,
+			partitionKey
+		);
 	}
 
 	/**
@@ -651,7 +688,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		if (prop.length > 0) {
 			prop += ".";
 		}
-		prop += comparator.property as string;
+		prop += comparator.property;
 
 		let attributeName = this.populateAttributeNames(prop, attributeNames);
 
@@ -860,6 +897,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @param cursor The cursor to request the next chunk of entities.
 	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @param secondaryIndex The secondary index to use for the query.
+	 * @param partitionKey The partition key to use for the query.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 * @internal
@@ -873,7 +911,8 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		properties?: (keyof T)[],
 		cursor?: string,
 		limit?: number,
-		secondaryIndex?: string
+		secondaryIndex?: string,
+		partitionKey?: string
 	): Promise<{
 		/**
 		 * The entities, which can be partial if a limited keys list was provided.
@@ -923,8 +962,8 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 
 			const attributeNames: { [id: string]: string } = { "#partitionId": "partitionId" };
 			const attributeValues: { [id: string]: AttributeValue } = {
-				[`:${DynamoDbEntityStorageConnector._PARTITION_ID_NAME}`]: {
-					S: DynamoDbEntityStorageConnector._PARTITION_ID_VALUE
+				[`:${DynamoDbEntityStorageConnector._PARTITION_KEY}`]: {
+					S: partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE
 				}
 			};
 
@@ -967,7 +1006,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 			if (Is.arrayValue(results.Items)) {
 				entities = results.Items.map(item => {
 					const unmarshalled = unmarshall(item);
-					delete unmarshalled[DynamoDbEntityStorageConnector._PARTITION_ID_NAME];
+					delete unmarshalled[DynamoDbEntityStorageConnector._PARTITION_KEY];
 					return unmarshalled as T;
 				});
 			}

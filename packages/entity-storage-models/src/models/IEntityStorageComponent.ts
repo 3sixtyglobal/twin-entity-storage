@@ -10,27 +10,24 @@ export interface IEntityStorageComponent<T = unknown> extends IComponent {
 	/**
 	 * Set an entity.
 	 * @param entity The entity to set.
-	 * @param userIdentity The user identity to use with storage operations.
 	 * @returns The id of the entity.
 	 */
-	set(entity: T, userIdentity?: string): Promise<void>;
+	set(entity: T): Promise<void>;
 
 	/**
 	 * Get an entity.
 	 * @param id The id of the entity to get, or the index value if secondaryIndex is set.
 	 * @param secondaryIndex Get the item using a secondary index.
-	 * @param userIdentity The user identity to use with storage operations.
 	 * @returns The object if it can be found or undefined.
 	 */
-	get(id: string, secondaryIndex?: keyof T, userIdentity?: string): Promise<T | undefined>;
+	get(id: string, secondaryIndex?: keyof T): Promise<T | undefined>;
 
 	/**
 	 * Remove the entity.
 	 * @param id The id of the entity to remove.
-	 * @param userIdentity The user identity to use with storage operations.
 	 * @returns Nothing.
 	 */
-	remove(id: string, userIdentity?: string): Promise<void>;
+	remove(id: string): Promise<void>;
 
 	/**
 	 * Query all the entities which match the conditions.
@@ -40,7 +37,6 @@ export interface IEntityStorageComponent<T = unknown> extends IComponent {
 	 * @param properties The optional properties to return, defaults to all.
 	 * @param cursor The cursor to request the next chunk of entities.
 	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
-	 * @param userIdentity The user identity to use with storage operations.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -50,8 +46,7 @@ export interface IEntityStorageComponent<T = unknown> extends IComponent {
 		orderByDirection?: SortDirection,
 		properties?: (keyof T)[],
 		cursor?: string,
-		limit?: number,
-		userIdentity?: string
+		limit?: number
 	): Promise<{
 		/**
 		 * The entities, which can be partial if a limited keys list was provided.

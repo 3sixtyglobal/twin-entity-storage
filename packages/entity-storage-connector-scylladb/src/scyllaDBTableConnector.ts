@@ -1,6 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-
+import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
 import { BaseError, ComponentFactory, GeneralError, Guards, type IError, Is } from "@twin.org/core";
 import {
 	EntitySchemaFactory,
@@ -11,8 +11,8 @@ import {
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import { AbstractScyllaDBConnector } from "./abstractScyllaDBConnector";
-import type { IScyllaDBTableConnectorConstructorOptions } from "./models/IScyllaDBTableConnectorConstructorOptions";
+import { AbstractScyllaDBConnector } from "./abstractScyllaDBConnector.js";
+import type { IScyllaDBTableConnectorConstructorOptions } from "./models/IScyllaDBTableConnectorConstructorOptions.js";
 
 /**
  * Store entities using ScyllaDB.
@@ -36,6 +36,14 @@ export class ScyllaDBTableConnector<T = unknown>
 	}
 
 	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return ScyllaDBTableConnector.CLASS_NAME;
+	}
+
+	/**
 	 * Bootstrap the component by creating and initializing any resources it needs.
 	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the bootstrapping process was successful.
@@ -43,18 +51,31 @@ export class ScyllaDBTableConnector<T = unknown>
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
-		nodeLogging?.log({
-			level: "info",
-			source: ScyllaDBTableConnector.CLASS_NAME,
-			ts: Date.now(),
-			message: "tableCreating",
-			data: { table: this._fullTableName }
-		});
-
 		try {
 			let dbConnection = await this.openConnection(true);
 
-			await this.createKeyspace(dbConnection, this._config.keyspace);
+			const exists = await this.checkKeyspaceExists(dbConnection, this._config.keyspace);
+
+			if (exists) {
+				await nodeLogging?.log({
+					level: "info",
+					source: ScyllaDBTableConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "keyspaceExists",
+					data: {
+						keyspace: this._config.keyspace
+					}
+				});
+			} else {
+				await nodeLogging?.log({
+					level: "info",
+					source: ScyllaDBTableConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "keyspaceCreating",
+					data: { keyspace: this._config.keyspace }
+				});
+				await this.createKeyspace(dbConnection, this._config.keyspace);
+			}
 
 			// Connection has to be closed and now open a new one with our keyspace
 			await this.closeConnection(dbConnection);
@@ -63,83 +84,90 @@ export class ScyllaDBTableConnector<T = unknown>
 			// Need to find structured properties (declared as type: object)
 			const structuredProperties = this._entitySchema.properties?.filter(
 				property =>
-					property.type === EntitySchemaPropertyType.Object ||
-					(property.type === EntitySchemaPropertyType.Array && property.itemTypeRef)
+					(property.type === EntitySchemaPropertyType.Object ||
+						property.type === EntitySchemaPropertyType.Array) &&
+					Is.stringValue(property.itemTypeRef)
 			);
 
 			// Needs to support objects that may have itemRef other objects (to be done)
 			if (Is.array(structuredProperties)) {
 				for (const strProperty of structuredProperties) {
 					const subTypeSchemaRef = strProperty.itemTypeRef;
-					if (!Is.undefined(subTypeSchemaRef)) {
-						const objSchema = EntitySchemaFactory.get(subTypeSchemaRef);
-						const typeFields: string[] = [];
-						for (const field of objSchema.properties ?? []) {
-							typeFields.push(`"${String(field.property)}" ${this.toDbField(field)}`);
+					if (Is.stringValue(subTypeSchemaRef)) {
+						if (!(await this.checkTypeExists(dbConnection, subTypeSchemaRef))) {
+							const objSchema = EntitySchemaFactory.get(subTypeSchemaRef);
+							const typeFields: string[] = [];
+							for (const field of objSchema.properties ?? []) {
+								typeFields.push(`"${String(field.property)}" ${this.toDbField(field)}`);
+							}
+							const sql = `CREATE TYPE IF NOT EXISTS "${subTypeSchemaRef}" (${typeFields.join(",")})`;
+
+							await nodeLogging?.log({
+								level: "info",
+								source: ScyllaDBTableConnector.CLASS_NAME,
+								ts: Date.now(),
+								message: "typeCreating",
+								data: { typeName: subTypeSchemaRef }
+							});
+
+							await this.execute(dbConnection, sql);
 						}
-						const sql = `CREATE TYPE IF NOT EXISTS
-																		"${subTypeSchemaRef}" (${typeFields.join(",")})`;
-
-						await nodeLogging?.log({
-							level: "info",
-							source: ScyllaDBTableConnector.CLASS_NAME,
-							ts: Date.now(),
-							message: "sql",
-							data: { sql }
-						});
-
-						await this.execute(dbConnection, sql);
-
-						await nodeLogging?.log({
-							level: "info",
-							source: ScyllaDBTableConnector.CLASS_NAME,
-							ts: Date.now(),
-							message: "typeCreated",
-							data: { typeName: subTypeSchemaRef }
-						});
 					}
 				}
 			}
 
-			const fields: string[] = [];
-			const primaryKeys: string[] = [];
-			const secondaryKeys: string[] = [];
+			const tableExists = await this.checkTableExists(
+				dbConnection,
+				this._config.keyspace,
+				this._fullTableName
+			);
 
-			for (const field of this._entitySchema.properties ?? []) {
-				fields.push(`"${String(field.property)}" ${this.toDbField(field)}`);
-				if (field.isPrimary) {
-					primaryKeys.push(`"${field.property as string}"`);
-				}
-				if (field.isSecondary) {
-					secondaryKeys.push(`"${field.property as string}"`);
-				}
-			}
-			fields.push(`PRIMARY KEY ((${primaryKeys.join(",")})`);
-			if (secondaryKeys.length > 0) {
-				fields.push(`${secondaryKeys.join(",")})`);
+			if (tableExists) {
+				await nodeLogging?.log({
+					level: "info",
+					source: ScyllaDBTableConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "tableExists",
+					data: {
+						table: this._fullTableName
+					}
+				});
 			} else {
-				fields[fields.length - 1] += ")";
+				const fields: string[] = [];
+				const primaryKeys: string[] = [];
+				const secondaryKeys: string[] = [];
+
+				primaryKeys.push(`"${AbstractScyllaDBConnector.PARTITION_KEY}"`);
+				fields.push(`"${AbstractScyllaDBConnector.PARTITION_KEY}" TEXT`);
+
+				for (const field of this._entitySchema.properties ?? []) {
+					fields.push(`"${String(field.property)}" ${this.toDbField(field)}`);
+					if (field.isPrimary) {
+						primaryKeys.push(`"${field.property as string}"`);
+					}
+					if (field.isSecondary) {
+						secondaryKeys.push(`"${field.property as string}"`);
+					}
+				}
+				fields.push(`PRIMARY KEY ((${primaryKeys.join(",")})`);
+				if (secondaryKeys.length > 0) {
+					fields.push(`${secondaryKeys.join(",")})`);
+				} else {
+					fields[fields.length - 1] += ")";
+				}
+
+				const sql = `CREATE TABLE IF NOT EXISTS "${this._fullTableName}" (${fields.join(", ")})`;
+
+				await nodeLogging?.log({
+					level: "info",
+					source: ScyllaDBTableConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "tableCreating",
+					data: { table: this._fullTableName }
+				});
+
+				await this.execute(dbConnection, sql);
 			}
-
-			const sql = `CREATE TABLE IF NOT EXISTS "${this._fullTableName}" (${fields.join(", ")})`;
-
-			await nodeLogging?.log({
-				level: "info",
-				source: ScyllaDBTableConnector.CLASS_NAME,
-				ts: Date.now(),
-				message: "sql",
-				data: { sql }
-			});
-
-			await this.execute(dbConnection, sql);
-
-			await nodeLogging?.log({
-				level: "info",
-				source: ScyllaDBTableConnector.CLASS_NAME,
-				ts: Date.now(),
-				message: "tableCreated",
-				data: { table: this._fullTableName }
-			});
 		} catch (err) {
 			if (BaseError.isErrorCode(err, "ResourceInUseException")) {
 				await nodeLogging?.log({
@@ -172,6 +200,9 @@ export class ScyllaDBTableConnector<T = unknown>
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(ScyllaDBTableConnector.CLASS_NAME, nameof(entity), entity);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
 		let connection;
@@ -180,29 +211,33 @@ export class ScyllaDBTableConnector<T = unknown>
 			const propValues: unknown[] = [];
 			const updateValues: string[] = [];
 
-			conditions ??= [];
+			const finalConditions: { property: keyof T; value: unknown }[] = [];
+
+			finalConditions.push({
+				property: AbstractScyllaDBConnector.PARTITION_KEY as keyof T,
+				value: partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE
+			});
 
 			for (const propDesc of this._entitySchema.properties ?? []) {
 				if (!propDesc.isPrimary && !propDesc.isSecondary) {
 					propValues.push(this.propertyToDbValue(entity[propDesc.property], propDesc));
 					updateValues.push(`"${String(propDesc.property)}"=?`);
 				} else {
-					conditions.unshift({
+					finalConditions.push({
 						property: propDesc.property,
 						value: this.propertyToDbValue(entity[propDesc.property], propDesc)
 					});
 				}
 			}
 
-			const { sqlCondition, conditionValues } = this.buildConditions(conditions);
-
-			let conditionString = "";
-			if (sqlCondition.length > 0) {
-				conditionString = ` WHERE ${sqlCondition}`;
-				propValues.push(...conditionValues);
+			if (Is.arrayValue(conditions)) {
+				finalConditions.push(...conditions);
 			}
 
-			const sql = `UPDATE "${this._fullTableName}" SET ${updateValues.join(",")}${conditionString}`;
+			const { sqlCondition, conditionValues } = this.buildConditions(finalConditions);
+			propValues.push(...conditionValues);
+
+			const sql = `UPDATE "${this._fullTableName}" SET ${updateValues.join(",")} WHERE ${sqlCondition}`;
 
 			await this._logging?.log({
 				level: "info",
@@ -240,10 +275,17 @@ export class ScyllaDBTableConnector<T = unknown>
 	): Promise<void> {
 		Guards.stringValue(ScyllaDBTableConnector.CLASS_NAME, nameof(id), id);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		let connection;
 
 		try {
 			conditions ??= [];
+			conditions.unshift({
+				property: AbstractScyllaDBConnector.PARTITION_KEY as keyof T,
+				value: partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE
+			});
 			conditions.unshift({ property: this._primaryKey?.property, value: id });
 
 			const { sqlCondition, conditionValues } = this.buildConditions(conditions);
@@ -378,56 +420,32 @@ export class ScyllaDBTableConnector<T = unknown>
 				dbType = "BOOLEAN";
 				break;
 			case "object":
-				if (!logicalField.itemTypeRef) {
-					throw new GeneralError(ScyllaDBTableConnector.CLASS_NAME, "itemTypeNotDefined", {
-						type: logicalField.type,
-						table: this._fullTableName
-					});
+				if (Is.stringValue(logicalField.itemTypeRef)) {
+					dbType = `frozen<"${logicalField.itemTypeRef}">`;
+				} else {
+					// Item type is unknown object, store as TEXT
+					// so that it can be JSON serialized
+					dbType = "TEXT";
 				}
-				dbType = `frozen<"${logicalField.itemTypeRef}">`;
 				break;
 			case "array":
-				if (!logicalField.itemType && !logicalField.itemTypeRef) {
-					throw new GeneralError(ScyllaDBTableConnector.CLASS_NAME, "itemTypeNotDefined", {
-						type: logicalField.type,
-						table: this._fullTableName
-					});
-				}
-				if (logicalField.itemType) {
-					dbType = `SET<${this.toDbField({
-						property: logicalField.property,
-						type: logicalField.itemType as EntitySchemaPropertyType
-					})}>`;
+				if (Is.stringValue(logicalField.itemTypeRef)) {
+					if (Is.stringValue(logicalField.itemType)) {
+						dbType = `SET<${this.toDbField({
+							property: logicalField.property,
+							type: logicalField.itemType
+						})}>`;
+					} else {
+						dbType = `SET<frozen<"${logicalField.itemTypeRef}">>`;
+					}
 				} else {
-					dbType = `SET<frozen<"${logicalField.itemTypeRef}">>`;
+					// Item type is unknown object, store as TEXT
+					// so that it can be JSON serialized
+					dbType = "TEXT";
 				}
 				break;
 		}
 
 		return dbType;
-	}
-
-	/**
-	 * Build the conditions for the query.
-	 * @param conditions The optional conditions to match for the entities.
-	 * @returns The SQL conditions and the values.
-	 */
-	private buildConditions(conditions: { property: keyof T; value: unknown }[] | undefined): {
-		sqlCondition: string;
-		conditionValues: unknown[];
-	} {
-		const conditionValues: unknown[] = [];
-		const sqlConditions: string[] = [];
-
-		if (Is.arrayValue(conditions)) {
-			for (const condition of conditions) {
-				sqlConditions.push(`"${condition.property as string}"=?`);
-				const schemaProperty = this._entitySchema.properties?.find(
-					s => s.property === condition.property
-				);
-				conditionValues.push(this.propertyToDbValue(condition.value, schemaProperty));
-			}
-		}
-		return { sqlCondition: sqlConditions.join(" AND "), conditionValues };
 	}
 }

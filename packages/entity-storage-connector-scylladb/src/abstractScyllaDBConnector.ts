@@ -1,7 +1,15 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-
-import { ComponentFactory, GeneralError, Guards, Is, StringHelper } from "@twin.org/core";
+import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
+import {
+	Coerce,
+	ComponentFactory,
+	GeneralError,
+	Guards,
+	Is,
+	ObjectHelper,
+	StringHelper
+} from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -17,8 +25,8 @@ import {
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import { types as CassandraTypes, Client } from "cassandra-driver";
-import type { IScyllaDBConfig } from "./models/IScyllaDBConfig";
-import type { IScyllaDBTableConfig } from "./models/IScyllaDBTableConfig";
+import type { IScyllaDBConfig } from "./models/IScyllaDBConfig.js";
+import type { IScyllaDBTableConfig } from "./models/IScyllaDBTableConfig.js";
 
 /**
  * Store entities using ScyllaDB.
@@ -28,6 +36,18 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * Runtime name for the class.
 	 */
 	public static readonly CLASS_NAME: string = nameof<AbstractScyllaDBConnector<unknown>>();
+
+	/**
+	 * Partition id field name.
+	 * @internal
+	 */
+	protected static readonly PARTITION_KEY: string = "partitionId";
+
+	/**
+	 * Partition id field value.
+	 * @internal
+	 */
+	protected static readonly PARTITION_KEY_VALUE: string = "root";
 
 	/**
 	 * Limit the number of entities when finding.
@@ -60,6 +80,12 @@ export abstract class AbstractScyllaDBConnector<T> {
 	protected readonly _entitySchema: IEntitySchema<T>;
 
 	/**
+	 * The keys to use from the context ids to create partitions.
+	 * @internal
+	 */
+	protected readonly _partitionContextIds?: string[];
+
+	/**
 	 * The primary key.
 	 * @internal
 	 */
@@ -70,11 +96,13 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @param options The options for the connector.
 	 * @param options.loggingComponentType The type of logging component to use, defaults to no logging.
 	 * @param options.entitySchema The name of the entity schema.
+	 * @param options.partitionContextIds The keys to use from the context ids to create partitions.
 	 * @param options.config The configuration for the connector.
 	 */
 	constructor(options: {
 		loggingComponentType?: string;
 		entitySchema: string;
+		partitionContextIds?: string[];
 		config: IScyllaDBTableConfig;
 	}) {
 		Guards.object(AbstractScyllaDBConnector.CLASS_NAME, nameof(options), options);
@@ -107,12 +135,21 @@ export abstract class AbstractScyllaDBConnector<T> {
 		this._logging = ComponentFactory.getIfExists(options.loggingComponentType ?? "logging");
 
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
+		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 
 		this._config = options.config;
 		this._fullTableName = StringHelper.camelCase(
 			Is.stringValue(options.config.tableName) ? options.config.tableName : options.entitySchema
 		);
+	}
+
+	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return AbstractScyllaDBConnector.CLASS_NAME;
 	}
 
 	/**
@@ -137,14 +174,29 @@ export abstract class AbstractScyllaDBConnector<T> {
 	): Promise<T | undefined> {
 		Guards.stringValue(AbstractScyllaDBConnector.CLASS_NAME, nameof(id), id);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		let connection;
 		try {
 			const indexField = secondaryIndex ?? this._primaryKey?.property;
 
-			let sql = `SELECT * FROM "${this._fullTableName}" WHERE "${String(indexField)}"=?`;
+			conditions ??= [];
+			conditions.unshift({
+				property: AbstractScyllaDBConnector.PARTITION_KEY as keyof T,
+				value: partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE
+			});
+			conditions.unshift({
+				property: indexField,
+				value: id
+			});
+
+			const { sqlCondition, conditionValues } = this.buildConditions(conditions);
+
+			let sql = `SELECT * FROM "${this._fullTableName}" WHERE ${sqlCondition}`;
 
 			if (secondaryIndex) {
-				sql += "ALLOW FILTERING";
+				sql += " ALLOW FILTERING";
 			}
 
 			await this._logging?.log({
@@ -157,10 +209,10 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 			connection = await this.openConnection();
 
-			const result = await this.queryDB(connection, sql, [id]);
+			const result = await this.queryDB(connection, sql, conditionValues);
 
 			if (result.rows.length === 1) {
-				return this.convertRowToObject(result.rows[0]);
+				return this.convertRowToObject(this._entitySchema.properties, result.rows[0]);
 			}
 		} catch (error) {
 			throw new GeneralError(
@@ -206,6 +258,10 @@ export abstract class AbstractScyllaDBConnector<T> {
 		cursor?: string;
 	}> {
 		let connection;
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		try {
 			let returnSize = limit ?? AbstractScyllaDBConnector._DEFAULT_LIMIT;
 			let sql = `SELECT * FROM "${this._fullTableName}"`;
@@ -225,6 +281,9 @@ export abstract class AbstractScyllaDBConnector<T> {
 			let conditionQuery = "";
 			// The params to be used to execute the query
 			const params: unknown[] = [];
+
+			let finalConditionQuery = `"${AbstractScyllaDBConnector.PARTITION_KEY}" = ?`;
+			params.push(partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE);
 
 			let theConditions: EntityCondition<T>[] = [];
 			if (!Is.undefined(conditions)) {
@@ -246,7 +305,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 					condition.comparison === ComparisonOperator.Includes ||
 					condition.comparison === ComparisonOperator.NotIncludes
 				) {
-					const propValue = `'%${condition.value}%'`;
+					const propValue = `'%${condition.value?.toString()}%'`;
 					if (condition.comparison === ComparisonOperator.Includes) {
 						conds.push(`"${condition.property}" LIKE ${propValue}`);
 					} else if (condition.comparison === ComparisonOperator.NotIncludes) {
@@ -284,8 +343,10 @@ export abstract class AbstractScyllaDBConnector<T> {
 			}
 
 			if (conditionQuery.length > 0) {
-				sql += ` WHERE ${conditionQuery}`;
+				finalConditionQuery += ` AND (${conditionQuery})`;
 			}
+
+			sql += ` WHERE ${finalConditionQuery}`;
 
 			connection = await this.openConnection();
 
@@ -306,6 +367,8 @@ export abstract class AbstractScyllaDBConnector<T> {
 				returnSize = 0;
 			}
 
+			sql += " ALLOW FILTERING";
+
 			await this._logging?.log({
 				level: "info",
 				source: AbstractScyllaDBConnector.CLASS_NAME,
@@ -319,7 +382,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 			const entities: Partial<T>[] = [];
 
 			for (const row of result.rows) {
-				entities.push(this.convertRowToObject(row));
+				entities.push(this.convertRowToObject(this._entitySchema.properties, row));
 			}
 
 			return {
@@ -440,9 +503,64 @@ export abstract class AbstractScyllaDBConnector<T> {
 	): Promise<CassandraTypes.ResultSet> {
 		return this.execute(
 			connection,
-			`CREATE KEYSPACE IF NOT EXISTS "${keyspaceName}"
-            WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1}`
+			`CREATE KEYSPACE IF NOT EXISTS "${keyspaceName}" WITH REPLICATION = { 'class' : 'SimpleStrategy', 'replication_factor' : 1}`
 		);
+	}
+
+	/**
+	 * Check if a keyspace exists.
+	 * @param connection The connection to perform the query with.
+	 * @param keyspaceName The name of the keyspace to check.
+	 * @returns True if the keyspace exists, false otherwise.
+	 * @internal
+	 */
+	protected async checkKeyspaceExists(connection: Client, keyspaceName: string): Promise<boolean> {
+		const result = await this.queryDB(
+			connection,
+			"SELECT keyspace_name FROM system_schema.keyspaces WHERE keyspace_name = ?",
+			[keyspaceName]
+		);
+
+		return result.rowLength > 0;
+	}
+
+	/**
+	 * Check if a type exists.
+	 * @param connection The connection to perform the query with.
+	 * @param typeName The name of the type to check.
+	 * @returns True if the type exists, false otherwise.
+	 * @internal
+	 */
+	protected async checkTypeExists(connection: Client, typeName: string): Promise<boolean> {
+		const result = await this.queryDB(
+			connection,
+			"SELECT type_name FROM system_schema.types WHERE type_name = ?",
+			[typeName]
+		);
+
+		return result.rowLength > 0;
+	}
+
+	/**
+	 * Check if a table exists.
+	 * @param connection The connection to perform the query with.
+	 * @param keyspaceName The name of the keyspace to check.
+	 * @param tableName The name of the table to check.
+	 * @returns True if the table exists, false otherwise.
+	 * @internal
+	 */
+	protected async checkTableExists(
+		connection: Client,
+		keyspaceName: string,
+		tableName: string
+	): Promise<boolean> {
+		const result = await this.queryDB(
+			connection,
+			"SELECT table_name FROM system_schema.tables WHERE keyspace_name = ? AND table_name = ?",
+			[keyspaceName, tableName]
+		);
+
+		return result.rowLength > 0;
 	}
 
 	/**
@@ -453,17 +571,19 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @internal
 	 */
 	protected dbValueToProperty(value: unknown, fieldDescriptor: IEntitySchemaProperty<T>): unknown {
-		if (fieldDescriptor.type === "object") {
-			if (
-				value === "null" ||
-				value === "undefined" ||
-				value === "" ||
-				value === null ||
-				value === undefined
-			) {
-				return;
-			}
-		} else if (fieldDescriptor.type === "string" && fieldDescriptor.format === "json") {
+		if (
+			Is.stringValue(fieldDescriptor.itemTypeRef) &&
+			(fieldDescriptor.type === "object" || fieldDescriptor.type === "array")
+		) {
+			const objSchema = EntitySchemaFactory.get(fieldDescriptor.itemTypeRef);
+			return this.convertRowToObject(objSchema.properties, value as { [id: string]: unknown });
+		} else if (
+			// If the field is json format
+			(fieldDescriptor.type === "string" && fieldDescriptor.format === "json") ||
+			// Or its and object or array without a type ref
+			(!Is.stringValue(fieldDescriptor.itemTypeRef) &&
+				(fieldDescriptor.type === "object" || fieldDescriptor.type === "array"))
+		) {
 			try {
 				return JSON.parse(value as string);
 			} catch {
@@ -471,6 +591,22 @@ export abstract class AbstractScyllaDBConnector<T> {
 					name: fieldDescriptor.property,
 					value
 				});
+			}
+		} else if (
+			fieldDescriptor.type === "string" &&
+			(fieldDescriptor.format === "date-time" || fieldDescriptor.format === "date") &&
+			Is.date(value)
+		) {
+			return Coerce.string(value);
+		} else if (fieldDescriptor.type === "object") {
+			if (
+				value === "null" ||
+				value === "undefined" ||
+				value === "" ||
+				value === null ||
+				value === undefined
+			) {
+				return null;
 			}
 		} else if (fieldDescriptor.format === "uuid") {
 			return (value as CassandraTypes.Uuid).toString();
@@ -486,12 +622,15 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @returns The value after conversion.
 	 * @internal
 	 */
-	protected propertyToDbValue(
-		value: unknown,
-		fieldDescriptor?: Pick<IEntitySchemaProperty<T>, "type" | "format">
-	): unknown {
+	protected propertyToDbValue(value: unknown, fieldDescriptor?: IEntitySchemaProperty<T>): unknown {
 		if (fieldDescriptor) {
-			if (fieldDescriptor.type === "string" && fieldDescriptor.format === "json") {
+			// If the field is json format
+			if (
+				(fieldDescriptor.type === "string" && fieldDescriptor.format === "json") ||
+				// Or its and object or array without a type ref
+				(!Is.stringValue(fieldDescriptor.itemTypeRef) &&
+					(fieldDescriptor.type === "object" || fieldDescriptor.type === "array"))
+			) {
 				return Is.empty(value) ? "null" : this.jsonWrap(value);
 			} else if (fieldDescriptor.format === "uuid") {
 				if (!Is.string(value)) {
@@ -505,21 +644,25 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 	/**
 	 * Convert a row back to an object.
+	 * @param properties The optional properties to convert.
 	 * @param row The row to convert.
 	 * @returns The row as an object.
 	 * @internal
 	 */
-	protected convertRowToObject(row: { [id: string]: unknown }): T {
+	protected convertRowToObject(
+		properties: IEntitySchemaProperty<T>[] | undefined,
+		row: { [id: string]: unknown }
+	): T {
 		const obj: { [id: string]: unknown } = {};
 
-		for (const field of this._entitySchema.properties ?? []) {
+		for (const field of properties ?? []) {
 			const value = row[field.property as string];
-			if (value) {
+			if (!Is.empty(value)) {
 				obj[field.property as string] = this.dbValueToProperty(value, field);
 			}
 		}
 
-		return obj as T;
+		return ObjectHelper.removeEmptyProperties(obj as T, { removeNull: true });
 	}
 
 	/**
@@ -564,5 +707,35 @@ export abstract class AbstractScyllaDBConnector<T> {
 			}
 		});
 		return json;
+	}
+
+	/**
+	 * Build the conditions for the query.
+	 * @param conditions The optional conditions to match for the entities.
+	 * @returns The SQL conditions and the values.
+	 * @internal
+	 */
+	protected buildConditions(conditions: { property: keyof T; value: unknown }[] | undefined): {
+		sqlCondition: string;
+		conditionValues: unknown[];
+	} {
+		const conditionValues: unknown[] = [];
+		const sqlConditions: string[] = [];
+
+		const properties = (this._entitySchema.properties ?? []).concat([
+			{
+				property: AbstractScyllaDBConnector.PARTITION_KEY,
+				type: "string"
+			} as IEntitySchemaProperty<T>
+		]);
+
+		if (Is.arrayValue(conditions)) {
+			for (const condition of conditions) {
+				sqlConditions.push(`"${condition.property as string}"=?`);
+				const schemaProperty = properties.find(s => s.property === condition.property);
+				conditionValues.push(this.propertyToDbValue(condition.value, schemaProperty));
+			}
+		}
+		return { sqlCondition: sqlConditions.join(" AND "), conditionValues };
 	}
 }

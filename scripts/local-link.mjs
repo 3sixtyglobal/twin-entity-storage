@@ -6,21 +6,23 @@
  * will try to find the package in the sibling folders and link it.
  *
  * You can use wildcards to link multiple packages with similar names.
- * e.g. npm run local-link "@twin.org/engine*"
+ *    npm run local-link "@twin.org/engine*"
+ * or to link all packages in the current repo
+ *    npm run local-link "@twin.org//*"
  *
  * Usage:
- * npm run local-link <package-name>
+ *    npm run local-link <package-name>
  * or
- * npm run local-link /path/to/package
+ *    npm run local-link /path/to/package
  *
  * To unlink
- * npm run local-link <package-name> unlink
+ *    npm run local-link <package-name> unlink
  * or
- * npm run local-link /path/to/package unlink
+ *    npm run local-link /path/to/package unlink
  */
 import fs, { readdir } from 'node:fs/promises';
 import path from 'node:path';
-import { directoryExists, fileExists, isSymbolicLink, loadJson, runShellCmd } from './common.mjs';
+import { directoryExists, fileExists, isSymbolicLink, loadJson } from './common.mjs';
 
 /**
  * Execute the process.
@@ -47,18 +49,8 @@ async function run() {
 	process.stdout.write(`Node Modules: ${nodeModulesDir}\n`);
 
 	if (process.argv[3] === 'unlink') {
-		const npmInstallPackages = [];
 		for (const pkg of packages) {
-			const unlinked = await unlinkPackage(nodeModulesDir, pkg.packageName, pkg.targetDir);
-			if (!unlinked) {
-				npmInstallPackages.push(pkg.packageName);
-			}
-		}
-		if (npmInstallPackages.length > 0) {
-			process.stdout.write(
-				'\nThere are no backup directories for some or all of the packages, performing npm install to re-instate packages\n'
-			);
-			await runShellCmd('npm', ['install', ...npmInstallPackages], process.cwd());
+			await unlinkPackage(nodeModulesDir, pkg.packageName, pkg.targetDir);
 		}
 	} else {
 		for (const pkg of packages) {
@@ -76,33 +68,33 @@ async function run() {
  * @param targetDir The target directory of the package to link.
  */
 async function linkPackage(nodeModulesDir, packageName, targetDir) {
-	process.stdout.write(`Linking package ${packageName}\n\n`);
-
-	process.stdout.write(`Target package directory: ${targetDir}\n`);
-
 	const currentNodeDir = path.join(nodeModulesDir, packageName);
 	const backupNodeDir = path.join(nodeModulesDir, `${packageName}.bak`);
 
 	const isLink = await isSymbolicLink(currentNodeDir);
 	if (isLink) {
-		process.stdout.write(`The package ${currentNodeDir} is already a symbolic link, skipping\n`);
+		process.stdout.write(`\nThe package ${currentNodeDir} is already a symbolic link, skipping\n`);
 		return;
 	}
 
-	try {
-		// Remove any old backup directory
-		if (await directoryExists(backupNodeDir)) {
-			await fs.rm(backupNodeDir, { recursive: true });
-		}
-	} catch {}
-
+	// Only proceed if the directory exists
 	if (await directoryExists(currentNodeDir)) {
+		process.stdout.write(`\nLinking package ${packageName}\n`);
+		process.stdout.write(`Target package directory: ${targetDir}\n`);
+
+		try {
+			// Remove any old backup directory
+			if (await directoryExists(backupNodeDir)) {
+				await fs.rm(backupNodeDir, { recursive: true });
+			}
+		} catch {}
+
 		process.stdout.write(`Renaming: ${currentNodeDir} to ${backupNodeDir}\n`);
 		await fs.rename(currentNodeDir, backupNodeDir);
-	}
 
-	process.stdout.write(`Creating symlink: ${currentNodeDir} to ${targetDir}\n`);
-	await fs.symlink(targetDir, currentNodeDir);
+		process.stdout.write(`Creating symlink: ${currentNodeDir} to ${targetDir}\n`);
+		await fs.symlink(targetDir, currentNodeDir);
+	}
 }
 
 /**
@@ -110,28 +102,23 @@ async function linkPackage(nodeModulesDir, packageName, targetDir) {
  * @param nodeModulesDir The node_modules directory.
  * @param packageName The name of the package to unlink.
  * @param targetDir The target directory of the package to unlink.
- * @returns True if unlinked, false if restored from backup.
  */
 async function unlinkPackage(nodeModulesDir, packageName, targetDir) {
-	process.stdout.write(`Unlinking package ${packageName}\n\n`);
-
 	const linkName = path.join(nodeModulesDir, packageName);
-	const isLink = await isSymbolicLink(linkName);
-	if (!isLink) {
-		process.stdout.write(`The package ${linkName} is not a symbolic link, skipping\n`);
-		return true;
+	if ((await directoryExists(linkName)) && !(await isSymbolicLink(linkName))) {
+		process.stdout.write(`\nThe package ${linkName} is not a symbolic link, skipping\n`);
+		return;
 	}
-
-	process.stdout.write(`Removing link: ${linkName}\n`);
-	await fs.unlink(linkName);
 
 	const linkNameBackup = `${linkName}.bak`;
 	if (await directoryExists(linkNameBackup)) {
+		process.stdout.write(`\nUnlinking package ${packageName}\n`);
+		process.stdout.write(`Removing symlink: ${linkName}\n`);
+		await fs.unlink(linkName);
+
 		process.stdout.write(`Renaming backup directory: ${linkNameBackup} to ${linkName}\n`);
 		await fs.rename(linkNameBackup, linkName);
-		return true;
 	}
-	return false;
 }
 
 /**

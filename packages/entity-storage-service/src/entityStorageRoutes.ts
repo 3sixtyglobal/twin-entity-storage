@@ -20,7 +20,7 @@ import type {
 } from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
 import { HttpStatusCode } from "@twin.org/web";
-import type { IEntityStorageRoutesExamples } from "./models/IEntityStorageRoutesExamples";
+import type { IEntityStorageRoutesExamples } from "./models/IEntityStorageRoutesExamples.js";
 
 /**
  * The source used when communicating about these routes.
@@ -214,7 +214,7 @@ export async function entityStorageSet(
 	Guards.object<IEntityStorageSetRequest>(ROUTES_SOURCE, nameof(request), request);
 
 	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
-	await component.set(request.body, httpRequestContext.userIdentity);
+	await component.set(request.body);
 	return {
 		statusCode: HttpStatusCode.noContent
 	};
@@ -243,8 +243,7 @@ export async function entityStorageGet(
 	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
 	const item = await component.get(
 		request.pathParams.id,
-		request.query?.secondaryIndex as keyof unknown,
-		httpRequestContext.userIdentity
+		request.query?.secondaryIndex as keyof unknown
 	);
 	return {
 		body: item
@@ -272,7 +271,7 @@ export async function entityStorageRemove(
 	Guards.stringValue(ROUTES_SOURCE, nameof(request.pathParams.id), request.pathParams.id);
 
 	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
-	await component.remove(request.pathParams.id, httpRequestContext.userIdentity);
+	await component.remove(request.pathParams.id);
 	return {
 		statusCode: HttpStatusCode.noContent
 	};
@@ -299,8 +298,7 @@ export async function entityStorageList(
 		request.query?.orderByDirection,
 		HttpParameterHelper.objectFromString(request.query?.properties),
 		request.query?.cursor,
-		Coerce.number(request.query?.limit),
-		httpRequestContext.userIdentity
+		Coerce.number(request.query?.limit)
 	);
 	return {
 		body: result

@@ -12,8 +12,8 @@ import { EntitySchemaHelper, type IEntitySchema } from "@twin.org/entity";
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import { AbstractScyllaDBConnector } from "./abstractScyllaDBConnector";
-import type { IScyllaDBViewConnectorConstructorOptions } from "./models/IScyllaDBViewConnectorConstructorOptions";
+import { AbstractScyllaDBConnector } from "./abstractScyllaDBConnector.js";
+import type { IScyllaDBViewConnectorConstructorOptions } from "./models/IScyllaDBViewConnectorConstructorOptions.js";
 
 /**
  * Manage entities using ScyllaDB Views.
@@ -63,6 +63,14 @@ export class ScyllaDBViewConnector<T>
 	}
 
 	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return ScyllaDBViewConnector.CLASS_NAME;
+	}
+
+	/**
 	 * Bootstrap the component by creating and initializing any resources it needs.
 	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the bootstrapping process was successful.
@@ -70,7 +78,7 @@ export class ScyllaDBViewConnector<T>
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
-		nodeLogging?.log({
+		await nodeLogging?.log({
 			level: "info",
 			source: ScyllaDBViewConnector.CLASS_NAME,
 			ts: Date.now(),
@@ -100,7 +108,7 @@ export class ScyllaDBViewConnector<T>
 
 			await this.execute(dbConnection, sql);
 
-			nodeLogging?.log({
+			await nodeLogging?.log({
 				level: "info",
 				source: ScyllaDBViewConnector.CLASS_NAME,
 				ts: Date.now(),
@@ -109,7 +117,7 @@ export class ScyllaDBViewConnector<T>
 			});
 		} catch (err) {
 			if (BaseError.isErrorCode(err, "ResourceInUseException")) {
-				nodeLogging?.log({
+				await nodeLogging?.log({
 					level: "info",
 					source: ScyllaDBViewConnector.CLASS_NAME,
 					ts: Date.now(),
@@ -117,7 +125,7 @@ export class ScyllaDBViewConnector<T>
 					data: { view: this._fullTableName }
 				});
 			} else {
-				nodeLogging?.log({
+				await nodeLogging?.log({
 					level: "error",
 					source: ScyllaDBViewConnector.CLASS_NAME,
 					ts: Date.now(),

@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-/* eslint-disable max-classes-per-file */
-import { ComponentFactory, I18n, ObjectHelper } from "@twin.org/core";
+import { ContextIdStore } from "@twin.org/context";
+import { ComponentFactory, ObjectHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -20,9 +20,9 @@ import {
 import { LoggingConnectorFactory } from "@twin.org/logging-models";
 import { LoggingService } from "@twin.org/logging-service";
 import { nameof } from "@twin.org/nameof";
-import { TEST_FIRESTORE_CONFIG } from "./setupTestEnv";
-import { FirestoreEntityStorageConnector } from "../src/firestoreEntityStorageConnector";
-import type { IFirestoreEntityStorageConnectorConfig } from "../src/models/IFirestoreEntityStorageConnectorConfig";
+import { TEST_FIRESTORE_CONFIG } from "./setupTestEnv.js";
+import { FirestoreEntityStorageConnector } from "../src/firestoreEntityStorageConnector.js";
+import type { IFirestoreEntityStorageConnectorConfig } from "../src/models/IFirestoreEntityStorageConnectorConfig.js";
 
 /**
  * Test SubType Definition.
@@ -101,13 +101,12 @@ class TestType {
 	public valueArray?: ValueType[];
 }
 
+let currentUser = "user";
+
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
-let entityStorage: FirestoreEntityStorageConnector<TestType>;
 
 describe("FirestoreEntityStorageConnector", () => {
 	beforeAll(async () => {
-		I18n.addDictionary("en", await import("../locales/en.json"));
-
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
 		EntitySchemaFactory.register(nameof<ValueType>(), () =>
@@ -115,6 +114,10 @@ describe("FirestoreEntityStorageConnector", () => {
 		);
 
 		initSchema();
+
+		ContextIdStore.getContextIds = vi
+			.fn()
+			.mockImplementation(() => ({ node: "node", tenant: "tenant", user: currentUser }));
 	});
 
 	beforeEach(async () => {
@@ -124,16 +127,15 @@ describe("FirestoreEntityStorageConnector", () => {
 		EntityStorageConnectorFactory.register("log-entry", () => memoryEntityStorage);
 		LoggingConnectorFactory.register("logging", () => new EntityStorageLoggingConnector());
 		ComponentFactory.register("logging", () => new LoggingService());
-
-		entityStorage = new FirestoreEntityStorageConnector({
-			entitySchema: nameof<TestType>(),
-			config: TEST_FIRESTORE_CONFIG
-		});
-		await entityStorage.bootstrap("logging");
 	});
 
 	afterEach(async () => {
 		try {
+			const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: TEST_FIRESTORE_CONFIG
+			});
+			await entityStorage.bootstrap("logging");
 			await entityStorage.collectionDelete();
 		} catch {}
 	});
@@ -141,7 +143,7 @@ describe("FirestoreEntityStorageConnector", () => {
 	test("can fail to construct when there are no options", async () => {
 		expect(
 			() =>
-				new FirestoreEntityStorageConnector(
+				new FirestoreEntityStorageConnector<TestType>(
 					undefined as unknown as {
 						entitySchema: string;
 						config: IFirestoreEntityStorageConnectorConfig;
@@ -162,7 +164,7 @@ describe("FirestoreEntityStorageConnector", () => {
 	test("can fail to construct when there is no schema", async () => {
 		expect(
 			() =>
-				new FirestoreEntityStorageConnector(
+				new FirestoreEntityStorageConnector<TestType>(
 					{} as unknown as {
 						entitySchema: string;
 						config: IFirestoreEntityStorageConnectorConfig;
@@ -181,17 +183,24 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can construct and bootstrap", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+		expect(entityStorage).toBeDefined();
 		const logs = memoryEntityStorage.getStore();
 		expect(logs).toBeDefined();
-		expect(logs?.length).toEqual(2);
-		expect(logs?.[0].message).toEqual("firestoreCreating");
-		expect(logs?.[1].message).toEqual("firestoreCreated");
-
-		expect(I18n.hasMessage("info.firestoreEntityStorageConnector.firestoreCreating")).toEqual(true);
-		expect(I18n.hasMessage("info.firestoreEntityStorageConnector.firestoreCreated")).toEqual(true);
+		expect(logs?.find(l => l.level === "error")).toBeUndefined();
 	});
 
 	test("can fail to set an item with no entity", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
 		await expect(entityStorage.set(undefined as unknown as TestType)).rejects.toMatchObject({
 			name: "GuardError",
 			message: "guard.objectUndefined",
@@ -203,6 +212,12 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can set an item", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -217,6 +232,12 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can set an item to update it with a condition", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
 		const entityId = "1";
 		const objectSet: TestType = {
 			id: entityId,
@@ -236,6 +257,12 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can fail to set an item with conditions not met", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -254,6 +281,12 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can set an item with conditions met", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -271,6 +304,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can set an item to update it", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet = {
 			id: entityId,
@@ -289,6 +327,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can fail to update an item with a condition", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		const objectSet: TestType = {
 			id: entityId,
@@ -308,6 +351,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can fail to get an item with no id", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		await expect(entityStorage.get(undefined as unknown as string)).rejects.toMatchObject({
 			name: "GuardError",
 			message: "guard.string",
@@ -319,12 +367,22 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can not get an item", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		const item = await entityStorage.get("20000");
 
 		expect(item).toBeUndefined();
 	});
 
 	test("can get an item", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		const objectSet = { id: "2", value1: "vvv", value2: 35 };
 		await entityStorage.set(objectSet);
 		const item = await entityStorage.get("2");
@@ -334,6 +392,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can get an item using secondary index", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		const objectSet = { id: "2", value1: "vvv", value2: 35 };
 		await entityStorage.set(objectSet);
 
@@ -344,6 +407,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can get an item with conditions met", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		const objectSet = { id: "1", value1: "aaa", value2: 35 };
 		await entityStorage.set(objectSet);
 
@@ -355,6 +423,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can fail to get an item with conditions not met", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		const objectSet = { id: "1", value1: "aaa", value2: 35 };
 		await entityStorage.set(objectSet);
 
@@ -365,6 +438,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can fail to remove an item with no id", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		await expect(entityStorage.remove(undefined as unknown as string)).rejects.toMatchObject({
 			name: "GuardError",
 			message: "guard.string",
@@ -376,6 +454,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can not remove an item", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		await entityStorage.set({ id: "10001", value1: "aaa", value2: 5555 });
 
 		const idToRemove = "1000999";
@@ -384,6 +467,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can remove an item", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		const idToRemove = "65432";
 		await entityStorage.set({ id: idToRemove, value1: "aaa", value2: 99 });
 		await entityStorage.remove(idToRemove);
@@ -393,6 +481,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can fail to remove an item with conditions not met", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		await entityStorage.set({ id: entityId, value1: "aaa", value2: 35 });
 
@@ -405,6 +498,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can remove an item with conditions met", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		const entityId = "1";
 		await entityStorage.set({ id: entityId, value1: "aaa", value2: 35 });
 
@@ -417,6 +515,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can find items with empty store", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		const result = await entityStorage.query();
 		expect(result).toBeDefined();
 		expect(result.entities.length).toEqual(0);
@@ -424,6 +527,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can find items with single entry", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		const objectSet = { id: "1", value1: "aaa", value2: 95 };
 		await entityStorage.set(objectSet);
 		const result = await entityStorage.query();
@@ -434,6 +542,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can find items with multiple entries", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 80; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -447,6 +560,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can find items with multiple entries and cursor", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 50; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -462,6 +580,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can find items with multiple entries and apply conditions", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -483,6 +606,11 @@ describe("FirestoreEntityStorageConnector", () => {
 	});
 
 	test("can find items with multiple entries and apply custom sort", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (30 - i).toString(),
@@ -512,7 +640,13 @@ describe("FirestoreEntityStorageConnector", () => {
 		expect(result.entities[0].value1).toEqual("20");
 		expect(result.entities[1].value1).toEqual("26");
 	});
+
 	test("can query items and get a reduced data set", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -526,7 +660,13 @@ describe("FirestoreEntityStorageConnector", () => {
 		expect(result.entities[0].value2).toBeUndefined();
 		expect(result.entities[0].value3).toBeUndefined();
 	});
+
 	test("can query sub items in object", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 5; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -551,40 +691,252 @@ describe("FirestoreEntityStorageConnector", () => {
 		expect(result).toBeDefined();
 		expect(result.entities.length).toEqual(5);
 	});
-	test("can query sub items in array using indexing field", async () => {
-		for (let i = 0; i < 5; i++) {
-			const item = {
-				id: (i + 1).toString(),
+
+	test("can set data with a partition key", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
 				value1: "aaa",
 				value2: 7777,
-				valueArray: [{ field: "name", value: "bob" }]
-			};
-			await entityStorage.set(item);
-		}
+				value3: { field1: new Date().toISOString() },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
 
-		for (let i = 0; i < 5; i++) {
-			const item = {
-				id: (i + 10).toString(),
-				value1: "aaa",
-				value2: 7777,
-				valueArray: [{ field: "name", value: "fred" }]
-			};
-			await entityStorage.set(item);
-		}
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: { field1: new Date().toISOString() },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
 
-		const queryCondition = {
-			conditions: [
+		currentUser = "user";
+		const item = await entityStorage.get("1");
+		expect(item).toEqual({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: { field1: expect.any(String) },
+			valueArray: [
 				{
-					property: "valueArrayFields",
-					value: "name:bob",
-					comparison: ComparisonOperator.Includes
+					field: "name",
+					value: "bob"
 				}
 			]
-		};
+		});
+	});
 
-		const result = await entityStorage.query(queryCondition);
+	test("can get data with a partition key", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
 
-		expect(result).toBeDefined();
-		expect(result.entities.length).toEqual(5);
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: { field1: new Date().toISOString() },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: { field1: new Date().toISOString() },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const item = await entityStorage.get("1");
+		expect(item).toEqual({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: { field1: expect.any(String) },
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
+	});
+
+	test("can remove data with a partition key", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: { field1: new Date().toISOString() },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: { field1: new Date().toISOString() },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		await entityStorage.remove("1");
+
+		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
+		expect(result.entities).toEqual([]);
+
+		currentUser = "user2";
+		const result2 = await entityStorage.query(
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined
+		);
+		expect(result2.entities).toEqual([
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: { field1: expect.any(String) },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
+	});
+
+	test("can query with a partition key", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: TEST_FIRESTORE_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: { field1: new Date().toISOString() },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: { field1: new Date().toISOString() },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
+		expect(result.entities).toEqual([
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: { field1: expect.any(String) },
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
 	});
 });

@@ -1,8 +1,0 @@
-{
-	"error": {
-		"synchronisedEntityStorageConnector": {
-			"missingRequiredProperty": "The property \"{requiredProperty}\" is required when using the Synchronised Entity Storage Connector.",
-			"missingRequiredPropertySort": "The property \"{requiredProperty}\" requires sorting attributes for the Synchronised Entity Storage Connector."
-		}
-	}
-}

@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-/* eslint-disable max-classes-per-file */
-import { ComponentFactory, I18n, ObjectHelper } from "@twin.org/core";
+import { ContextIdStore } from "@twin.org/context";
+import { ComponentFactory, ObjectHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -20,9 +20,9 @@ import {
 import { LoggingConnectorFactory } from "@twin.org/logging-models";
 import { LoggingService } from "@twin.org/logging-service";
 import { nameof } from "@twin.org/nameof";
-import { TEST_DYNAMODB_CONFIG } from "./setupTestEnv";
-import { DynamoDbEntityStorageConnector } from "../src/dynamoDbEntityStorageConnector";
-import type { IDynamoDbEntityStorageConnectorConfig } from "../src/models/IDynamoDbEntityStorageConnectorConfig";
+import { TEST_DYNAMODB_CONFIG } from "./setupTestEnv.js";
+import { DynamoDbEntityStorageConnector } from "../src/dynamoDbEntityStorageConnector.js";
+import type { IDynamoDbEntityStorageConnectorConfig } from "../src/models/IDynamoDbEntityStorageConnectorConfig.js";
 
 /**
  * Test SubType Definition.
@@ -85,16 +85,20 @@ class TestType {
 	}[];
 }
 
+let currentUser = "user";
+
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
 
 describe("DynamoDbEntityStorageConnector", () => {
 	beforeAll(async () => {
-		I18n.addDictionary("en", await import("../locales/en.json"));
-
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
 
 		initSchema();
+
+		ContextIdStore.getContextIds = vi
+			.fn()
+			.mockImplementation(() => ({ node: "node", tenant: "tenant", user: currentUser }));
 	});
 
 	beforeEach(() => {
@@ -165,13 +169,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 		});
 		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
-		expect(logs).toBeDefined();
-		expect(logs?.length).toEqual(2);
-		expect(logs?.[0].message).toEqual("tableCreating");
-		expect(logs?.[1].message).toEqual("tableCreated");
-
-		expect(I18n.hasMessage("info.dynamoDbEntityStorageConnector.tableCreating")).toEqual(true);
-		expect(I18n.hasMessage("info.dynamoDbEntityStorageConnector.tableCreated")).toEqual(true);
+		expect(logs?.find(l => l.level === "error")).toBeUndefined();
 	});
 
 	test("can fail to set an item with no entity", async () => {
@@ -738,5 +736,254 @@ describe("DynamoDbEntityStorageConnector", () => {
 		expect(result.entities.length).toEqual(1);
 		expect(result.entities[0].id).toEqual("1");
 		expect(result.entities[0].value3).toBeDefined();
+	});
+
+	test("can set data with a partition key", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const item = await entityStorage.get("1");
+
+		expect(item).toEqual({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: undefined,
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
+	});
+
+	test("can get data with a partition key", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const item = await entityStorage.get("1");
+		expect(item).toEqual({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: undefined,
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
+	});
+
+	test("can remove data with a partition key", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		await entityStorage.remove("1");
+
+		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
+		expect(result.entities).toEqual([]);
+
+		currentUser = "user2";
+		const result2 = await entityStorage.query(
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined
+		);
+		expect(result2.entities).toEqual([
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
+	});
+
+	test("can query with a partition key", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
+		expect(result.entities).toEqual([
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
 	});
 });

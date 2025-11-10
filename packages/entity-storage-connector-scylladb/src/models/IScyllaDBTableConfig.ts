@@ -1,6 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import type { IScyllaDBConfig } from "./IScyllaDBConfig";
+import type { IScyllaDBConfig } from "./IScyllaDBConfig.js";
 
 /**
  * Definition of MySQL DB configuration.

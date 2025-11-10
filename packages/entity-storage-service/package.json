@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-service",
-	"version": "0.0.2-next.10",
+	"version": "0.0.3-next.0",
 	"description": "Entity Storage contract implementation and REST endpoint definitions",
 	"repository": {
 		"type": "git",
@@ -16,60 +16,54 @@
 	"scripts": {
 		"clean": "rimraf dist coverage docs/reference",
 		"build": "tspc",
-		"dev": "nodemon --watch src --ext ts --exec \"npm run build && npm run bundle:esm\"",
+		"dev": "nodemon --watch src --ext ts --exec \"npm run build\"",
 		"test": "vitest --run --config ./vitest.config.ts --no-cache",
 		"test:build": "tspc -p ./tests/tsconfig.json --noEmit",
 		"validate-locales": "validate-locales",
-		"coverage": "vitest --run --coverage --config ./vitest.config.ts --no-cache",
-		"bundle:esm": "rollup --config rollup.config.mjs --environment MODULE:esm",
-		"bundle:cjs": "rollup --config rollup.config.mjs --environment MODULE:cjs",
-		"bundle": "npm run bundle:esm && npm run bundle:cjs",
+		"test:coverage": "vitest --run --coverage --config ./vitest.config.ts --no-cache",
 		"docs:clean": "rimraf docs/reference",
 		"docs:generate": "typedoc",
 		"docs:api": "ts-to-openapi ./ts-to-openapi.json ./docs/open-api/spec.json",
 		"docs": "npm run docs:clean && npm run docs:generate && npm run docs:api",
-		"dist": "npm run clean && npm run build && npm run validate-locales && npm run test:build && npm run test && npm run bundle && npm run docs",
-		"dist:no-test": "npm run clean && npm run build && npm run bundle && npm run docs"
+		"dist": "npm run clean && npm run build && npm run validate-locales && npm run test:build && npm run test && npm run docs",
+		"dist:no-test": "npm run clean && npm run build && npm run test:build && npm run docs"
 	},
 	"dependencies": {
 		"@twin.org/api-models": "next",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.0.2-next.10",
+		"@twin.org/entity-storage-models": "0.0.3-next.0",
 		"@twin.org/nameof": "next",
 		"@twin.org/web": "next"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.0.2-next.10",
+		"@twin.org/entity-storage-connector-memory": "0.0.3-next.0",
 		"@twin.org/ts-to-openapi": "next",
 		"@twin.org/nameof-transformer": "next",
 		"@twin.org/nameof-vitest-plugin": "next",
 		"@twin.org/validate-locales": "next",
-		"@vitest/coverage-v8": "3.2.4",
+		"@vitest/coverage-v8": "4.0.8",
 		"copyfiles": "2.4.1",
 		"nodemon": "3.1.10",
-		"rimraf": "6.0.1",
-		"rollup": "4.52.4",
+		"rimraf": "6.1.0",
 		"ts-patch": "3.3.0",
-		"typedoc": "0.28.13",
+		"typedoc": "0.28.14",
 		"typedoc-plugin-markdown": "4.9.0",
 		"typescript": "5.9.3",
-		"vitest": "3.2.4"
+		"vitest": "4.0.8"
 	},
-	"main": "./dist/cjs/index.cjs",
-	"module": "./dist/esm/index.mjs",
+	"main": "./dist/es/index.js",
 	"types": "./dist/types/index.d.ts",
 	"exports": {
 		".": {
 			"types": "./dist/types/index.d.ts",
-			"require": "./dist/cjs/index.cjs",
-			"import": "./dist/esm/index.mjs"
+			"import": "./dist/es/index.js",
+			"default": "./dist/es/index.js"
 		},
 		"./locales/*.json": "./locales/*.json"
 	},
 	"files": [
-		"dist/cjs",
-		"dist/esm",
+		"dist/es",
 		"dist/types",
 		"locales",
 		"docs"

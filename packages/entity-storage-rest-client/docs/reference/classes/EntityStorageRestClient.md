@@ -22,7 +22,7 @@ Client for performing entity storage through to REST endpoints.
 
 > **new EntityStorageRestClient**\<`T`\>(`config`): `EntityStorageRestClient`\<`T`\>
 
-Create a new instance of EntityStorageClient.
+Create a new instance of EntityStorageRestClient.
 
 #### Parameters
 
@@ -49,6 +49,24 @@ The configuration for the client.
 Runtime name for the class.
 
 ## Methods
+
+### className()
+
+> **className**(): `string`
+
+Returns the class name of the component.
+
+#### Returns
+
+`string`
+
+The class name of the component.
+
+#### Implementation of
+
+`IEntityStorageComponent.className`
+
+***
 
 ### set()
 
@@ -78,7 +96,7 @@ The id of the entity.
 
 ### get()
 
-> **get**(`id`, `secondaryIndex?`): `Promise`\<`undefined` \| `T`\>
+> **get**(`id`, `secondaryIndex?`): `Promise`\<`T` \| `undefined`\>
 
 Get an entity.
 
@@ -98,7 +116,7 @@ Get the item using a secondary index.
 
 #### Returns
 
-`Promise`\<`undefined` \| `T`\>
+`Promise`\<`T` \| `undefined`\>
 
 The object if it can be found or undefined.
 

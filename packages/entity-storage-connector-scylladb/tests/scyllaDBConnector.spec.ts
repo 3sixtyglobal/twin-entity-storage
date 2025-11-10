@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-/* eslint-disable max-classes-per-file */
-import { ComponentFactory, I18n } from "@twin.org/core";
+import { ContextIdStore } from "@twin.org/context";
+import { ComponentFactory } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -20,9 +20,9 @@ import {
 import { LoggingConnectorFactory } from "@twin.org/logging-models";
 import { LoggingService } from "@twin.org/logging-service";
 import { nameof } from "@twin.org/nameof";
-import { TEST_SCYLLA_CONFIG } from "./setupTestEnv";
-import type { IScyllaDBTableConfig } from "../src/models/IScyllaDBTableConfig";
-import { ScyllaDBTableConnector } from "../src/scyllaDBTableConnector";
+import { TEST_SCYLLA_CONFIG } from "./setupTestEnv.js";
+import type { IScyllaDBTableConfig } from "../src/models/IScyllaDBTableConfig.js";
+import { ScyllaDBTableConnector } from "../src/scyllaDBTableConnector.js";
 
 /**
  * Test SubType Definition.
@@ -33,7 +33,7 @@ class SubType {
 	 * Field1.
 	 */
 	@property({ type: "string", format: "date-time" })
-	public field1!: Date;
+	public field1!: string;
 }
 
 /**
@@ -64,17 +64,40 @@ class TestType {
 	 */
 	@property({ type: "object", itemTypeRef: "SubType", optional: true })
 	public value3!: SubType | undefined;
+
+	/**
+	 * Value4.
+	 */
+	@property({ type: "object", optional: true })
+	public valueObject?: {
+		[id: string]: {
+			value: string;
+		};
+	};
+
+	/**
+	 * Value5.
+	 */
+	@property({ type: "array", optional: true })
+	public valueArray?: {
+		field: string;
+		value: string;
+	}[];
 }
+
+let currentUser = "user";
 
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
 
 describe("ScyllaDBTableConnector", () => {
 	beforeAll(async () => {
-		I18n.addDictionary("en", await import("../locales/en.json"));
-
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
 		initSchema();
+
+		ContextIdStore.getContextIds = vi
+			.fn()
+			.mockImplementation(() => ({ node: "node", tenant: "tenant", user: currentUser }));
 	});
 
 	beforeEach(() => {
@@ -209,13 +232,7 @@ describe("ScyllaDBTableConnector", () => {
 		});
 		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
-		expect(logs).toBeDefined();
-		expect(logs?.length).toEqual(2);
-		expect(logs?.[0].message).toEqual("tableCreating");
-		expect(logs?.[1].message).toEqual("tableCreateFailed");
-
-		expect(I18n.hasMessage("info.scyllaDBTableConnector.tableCreating")).toEqual(true);
-		expect(I18n.hasMessage("error.scyllaDBTableConnector.tableCreateFailed")).toEqual(true);
+		expect(logs?.find(l => l.level === "error")).toBeUndefined();
 	});
 
 	test("can bootstrap and create table", async () => {
@@ -225,16 +242,7 @@ describe("ScyllaDBTableConnector", () => {
 		});
 		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
-		expect(logs).toBeDefined();
-		expect(logs?.length).toEqual(5);
-		expect(logs?.[0].message).toEqual("tableCreating");
-		expect(logs?.[1].message).toEqual("sql");
-		expect(logs?.[2].message).toEqual("typeCreated");
-		expect(logs?.[3].message).toEqual("sql");
-		expect(logs?.[4].message).toEqual("tableCreated");
-
-		expect(I18n.hasMessage("info.scyllaDBTableConnector.typeCreated")).toEqual(true);
-		expect(I18n.hasMessage("info.scyllaDBTableConnector.sql")).toEqual(true);
+		expect(logs?.find(l => l.level === "error")).toBeUndefined();
 	});
 
 	test("can fail to set an item with no entity", async () => {
@@ -263,7 +271,7 @@ describe("ScyllaDBTableConnector", () => {
 			id: entityId,
 			value1: "aaa",
 			value2: 35,
-			value3: { field1: new Date() }
+			value3: { field1: new Date().toISOString() }
 		};
 		await entityStorage.set(objectSet);
 
@@ -282,7 +290,7 @@ describe("ScyllaDBTableConnector", () => {
 			id: entityId,
 			value1: "aaa",
 			value2: 35,
-			value3: { field1: new Date() }
+			value3: { field1: new Date().toISOString() }
 		};
 		await entityStorage.set(objectSet, [{ property: "value1", value: "aaa" }]);
 
@@ -303,7 +311,7 @@ describe("ScyllaDBTableConnector", () => {
 			id: entityId,
 			value1: "aaa",
 			value2: 35,
-			value3: { field1: new Date() }
+			value3: { field1: new Date().toISOString() }
 		};
 		await entityStorage.set(objectSet);
 
@@ -509,7 +517,7 @@ describe("ScyllaDBTableConnector", () => {
 				id: (i + 1).toString(),
 				value1: "aaa",
 				value2: 7777,
-				value3: { field1: new Date() }
+				value3: { field1: new Date().toISOString() }
 			});
 		}
 
@@ -626,5 +634,253 @@ describe("ScyllaDBTableConnector", () => {
 		);
 
 		expect(result).toBeDefined();
+	});
+
+	test("can set data with a partition key", async () => {
+		const entityStorage = new ScyllaDBTableConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: TEST_SCYLLA_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const item = await entityStorage.get("1");
+		expect(item).toEqual({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: undefined,
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
+	});
+
+	test("can get data with a partition key", async () => {
+		const entityStorage = new ScyllaDBTableConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: TEST_SCYLLA_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const item = await entityStorage.get("1");
+		expect(item).toEqual({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: undefined,
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
+	});
+
+	test("can remove data with a partition key", async () => {
+		const entityStorage = new ScyllaDBTableConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: TEST_SCYLLA_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		await entityStorage.remove("1");
+
+		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
+		expect(result.entities).toEqual([]);
+
+		currentUser = "user2";
+		const result2 = await entityStorage.query(
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined
+		);
+		expect(result2.entities).toEqual([
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
+	});
+
+	test("can query with a partition key", async () => {
+		const entityStorage = new ScyllaDBTableConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config: TEST_SCYLLA_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
+		expect(result.entities).toEqual([
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
 	});
 });

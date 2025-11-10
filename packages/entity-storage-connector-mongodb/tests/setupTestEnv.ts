@@ -3,7 +3,7 @@
 import path from "node:path";
 import { Coerce, Guards } from "@twin.org/core";
 import * as dotenv from "dotenv";
-import type { IMongoDbEntityStorageConnectorConfig } from "../src/models/IMongoDbEntityStorageConnectorConfig";
+import type { IMongoDbEntityStorageConnectorConfig } from "../src/models/IMongoDbEntityStorageConnectorConfig.js";
 
 dotenv.config({
 	path: [path.join(__dirname, ".env"), path.join(__dirname, ".env.dev")],

@@ -64,8 +64,7 @@ This command performs the following operations in sequence:
 
 Each package will have a `dist` folder containing:
 
-- **`esm/`** - ES Module format for modern bundlers and Node.js
-- **`cjs/`** - CommonJS format for Node.js compatibility
+- **`es/`** - ES Module format for modern bundlers and Node.js
 - **`types/`** - TypeScript declaration files (`.d.ts`)
 - **`docs/`** - Auto-generated API documentation in Markdown format
 
@@ -89,23 +88,20 @@ npm run dist
 These command are available in each package.
 
 ```shell
-# Build without tests (faster during development, you will also need to run npm run bundle:esm)
+# Build without tests (faster during development)
 npm run build
 
 # Watch the files and auto build and package when spotting changes
 npm run dev
-
-# Bundle the esm packages
-npm run bundle:esm
-
-# Bundle the cjs packages
-npm run bundle:cjs
 
 # Build the docs
 npm run docs
 
 # Run the tests
 npm run test
+
+# Run the tests with coverage
+npm run test:coverage
 
 # Complete build (build, package, test and docs)
 npm run dist

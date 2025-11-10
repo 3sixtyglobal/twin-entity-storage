@@ -1,10 +1,11 @@
 {
 	"info": {
 		"scyllaDBTableConnector": {
+			"keyspaceCreating": "Creating keyspace \"{keyspace}\"",
+			"keyspaceExists": "Skipping create keyspace \"{keyspace}\" as it already exists",
 			"tableCreating": "Creating table \"{table}\"",
-			"tableCreated": "Created table \"{table}\"",
 			"tableExists": "Skipping create table \"{table}\" as it already exists",
-			"typeCreated": "Created type \"{typeName}\"",
+			"typeCreating": "Creating type \"{typeName}\"",
 			"sql": "SQL: \"{sql}\""
 		},
 		"scyllaDBViewConnector": {
@@ -22,7 +23,6 @@
 			"dropTableFailed": " \"{table}\" cannot be dropped",
 			"truncateTableFailed": " \"{table}\" cannot be dropped",
 			"removeFailed": "Removing item with \"{id}\" failed",
-			"itemTypeNotDefined": "The item type is not defined",
 			"setFailed": "Setting item with \"{id}\" failed"
 		},
 		"scyllaDBViewConnector": {

@@ -3,6 +3,7 @@
 		"cosmosDbEntityStorageConnector": {
 			"databaseCreating": "Database \"{databaseId}\" creating",
 			"databaseExists": "Database \"{databaseId}\" created or it already exists",
+			"containerCreating": "Container \"{containerId}\" creating",
 			"containerExists": "Container \"{containerId}\" created or it already exists"
 		}
 	},
@@ -16,7 +17,6 @@
 			"conditionalNotSupported": "Conditional operator \"{operator}\" is not supported",
 			"sortSingle": "You can only sort by a single property",
 			"sortNotIndexed": "The property \"{property}\" is not indexed and cannot be used for sorting",
-			"containerNotExisting": "The expected container definition is undefined",
 			"containerCreateFailed": "The container couldn't be created \"{containerId}\"",
 			"databaseCreateFailed": "Unable to create database \"{databaseId}\"",
 			"containerDoesNotExist": "Container \"{containerId}\" does not exist"

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0.
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
 import { BaseError, Coerce, ComponentFactory, Guards, Is, ObjectHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
@@ -9,6 +10,7 @@ import {
 	EntitySchemaFactory,
 	EntitySchemaHelper,
 	EntitySorter,
+	LogicalOperator,
 	type EntityCondition,
 	type IEntitySchema,
 	type IEntitySchemaProperty,
@@ -17,7 +19,7 @@ import {
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import type { IFileEntityStorageConnectorConstructorOptions } from "./models/IFileEntityStorageConnectorConstructorOptions";
+import type { IFileEntityStorageConnectorConstructorOptions } from "./models/IFileEntityStorageConnectorConstructorOptions.js";
 
 /**
  * Class for performing entity storage operations in file.
@@ -35,10 +37,22 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	private static readonly _DEFAULT_LIMIT: number = 20;
 
 	/**
+	 * Partition key for the operation.
+	 * @internal
+	 */
+	private static readonly _PARTITION_KEY: string = "partitionId";
+
+	/**
 	 * The schema for the entity.
 	 * @internal
 	 */
 	private readonly _entitySchema: IEntitySchema<T>;
+
+	/**
+	 * The keys to use from the context ids to create partitions.
+	 * @internal
+	 */
+	private readonly _partitionContextIds?: string[];
 
 	/**
 	 * The primary key.
@@ -70,6 +84,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 			options.config.directory
 		);
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
+		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 		this._directory = path.resolve(options.config.directory);
 	}
@@ -129,6 +144,14 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	}
 
 	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return FileEntityStorageConnector.CLASS_NAME;
+	}
+
+	/**
 	 * Get the schema for the entities.
 	 * @returns The schema for the entities.
 	 */
@@ -150,11 +173,27 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	): Promise<T | undefined> {
 		Guards.stringValue(FileEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		const store = await this.readStore();
 
-		const foundIndex = this.findItem(store, id, secondaryIndex, conditions);
+		const finalConditions = conditions ?? [];
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.push({
+				property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
+				value: partitionKey
+			});
+		}
 
-		return foundIndex === -1 ? undefined : store[foundIndex];
+		const index = this.findItem(store, id, secondaryIndex, finalConditions);
+		const item = index >= 0 ? store[index] : undefined;
+
+		if (Is.objectValue(item)) {
+			ObjectHelper.propertyDelete(item, FileEntityStorageConnector._PARTITION_KEY);
+		}
+
+		return item;
 	}
 
 	/**
@@ -166,20 +205,38 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(FileEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		EntitySchemaHelper.validateEntity(entity, this.getSchema());
 
 		const store = await this.readStore();
 
+		const finalEntity = ObjectHelper.clone(entity);
+
+		const finalConditions = conditions ?? [];
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.push({
+				property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
+				value: partitionKey
+			});
+			ObjectHelper.propertySet(
+				finalEntity,
+				FileEntityStorageConnector._PARTITION_KEY,
+				partitionKey
+			);
+		}
+
 		const existingIndex = this.findItem(
 			store,
-			entity[this._primaryKey.property] as string,
+			finalEntity[this._primaryKey.property] as string,
 			undefined,
-			conditions
+			finalConditions
 		);
 		if (existingIndex >= 0) {
-			store[existingIndex] = entity;
+			store[existingIndex] = finalEntity;
 		} else {
-			store.push(entity);
+			store.push(finalEntity);
 		}
 
 		await this.writeStore(store);
@@ -197,9 +254,20 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	): Promise<void> {
 		Guards.stringValue(FileEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		const store = await this.readStore();
 
-		const index = this.findItem(store, id, undefined, conditions);
+		const finalConditions = conditions ?? [];
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.push({
+				property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
+				value: partitionKey
+			});
+		}
+
+		const index = this.findItem(store, id, undefined, finalConditions);
 
 		if (index >= 0) {
 			store.splice(index, 1);
@@ -236,7 +304,27 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		 */
 		cursor?: string;
 	}> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
 		let allEntities = await this.readStore();
+
+		const finalConditions: EntityCondition<T> = {
+			conditions: [],
+			logicalOperator: LogicalOperator.And
+		};
+
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.conditions.push({
+				property: FileEntityStorageConnector._PARTITION_KEY,
+				comparison: ComparisonOperator.Equals,
+				value: partitionKey
+			});
+		}
+
+		if (!Is.empty(conditions)) {
+			finalConditions.conditions.push(conditions);
+		}
 
 		const entities = [];
 		const finalLimit = limit ?? FileEntityStorageConnector._DEFAULT_LIMIT;
@@ -252,8 +340,13 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 			const startIndex = Coerce.number(cursor) ?? 0;
 
 			for (let i = startIndex; i < allEntities.length; i++) {
-				if (EntityConditions.check(allEntities[i], conditions) && entities.length < finalLimit) {
-					entities.push(ObjectHelper.pick(allEntities[i], properties));
+				if (
+					EntityConditions.check(allEntities[i], finalConditions) &&
+					entities.length < finalLimit
+				) {
+					const entity = ObjectHelper.pick(allEntities[i], properties);
+					ObjectHelper.propertyDelete(entity, FileEntityStorageConnector._PARTITION_KEY);
+					entities.push(entity);
 					if (entities.length >= finalLimit) {
 						if (i < allEntities.length - 1) {
 							nextCursor = (i + 1).toString();

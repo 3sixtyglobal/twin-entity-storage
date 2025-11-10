@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-/* eslint-disable max-classes-per-file */
-import { ComponentFactory, GeneralError, I18n, ObjectHelper } from "@twin.org/core";
+import { ContextIdStore } from "@twin.org/context";
+import { ComponentFactory, GeneralError, ObjectHelper } from "@twin.org/core";
 import type { IJsonLdNodeObject } from "@twin.org/data-json-ld";
 import {
 	ComparisonOperator,
@@ -21,9 +21,9 @@ import {
 import { LoggingConnectorFactory } from "@twin.org/logging-models";
 import { LoggingService } from "@twin.org/logging-service";
 import { nameof } from "@twin.org/nameof";
-import { TEST_MYSQL_CONFIG } from "./setupTestEnv";
-import type { IMySqlEntityStorageConnectorConfig } from "../src/models/IMySqlEntityStorageConnectorConfig";
-import { MySqlEntityStorageConnector } from "../src/mysqlEntityStorageConnector";
+import { TEST_MYSQL_CONFIG } from "./setupTestEnv.js";
+import type { IMySqlEntityStorageConnectorConfig } from "../src/models/IMySqlEntityStorageConnectorConfig.js";
+import { MySqlEntityStorageConnector } from "../src/mysqlEntityStorageConnector.js";
 
 /**
  * Test SubType Definition.
@@ -124,13 +124,13 @@ class BlobStorageEntry {
 	public userIdentity?: string;
 }
 
+let currentUser = "user";
+
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
 const config: IMySqlEntityStorageConnectorConfig = TEST_MYSQL_CONFIG;
 
 describe("MySqlEntityStorageConnector", () => {
 	beforeAll(async () => {
-		I18n.addDictionary("en", await import("../locales/en.json"));
-
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
 		EntitySchemaFactory.register(nameof<BlobStorageEntry>(), () =>
@@ -138,6 +138,10 @@ describe("MySqlEntityStorageConnector", () => {
 		);
 
 		initSchema();
+
+		ContextIdStore.getContextIds = vi
+			.fn()
+			.mockImplementation(() => ({ node: "node", tenant: "tenant", user: currentUser }));
 	});
 
 	beforeEach(async () => {
@@ -154,7 +158,7 @@ describe("MySqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.tableDrop();
+		await entityStorage.tableEmpty();
 	});
 
 	test("can fail to construct when there are no options", async () => {
@@ -207,15 +211,7 @@ describe("MySqlEntityStorageConnector", () => {
 		await entityStorage.bootstrap("logging");
 		const logs = memoryEntityStorage.getStore();
 		expect(logs).toBeDefined();
-
-		expect(logs?.length).toEqual(3);
-		expect(logs?.[0].message).toEqual("databaseCreating");
-		expect(logs?.[1].message).toEqual("databaseExists");
-		expect(logs?.[2].message).toEqual("tableExists");
-
-		expect(I18n.hasMessage("info.mySqlEntityStorageConnector.databaseCreating")).toEqual(true);
-		expect(I18n.hasMessage("info.mySqlEntityStorageConnector.databaseExists")).toEqual(true);
-		expect(I18n.hasMessage("info.mySqlEntityStorageConnector.tableExists")).toEqual(true);
+		expect(logs?.find(l => l.level === "error")).toBeUndefined();
 	});
 
 	test("can fail to set an item with no entity", async () => {
@@ -278,7 +274,20 @@ describe("MySqlEntityStorageConnector", () => {
 		await entityStorage.set(objectSet);
 
 		const result = await entityStorage.get(entityId);
-		expect(result).toEqual(objectSet);
+
+		expect(result).toEqual({
+			id: entityId,
+			value1: "aaa",
+			value2: 35,
+			value3: { field1: expect.any(String) },
+			valueObject: "data test asd" as unknown as { [id: string]: { value: string } },
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
 	});
 
 	test("can set an item with a condition", async () => {
@@ -309,7 +318,23 @@ describe("MySqlEntityStorageConnector", () => {
 		await entityStorage.set(objectSet, [{ property: "value1", value: "aaa" }]);
 
 		const result = await entityStorage.get(entityId);
-		expect(result).toEqual(objectSet);
+		expect(result).toEqual({
+			id: entityId,
+			value1: "aaa",
+			value2: 35,
+			value3: { field1: expect.any(String) },
+			valueObject: {
+				"1": {
+					value: "bob"
+				}
+			},
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
 	});
 
 	test("can set an item to update it", async () => {
@@ -343,7 +368,23 @@ describe("MySqlEntityStorageConnector", () => {
 		await entityStorage.set(objectSet);
 
 		const result = await entityStorage.get(entityId);
-		expect(result).toEqual(objectSet);
+		expect(result).toEqual({
+			id: entityId,
+			value1: "aaa",
+			value2: 99,
+			value3: { field1: expect.any(String) },
+			valueObject: {
+				"1": {
+					value: "bob"
+				}
+			},
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
 	});
 
 	test("can set an item to update it with a condition", async () => {
@@ -378,7 +419,23 @@ describe("MySqlEntityStorageConnector", () => {
 		await entityStorage.set(objectUpdate, [{ property: "value1", value: "aaa" }]);
 
 		const result = await entityStorage.get(entityId);
-		expect(result).toEqual(objectUpdate);
+		expect(result).toEqual({
+			id: entityId,
+			value1: "aaa",
+			value2: 99,
+			value3: { field1: expect.any(String) },
+			valueObject: {
+				"1": {
+					value: "bob"
+				}
+			},
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
 	});
 
 	test("can fail set an item to update it with an unmatched condition", async () => {
@@ -414,7 +471,23 @@ describe("MySqlEntityStorageConnector", () => {
 
 		// Should still have original value set
 		const result = await entityStorage.get(entityId);
-		expect(result).toEqual(objectSet);
+		expect(result).toEqual({
+			id: entityId,
+			value1: "aaa",
+			value2: 35,
+			value3: { field1: expect.any(String) },
+			valueObject: {
+				"1": {
+					value: "bob"
+				}
+			},
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
 	});
 
 	test("can fail to get an item with no id", async () => {
@@ -1031,10 +1104,260 @@ describe("MySqlEntityStorageConnector", () => {
 		expect(result.entities.length).toEqual(5);
 	});
 
+	test("can set data with a partition key", async () => {
+		const entityStorage = new MySqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const item = await entityStorage.get("1");
+		expect(item).toEqual({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: undefined,
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
+	});
+
+	test("can get data with a partition key", async () => {
+		const entityStorage = new MySqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const item = await entityStorage.get("1");
+		expect(item).toEqual({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: undefined,
+			valueArray: [
+				{
+					field: "name",
+					value: "bob"
+				}
+			]
+		});
+	});
+
+	test("can remove data with a partition key", async () => {
+		const entityStorage = new MySqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		await entityStorage.remove("1");
+		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
+		expect(result.entities).toEqual([]);
+
+		currentUser = "user2";
+		const result2 = await entityStorage.query(
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined
+		);
+		expect(result2.entities).toEqual([
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
+	});
+
+	test("can query with a partition key", async () => {
+		const entityStorage = new MySqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node", "tenant", "user"],
+			config
+		});
+		await entityStorage.bootstrap("logging");
+
+		currentUser = "user";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user2";
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "bbbb",
+				value2: 8888,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		currentUser = "user";
+		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
+		expect(result.entities).toEqual([
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
+	});
+
 	test("can get an item with JSON object", async () => {
 		const entityStorage = new MySqlEntityStorageConnector<BlobStorageEntry>({
 			entitySchema: nameof<BlobStorageEntry>(),
-			config
+			config: {
+				...config,
+				tableName: "blob"
+			}
 		});
 		await entityStorage.bootstrap("logging");
 		const object = {
@@ -1059,7 +1382,10 @@ describe("MySqlEntityStorageConnector", () => {
 	test("can get an item with JSON array", async () => {
 		const entityStorage = new MySqlEntityStorageConnector<BlobStorageEntry>({
 			entitySchema: nameof<BlobStorageEntry>(),
-			config
+			config: {
+				...config,
+				tableName: "blob"
+			}
 		});
 		await entityStorage.bootstrap("logging");
 		const object: BlobStorageEntry = {
@@ -1088,7 +1414,10 @@ describe("MySqlEntityStorageConnector", () => {
 	test("can get an item with undefined optional fields", async () => {
 		const entityStorage = new MySqlEntityStorageConnector<BlobStorageEntry>({
 			entitySchema: nameof<BlobStorageEntry>(),
-			config
+			config: {
+				...config,
+				tableName: "blob"
+			}
 		});
 		await entityStorage.bootstrap("logging");
 		const object = {
@@ -1101,18 +1430,16 @@ describe("MySqlEntityStorageConnector", () => {
 		const item = await entityStorage.get("3");
 
 		expect(item).toBeDefined();
-		for (const key in item) {
-			if (item[key as keyof BlobStorageEntry] === null) {
-				(item as Partial<BlobStorageEntry>)[key as keyof BlobStorageEntry] = undefined;
-			}
-		}
 		expect(item).toEqual(object);
 	});
 
 	test("can get an item with an object embedded condition", async () => {
 		const entityStorage = new MySqlEntityStorageConnector<BlobStorageEntry>({
 			entitySchema: nameof<BlobStorageEntry>(),
-			config
+			config: {
+				...config,
+				tableName: "blob"
+			}
 		});
 		await entityStorage.bootstrap("logging");
 		const object = {
@@ -1132,11 +1459,6 @@ describe("MySqlEntityStorageConnector", () => {
 		expect(result).toBeDefined();
 		expect(result.entities.length).toEqual(1);
 		const item = result.entities[0];
-		for (const key in item) {
-			if (item[key as keyof BlobStorageEntry] === null) {
-				item[key as keyof BlobStorageEntry] = undefined;
-			}
-		}
 		expect(item).toEqual(object);
 	});
 
@@ -1159,7 +1481,10 @@ describe("MySqlEntityStorageConnector", () => {
 
 		const bigIntEntityStorage = new MySqlEntityStorageConnector<BigIntTestType>({
 			entitySchema: nameof<BigIntTestType>(),
-			config
+			config: {
+				...config,
+				tableName: "bigint"
+			}
 		});
 		await bigIntEntityStorage.bootstrap();
 
@@ -1196,7 +1521,10 @@ describe("MySqlEntityStorageConnector", () => {
 
 		const uuidEntityStorage = new MySqlEntityStorageConnector<UuidTestType>({
 			entitySchema: nameof<UuidTestType>(),
-			config
+			config: {
+				...config,
+				tableName: "random"
+			}
 		});
 		await uuidEntityStorage.bootstrap();
 

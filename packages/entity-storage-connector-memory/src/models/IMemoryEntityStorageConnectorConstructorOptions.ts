@@ -9,4 +9,9 @@ export interface IMemoryEntityStorageConnectorConstructorOptions {
 	 * The schema for the entity.
 	 */
 	entitySchema: string;
+
+	/**
+	 * The keys to use from the context ids to create partitions.
+	 */
+	partitionContextIds?: string[];
 }

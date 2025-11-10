@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import type { IRestRouteEntryPoint } from "@twin.org/api-models";
-import { generateRestRoutesEntityStorage, tagsEntityStorage } from "./entityStorageRoutes";
+import { generateRestRoutesEntityStorage, tagsEntityStorage } from "./entityStorageRoutes.js";
 
 /**
  * These are dummy entry points for the entity storage service.

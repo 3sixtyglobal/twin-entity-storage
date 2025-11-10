@@ -68,6 +68,24 @@ True if the bootstrapping process was successful.
 
 ***
 
+### className()
+
+> **className**(): `string`
+
+Returns the class name of the component.
+
+#### Returns
+
+`string`
+
+The class name of the component.
+
+#### Implementation of
+
+`IEntityStorageConnector.className`
+
+***
+
 ### getSchema()
 
 > **getSchema**(): `IEntitySchema`
@@ -88,7 +106,7 @@ The schema for the entities.
 
 ### get()
 
-> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`undefined` \| `T`\>
+> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
 
 Get an entity.
 
@@ -114,7 +132,7 @@ The optional conditions to match for the entities.
 
 #### Returns
 
-`Promise`\<`undefined` \| `T`\>
+`Promise`\<`T` \| `undefined`\>
 
 The object if it can be found or undefined.
 

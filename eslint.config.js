@@ -138,7 +138,7 @@ const jsRules = {
 	'no-shadow-restricted-names': 'error',
 	'no-sparse-arrays': 'error',
 	'no-template-curly-in-string': 'error',
-	'no-throw-literal': 'error',
+	'no-throw-literal': 'off',
 	'no-trailing-spaces': 'error',
 	'no-undef-init': 'error',
 	'no-unexpected-multiline': 'error',
@@ -365,7 +365,7 @@ const tsRules = {
 	'@typescript-eslint/promise-function-async': 'error',
 	'@typescript-eslint/restrict-plus-operands': 'error',
 	'@typescript-eslint/return-await': 'error',
-	'@typescript-eslint/switch-exhaustiveness-check': 'error',
+	'@typescript-eslint/switch-exhaustiveness-check': 'off',
 	'@typescript-eslint/triple-slash-reference': 'error',
 	'@typescript-eslint/typedef': ['error', { arrowParameter: false }],
 	'@typescript-eslint/unbound-method': 'error',
@@ -557,12 +557,7 @@ if (customModule?.extendRules) {
 const config = [
 	// Global ignores
 	{
-		ignores: [
-			'**/dist/**',
-			'**/coverage/**',
-			'**/rollup.config.mjs',
-			'**/vitest.config.ts.timestamp*'
-		]
+		ignores: ['**/dist/**', '**/coverage/**', '**/vitest.config.ts.timestamp*']
 	},
 
 	// Base JavaScript configuration
@@ -570,7 +565,7 @@ const config = [
 
 	// JavaScript files
 	{
-		files: ['**/*.js', '**/*.cjs', '**/*.mjs'],
+		files: ['**/*.js', '**/*.mjs'],
 		languageOptions: {
 			ecmaVersion: 2022,
 			sourceType: 'module',
@@ -679,9 +674,13 @@ const config = [
 	{
 		files: ['**/tests/**/*.ts'],
 		rules: {
+			'max-classes-per-file': 'off',
 			'no-console': 'off',
+			'jsdoc/require-jsdoc': 'off',
+			'unicorn/consistent-function-scoping': 'off',
 			'unicorn/no-useless-undefined': 'off',
-			'no-restricted-syntax': ['error', ...tsRestrictedSyntax]
+			'no-restricted-syntax': ['error', ...tsRestrictedSyntax],
+			'@typescript-eslint/unbound-method': 'off'
 		}
 	}
 ];

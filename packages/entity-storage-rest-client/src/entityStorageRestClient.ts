@@ -40,6 +40,14 @@ export class EntityStorageRestClient<T>
 	}
 
 	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return EntityStorageRestClient.CLASS_NAME;
+	}
+
+	/**
 	 * Set an entity.
 	 * @param entity The entity to set.
 	 * @returns The id of the entity.
