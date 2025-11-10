@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-postgresql",
-	"version": "0.0.3-next.0",
+	"version": "0.0.3-next.1",
 	"description": "Entity Storage connector implementation using PostgreSql storage",
 	"repository": {
 		"type": "git",
@@ -31,13 +31,13 @@
 		"@twin.org/context": "next",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.0.3-next.0",
+		"@twin.org/entity-storage-models": "0.0.3-next.1",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next",
 		"postgres": "3.4.7"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.0.3-next.0",
+		"@twin.org/entity-storage-connector-memory": "0.0.3-next.1",
 		"@twin.org/logging-connector-entity-storage": "next",
 		"@twin.org/logging-service": "next",
 		"@twin.org/nameof-transformer": "next",
