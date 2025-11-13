@@ -6,6 +6,7 @@ import {
 	ComparisonOperator,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
+	LogicalOperator,
 	SortDirection,
 	entity,
 	property
@@ -85,6 +86,52 @@ class TestType {
 	}[];
 }
 
+/**
+ * Test Type with Mnemonic as Object Definition.
+ * This reproduces the bug where a field is defined as Object
+ * but stored as plain text (not JSON).
+ */
+@entity()
+class TestTypeWithMnemonicAsObject {
+	/**
+	 * Id.
+	 */
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	/**
+	 * Mnemonic - defined as Object but stored as plain text string.
+	 * This should trigger JSON.parse() error if not handled properly.
+	 */
+	@property({ type: "object", optional: true })
+	public mnemonic?: { value: string };
+}
+
+/**
+ * BackgroundTask Type Definition.
+ * Reproduces the placeholder bug from the issue report.
+ */
+@entity()
+class BackgroundTask {
+	/**
+	 * Id.
+	 */
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	/**
+	 * RetainUntil timestamp.
+	 */
+	@property({ type: "string", format: "date-time" })
+	public retainUntil!: string;
+
+	/**
+	 * Status of the task.
+	 */
+	@property({ type: "string" })
+	public status!: string;
+}
+
 let currentUser = "user";
 
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
@@ -94,6 +141,12 @@ describe("PostgreSqlEntityStorageConnector", () => {
 	beforeAll(async () => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
+		EntitySchemaFactory.register(nameof<TestTypeWithMnemonicAsObject>(), () =>
+			EntitySchemaHelper.getSchema(TestTypeWithMnemonicAsObject)
+		);
+		EntitySchemaFactory.register(nameof<BackgroundTask>(), () =>
+			EntitySchemaHelper.getSchema(BackgroundTask)
+		);
 
 		initSchema();
 
@@ -1242,5 +1295,194 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				]
 			}
 		]);
+	});
+
+	test("can create database and table with hyphenated names", async () => {
+		const hyphenatedConfig: IPostgreSqlEntityStorageConnectorConfig = {
+			...config,
+			tableName: "test-with-hyphen"
+		};
+
+		const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: hyphenatedConfig
+		});
+
+		await entityStorage.bootstrap("logging");
+
+		const entityId = "test-1";
+		const testEntity = {
+			id: entityId,
+			value1: "test-hyphenated",
+			value2: 42,
+			value3: undefined,
+			valueObject: undefined,
+			valueArray: undefined
+		};
+
+		await entityStorage.set(testEntity);
+		const result = await entityStorage.get(entityId);
+		expect(result).toEqual(testEntity);
+
+		// Cleanup
+		await entityStorage.tableDrop();
+	});
+
+	test("should handle plain text in object field gracefully by returning it as string", async () => {
+		const entityStorage = new PostgreSqlEntityStorageConnector<TestTypeWithMnemonicAsObject>({
+			entitySchema: nameof<TestTypeWithMnemonicAsObject>(),
+			config
+		});
+
+		await entityStorage.bootstrap("logging");
+
+		const plainTextValue =
+			"garden habit curve acquire derive nut mushroom armed gather spot flame history";
+		const entityId = "test-plain-text";
+
+		// Store plain text value in object field (bypassing type safety with 'as any')
+		const testEntity = {
+			id: entityId,
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			mnemonic: plainTextValue as any
+		};
+
+		await entityStorage.set(testEntity);
+
+		// Should retrieve successfully and return the plain text as string
+		const result = await entityStorage.get(entityId);
+		expect(result).toBeDefined();
+		expect(result?.mnemonic).toBe(plainTextValue);
+		expect(typeof result?.mnemonic).toBe("string");
+
+		await entityStorage.tableDrop();
+	});
+
+	test("should handle plain text in object field when querying", async () => {
+		const entityStorage = new PostgreSqlEntityStorageConnector<TestTypeWithMnemonicAsObject>({
+			entitySchema: nameof<TestTypeWithMnemonicAsObject>(),
+			config
+		});
+
+		await entityStorage.bootstrap("logging");
+
+		const plainTextValue =
+			"garden habit curve acquire derive nut mushroom armed gather spot flame history";
+		const entityId = "test-plain-text-query";
+
+		// Store plain text value in object field
+		const testEntity = {
+			id: entityId,
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			mnemonic: plainTextValue as any
+		};
+
+		await entityStorage.set(testEntity);
+
+		// Should query successfully and return the plain text as string
+		const queryResult = await entityStorage.query();
+		expect(queryResult).toBeDefined();
+		expect(queryResult.entities.length).toEqual(1);
+		expect(queryResult.entities[0]?.mnemonic).toBe(plainTextValue);
+		expect(typeof queryResult.entities[0]?.mnemonic).toBe("string");
+
+		await entityStorage.tableDrop();
+	});
+
+	test("should handle query with multiple conditions with incremented placeholders", async () => {
+		const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+
+		await entityStorage.bootstrap("logging");
+
+		// Store multiple entities with different value1 values
+		for (let i = 0; i < 10; i++) {
+			await entityStorage.set({
+				id: `entity-${i}`,
+				value1: `status-${i % 4}`,
+				value2: i * 10,
+				value3: undefined,
+				valueObject: {
+					"1": { value: "bob" }
+				},
+				valueArray: [{ field: "name", value: "test" }]
+			});
+		}
+
+		// Query with IN clause that requires multiple placeholders
+		// Combined with range conditions to test placeholder incrementing
+		const result = await entityStorage.query({
+			property: "value1",
+			value: ["status-0", "status-1", "status-2"],
+			comparison: ComparisonOperator.In
+		});
+
+		expect(result).toBeDefined();
+		expect(result.entities.length).toBeGreaterThan(0);
+
+		await entityStorage.tableDrop();
+	});
+
+	test("should handle query with complex multiple conditions of different types", async () => {
+		const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+
+		await entityStorage.bootstrap("logging");
+
+		// Store multiple entities
+		for (let i = 0; i < 15; i++) {
+			await entityStorage.set({
+				id: `complex-entity-${i}`,
+				value1: `status-${i % 5}`,
+				value2: i * 5,
+				value3: undefined,
+				valueObject: {
+					key1: { value: `value-${i % 3}` }
+				},
+				valueArray: [{ field: "type", value: `type-${i % 2}` }]
+			});
+		}
+
+		// Query with multiple different condition types:
+		// - GreaterThan: value2 > 20
+		// - LessThan: value2 < 50
+		// - Equals: value1 = "status-1"
+		// - In: includes multiple statuses
+		// - NotEquals: value1 <> "status-4"
+		// This tests placeholder incrementing across different operators
+		const result = await entityStorage.query({
+			conditions: [
+				{
+					property: "value2",
+					value: 20,
+					comparison: ComparisonOperator.GreaterThan
+				},
+				{
+					property: "value2",
+					value: 50,
+					comparison: ComparisonOperator.LessThan
+				},
+				{
+					property: "value1",
+					value: ["status-0", "status-1", "status-2", "status-3"],
+					comparison: ComparisonOperator.In
+				}
+			],
+			logicalOperator: LogicalOperator.And
+		});
+
+		expect(result).toBeDefined();
+		// Should find entities matching all conditions
+		expect(result.entities.length).toBeGreaterThan(0);
+		for (const entityResult of result.entities) {
+			expect(entityResult.value2).toBeGreaterThan(20);
+			expect(entityResult.value2).toBeLessThan(50);
+		}
+
+		await entityStorage.tableDrop();
 	});
 });

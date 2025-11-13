@@ -184,7 +184,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 					}
 				});
 
-				const createTableQuery = `CREATE TABLE ${this._config.tableName} (${this.mapPostgreSqlProperties(this._entitySchema)})`;
+				const createTableQuery = `CREATE TABLE "${this._config.tableName}" (${this.mapPostgreSqlProperties(this._entitySchema)})`;
 				await dbConnection.unsafe(createTableQuery);
 				await this.waitForTableExists();
 			} else {
@@ -282,16 +282,22 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 						const row = rows[0] as unknown as { [key: string]: unknown };
 						let propColumn = prop.property as string;
 						propColumn = propColumn.toLowerCase();
+
 						if (
 							(prop.type === EntitySchemaPropertyType.Object ||
 								prop.type === EntitySchemaPropertyType.Array) &&
 							typeof row[propColumn] === "string"
 						) {
-							const rowValue = JSON.parse(
-								(rows[0] as { [key: string]: unknown })[propColumn] as string
-							);
+							let value: unknown;
+							try {
+								value = JSON.parse((rows[0] as { [key: string]: unknown })[propColumn] as string);
+							} catch {
+								// If JSON.parse fails, keep the value as string
+								// This handles cases where plain text was stored in Object/Array fields
+								value = (rows[0] as { [key: string]: unknown })[propColumn];
+							}
 							delete (rows[0] as { [key: string]: unknown })[propColumn];
-							(rows[0] as { [key: string]: unknown })[prop.property as string] = rowValue;
+							(rows[0] as { [key: string]: unknown })[prop.property as string] = value;
 						}
 						if (row[propColumn] === null) {
 							(rows[0] as { [key: string]: unknown })[prop.property as string] = undefined;
@@ -523,9 +529,16 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 								prop.type === EntitySchemaPropertyType.Array) &&
 							Is.string(row[propColumn])
 						) {
-							const rowValue = JSON.parse(row[propColumn] as string);
+							let value: unknown;
+							try {
+								value = JSON.parse(row[propColumn] as string);
+							} catch {
+								// If JSON.parse fails, keep the value as string
+								// This handles cases where plain text was stored in Object/Array fields
+								value = row[propColumn];
+							}
 							delete row[propColumn];
-							row[prop.property as string] = rowValue;
+							row[prop.property as string] = value;
 						}
 						if (row[propColumn] === null) {
 							row[prop.property as string] = undefined;
@@ -568,7 +581,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 				return;
 			}
 			const dbConnection = await this.createConnection();
-			await dbConnection.unsafe(`DROP TABLE ${this._config.tableName};`);
+			await dbConnection.unsafe(`DROP TABLE "${this._config.tableName}";`);
 
 			await this.waitForTableNotExists();
 		} catch {
