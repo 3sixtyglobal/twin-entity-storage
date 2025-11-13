@@ -1,5 +1,22 @@
 # @twin.org/entity-storage-connector-dynamodb - Changelog
 
+## [0.0.3-next.2](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-dynamodb-v0.0.3-next.1...entity-storage-connector-dynamodb-v0.0.3-next.2) (2025-11-13)
+
+
+### Bug Fixes
+
+* add missing dependency ([3282535](https://github.com/twinfoundation/entity-storage/commit/328253516e0d13b276406fb4de97dab8ee5e8ba7))
+* add missing dependency ([2b848f3](https://github.com/twinfoundation/entity-storage/commit/2b848f3a345522c869b798d7a1cb64112dd8e3e3))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.1 to 0.0.3-next.2
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.1 to 0.0.3-next.2
+
 ## [0.0.3-next.1](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-dynamodb-v0.0.3-next.0...entity-storage-connector-dynamodb-v0.0.3-next.1) (2025-11-10)
 
 

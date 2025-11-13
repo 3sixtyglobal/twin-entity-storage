@@ -1,5 +1,21 @@
 # @twin.org/entity-storage-connector-mysql - Changelog
 
+## [0.0.3-next.2](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-mysql-v0.0.3-next.1...entity-storage-connector-mysql-v0.0.3-next.2) (2025-11-13)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-connector-mysql:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.1 to 0.0.3-next.2
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.1 to 0.0.3-next.2
+
 ## [0.0.3-next.1](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-mysql-v0.0.3-next.0...entity-storage-connector-mysql-v0.0.3-next.1) (2025-11-10)
 
 

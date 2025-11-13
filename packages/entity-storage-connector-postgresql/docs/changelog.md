@@ -1,5 +1,21 @@
 # @twin.org/entity-storage-connector-postgresql - Changelog
 
+## [0.0.3-next.2](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-postgresql-v0.0.3-next.1...entity-storage-connector-postgresql-v0.0.3-next.2) (2025-11-13)
+
+
+### Bug Fixes
+
+* adding tests for debugging and patching the missing quotes and parse error handeling ([#61](https://github.com/twinfoundation/entity-storage/issues/61)) ([f746be5](https://github.com/twinfoundation/entity-storage/commit/f746be530799bede1db08482cf65fe780c5e75a0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.1 to 0.0.3-next.2
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.1 to 0.0.3-next.2
+
 ## [0.0.3-next.1](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-postgresql-v0.0.3-next.0...entity-storage-connector-postgresql-v0.0.3-next.1) (2025-11-10)
 
 

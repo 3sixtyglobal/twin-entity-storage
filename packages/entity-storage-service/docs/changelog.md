@@ -1,5 +1,21 @@
 # @twin.org/entity-storage-service - Changelog
 
+## [0.0.3-next.2](https://github.com/twinfoundation/entity-storage/compare/entity-storage-service-v0.0.3-next.1...entity-storage-service-v0.0.3-next.2) (2025-11-13)
+
+
+### Bug Fixes
+
+* api docs ([4228736](https://github.com/twinfoundation/entity-storage/commit/4228736ebc8be212f81b3ccc70b56991d5d95032))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.1 to 0.0.3-next.2
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.1 to 0.0.3-next.2
+
 ## [0.0.3-next.1](https://github.com/twinfoundation/entity-storage/compare/entity-storage-service-v0.0.3-next.0...entity-storage-service-v0.0.3-next.1) (2025-11-10)
 
 
