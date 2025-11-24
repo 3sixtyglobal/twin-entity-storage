@@ -6,7 +6,7 @@
  * Usage:
  * npm run generate-release-configs <path-to-release-config-directory>
  */
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { directoryExists, fileExists, loadJson, saveJson } from './common.mjs';
 
@@ -88,13 +88,11 @@ async function generateConfig(targetDirectory, releaseType, packageNames) {
 			'changelog-path': 'docs/changelog.md'
 		};
 
-		const embeddedVersionFiles = ['src/cli.ts', 'tests/cli.spec.ts', 'src/index.ts'];
+		const embeddedVersionFiles = await collectTsFilesIn(packageName);
 
 		for (const embeddedVersionFile of embeddedVersionFiles) {
-			if (await fileExists(path.join(packageName, embeddedVersionFile))) {
-				config.packages[packageName]['extra-files'] ??= [];
-				config.packages[packageName]['extra-files'].push(embeddedVersionFile);
-			}
+			config.packages[packageName]['extra-files'] ??= [];
+			config.packages[packageName]['extra-files'].push(embeddedVersionFile);
 		}
 
 		config.plugins[1].components.push(packageNameParts[1]);
@@ -137,6 +135,39 @@ async function generateManifest(targetDirectory, versionBase, packageNames) {
 
 		await saveJson(filename, config);
 	}
+}
+
+/**
+ * Collect the .ts files in the package.
+ */
+async function collectTsFilesIn(pkg) {
+	const roots = ['src', 'tests'];
+	const results = [];
+
+	async function walk(dirPath) {
+		const entries = await readdir(dirPath, { withFileTypes: true });
+		for (const e of entries) {
+			const full = path.join(dirPath, e.name);
+			if (e.isDirectory()) {
+				await walk(full);
+			} else if (e.isFile() && e.name.endsWith('.ts')) {
+				const file = await readFile(full, 'utf8');
+				if (file.includes('release-please-version')) {
+					const rel = path.relative(pkg, full).split(path.sep).join('/');
+					results.push(rel);
+				}
+			}
+		}
+	}
+
+	for (const root of roots) {
+		const rootPath = path.join(pkg, root);
+		if (await directoryExists(rootPath)) {
+			await walk(rootPath);
+		}
+	}
+
+	return results;
 }
 
 run().catch(err => {
