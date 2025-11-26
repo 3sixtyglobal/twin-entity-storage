@@ -37,4 +37,9 @@ export interface IDynamoDbEntityStorageConnectorConfig {
 	 * AWS endpoint, not usually required but could be used for local DynamoDB instance e.g. http://localhost:10000.
 	 */
 	endpoint?: string;
+
+	/**
+	 * The connection timeout in milliseconds.
+	 */
+	connectionTimeoutMs?: number;
 }

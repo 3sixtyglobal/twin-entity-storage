@@ -4,6 +4,7 @@ import {
 	type AttributeValue,
 	type CreateTableCommandInput,
 	DynamoDB,
+	type DynamoDBClientConfig,
 	type GlobalSecondaryIndex,
 	QueryCommand,
 	waitUntilTableExists
@@ -842,14 +843,11 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @returns The Dynamo DB connection configuration.
 	 * @internal
 	 */
-	private createConnectionConfig(): {
-		credentials?: {
-			accessKeyId: string;
-			secretAccessKey: string;
+	private createConnectionConfig(): DynamoDBClientConfig {
+		const requestHandler = {
+			requestTimeout: this._config.connectionTimeoutMs
 		};
-		endpoint?: string;
-		region: string;
-	} {
+
 		if (
 			Is.stringValue(this._config.secretAccessKey) &&
 			Is.stringValue(this._config.accessKeyId) &&
@@ -861,13 +859,15 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 					secretAccessKey: this._config.secretAccessKey
 				},
 				endpoint: this._config.endpoint,
-				region: this._config.region
+				region: this._config.region,
+				requestHandler
 			};
 		}
 
 		return {
 			endpoint: this._config.endpoint,
-			region: this._config.region
+			region: this._config.region,
+			requestHandler
 		};
 	}
 
