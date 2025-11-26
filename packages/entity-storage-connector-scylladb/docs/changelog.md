@@ -1,5 +1,21 @@
 # @twin.org/entity-storage-connector-scylladb - Changelog
 
+## [0.0.3-next.3](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-scylladb-v0.0.3-next.2...entity-storage-connector-scylladb-v0.0.3-next.3) (2025-11-26)
+
+
+### Features
+
+* add support for object comparison conditions ([eb505a1](https://github.com/twinfoundation/entity-storage/commit/eb505a17a3642e95c4e3cf137a77a0a8fb388c97))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.2 to 0.0.3-next.3
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.2 to 0.0.3-next.3
+
 ## [0.0.3-next.2](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-scylladb-v0.0.3-next.1...entity-storage-connector-scylladb-v0.0.3-next.2) (2025-11-13)
 
 
