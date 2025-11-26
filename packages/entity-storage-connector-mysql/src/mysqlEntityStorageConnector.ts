@@ -709,7 +709,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		}
 
 		prop += comparator.property;
-		// prop = prop.replace(/\./g, "->");
+
 		if (comparator.comparison === ComparisonOperator.In) {
 			const inValues = Is.array(comparator.value) ? comparator.value : [comparator.value];
 			values.push(...inValues.map(val => this.propertyToDbValue(val, type)));
@@ -722,8 +722,14 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		if (comparator.property.split(".").length > 1) {
 			return `JSON_UNQUOTE(JSON_EXTRACT(\`${comparator.property.split(".")[0]}\`, '$.${comparator.property.split(".").slice(1).join(".")}')) = ?`;
 		} else if (comparator.comparison === ComparisonOperator.Equals) {
+			if (Is.object(comparator.value) || Is.array(comparator.value)) {
+				return `JSON_CONTAINS(\`${prop}\`, ?)`;
+			}
 			return `\`${prop}\` = ?`;
 		} else if (comparator.comparison === ComparisonOperator.NotEquals) {
+			if (Is.object(comparator.value) || Is.array(comparator.value)) {
+				return `NOT JSON_CONTAINS(\`${prop}\`, ?)`;
+			}
 			return `\`${prop}\` <> ?`;
 		} else if (comparator.comparison === ComparisonOperator.GreaterThan) {
 			return `\`${prop}\` > ?`;

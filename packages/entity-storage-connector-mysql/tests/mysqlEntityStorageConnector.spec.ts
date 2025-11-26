@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
-import { ComponentFactory, GeneralError, ObjectHelper } from "@twin.org/core";
+import { ComponentFactory, ObjectHelper } from "@twin.org/core";
 import type { IJsonLdNodeObject } from "@twin.org/data-json-ld";
 import {
 	ComparisonOperator,
@@ -241,11 +241,14 @@ describe("MySqlEntityStorageConnector", () => {
 			value1: "aaa"
 		} as TestType;
 
-		await expect(entityStorage.set(objectSet)).rejects.toThrowError(
-			new GeneralError("EntitySchemaHelper", "invalidOptional", {
-				property: "value2",
-				type: "number",
-				value: undefined
+		await expect(entityStorage.set(objectSet)).rejects.toThrow(
+			expect.objectContaining({
+				source: "EntitySchemaHelper",
+				message: "entitySchemaHelper.invalidOptional",
+				properties: {
+					property: "value2",
+					type: "number"
+				}
 			})
 		);
 	});
@@ -1540,5 +1543,45 @@ describe("MySqlEntityStorageConnector", () => {
 
 		const result = await uuidEntityStorage.get(entityId);
 		expect(result).toEqual(objectSet);
+	});
+
+	test("can perform a query with an object condition", async () => {
+		const entityStorage = new MySqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+
+		await entityStorage.bootstrap("logging");
+
+		await entityStorage.set({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: {
+				field1: "foo"
+			}
+		});
+
+		const result = await entityStorage.query({
+			conditions: [
+				{
+					property: "value3",
+					value: {
+						field1: "foo"
+					},
+					comparison: ComparisonOperator.Equals
+				}
+			]
+		});
+		expect(result.entities).toEqual([
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: {
+					field1: "foo"
+				}
+			}
+		]);
 	});
 });

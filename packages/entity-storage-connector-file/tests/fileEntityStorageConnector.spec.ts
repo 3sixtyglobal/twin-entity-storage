@@ -25,6 +25,18 @@ import { FileEntityStorageConnector } from "../src/fileEntityStorageConnector.js
 import type { IFileEntityStorageConnectorConfig } from "../src/models/IFileEntityStorageConnectorConfig.js";
 
 /**
+ * Test SubType Definition.
+ */
+@entity()
+class SubType {
+	/**
+	 * Field1.
+	 */
+	@property({ type: "string", format: "date-time" })
+	public field1!: string;
+}
+
+/**
  * Test Type Definition.
  */
 @entity()
@@ -46,6 +58,12 @@ class TestType {
 	 */
 	@property({ type: "string" })
 	public value2!: string;
+
+	/**
+	 * Value3.
+	 */
+	@property({ type: "object", itemTypeRef: "SubType", optional: true })
+	public value3?: SubType;
 }
 
 let currentUser = "user";
@@ -721,6 +739,46 @@ describe("FileEntityStorageConnector", () => {
 				id: "1",
 				value1: "aaa",
 				value2: "7777"
+			}
+		]);
+	});
+
+	test("can perform a query with an object condition", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+
+		await entityStorage.bootstrap("logging");
+
+		await entityStorage.set({
+			id: "1",
+			value1: "aaa",
+			value2: "7777",
+			value3: {
+				field1: "foo"
+			}
+		});
+
+		const result = await entityStorage.query({
+			conditions: [
+				{
+					property: "value3",
+					value: {
+						field1: "foo"
+					},
+					comparison: ComparisonOperator.Equals
+				}
+			]
+		});
+		expect(result.entities).toEqual([
+			{
+				id: "1",
+				value1: "aaa",
+				value2: "7777",
+				value3: {
+					field1: "foo"
+				}
 			}
 		]);
 	});

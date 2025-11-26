@@ -788,8 +788,14 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 				.join("");
 			return `("${comparator.property.split(".")[0]}"::jsonb ${jsonPath}) = $${valueIndex}`;
 		} else if (comparator.comparison === ComparisonOperator.Equals) {
+			if (Is.object(comparator.value) || Is.array(comparator.value)) {
+				return `"${prop}" = $${valueIndex}::jsonb`;
+			}
 			return `"${prop}" = $${valueIndex}`;
 		} else if (comparator.comparison === ComparisonOperator.NotEquals) {
+			if (Is.object(comparator.value) || Is.array(comparator.value)) {
+				return `"${prop}" != $${valueIndex}::jsonb`;
+			}
 			return `"${prop}" <> $${valueIndex}`;
 		} else if (comparator.comparison === ComparisonOperator.GreaterThan) {
 			return `"${prop}" > $${valueIndex}`;
@@ -816,20 +822,18 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	 * @internal
 	 */
 	private propertyToDbValue(value: unknown, type?: EntitySchemaPropertyType): unknown {
-		if (type === "string") {
+		if (type === EntitySchemaPropertyType.String) {
 			return String(value);
-		} else if (type === "number") {
+		} else if (type === EntitySchemaPropertyType.Number) {
 			return Number(value);
-		} else if (type === "boolean") {
+		} else if (type === EntitySchemaPropertyType.Boolean) {
 			return Boolean(value);
-		} else if (type === "array") {
+		} else if (
+			type === EntitySchemaPropertyType.Object ||
+			type === EntitySchemaPropertyType.Array
+		) {
 			return value;
 		}
-
-		if (Is.object(value)) {
-			return JSON.stringify(value);
-		}
-
 		return value;
 	}
 

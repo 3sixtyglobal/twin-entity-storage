@@ -986,4 +986,44 @@ describe("DynamoDbEntityStorageConnector", () => {
 			}
 		]);
 	});
+
+	test("can perform a query with an object condition", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector({
+			entitySchema: nameof<TestType>(),
+			config: TEST_DYNAMODB_CONFIG
+		});
+
+		await entityStorage.bootstrap("logging");
+
+		await entityStorage.set({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: {
+				field1: "foo"
+			}
+		});
+
+		const result = await entityStorage.query({
+			conditions: [
+				{
+					property: "value3",
+					value: {
+						field1: "foo"
+					},
+					comparison: ComparisonOperator.Equals
+				}
+			]
+		});
+		expect(result.entities).toEqual([
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: {
+					field1: "foo"
+				}
+			}
+		]);
+	});
 });

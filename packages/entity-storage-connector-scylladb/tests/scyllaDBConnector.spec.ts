@@ -883,4 +883,44 @@ describe("ScyllaDBTableConnector", () => {
 			}
 		]);
 	});
+
+	test("can perform a query with an object condition", async () => {
+		const entityStorage = new ScyllaDBTableConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_SCYLLA_CONFIG
+		});
+
+		await entityStorage.bootstrap("logging");
+
+		await entityStorage.set({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: {
+				field1: "2025-11-26T00:00:00.000Z"
+			}
+		});
+
+		const result = await entityStorage.query({
+			conditions: [
+				{
+					property: "value3",
+					value: {
+						field1: "2025-11-26T00:00:00.000Z"
+					},
+					comparison: ComparisonOperator.Equals
+				}
+			]
+		});
+		expect(result.entities).toEqual([
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: {
+					field1: "2025-11-26T00:00:00.000Z"
+				}
+			}
+		]);
+	});
 });

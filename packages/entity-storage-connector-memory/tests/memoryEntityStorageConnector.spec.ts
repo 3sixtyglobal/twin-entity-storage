@@ -554,8 +554,6 @@ describe("MemoryEntityStorageConnector", () => {
 			undefined
 		);
 
-		console.log(JSON.stringify(entityStorage.getStore(), null, 2));
-
 		expect(entityStorage.getStore()).toEqual([
 			{
 				partitionId: "node/tenant/user",
@@ -756,6 +754,58 @@ describe("MemoryEntityStorageConnector", () => {
 				value1: "aaa",
 				value2: 7777,
 				value3: undefined,
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			}
+		]);
+	});
+
+	test("can perform a query with an object condition", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>()
+		});
+
+		await entityStorage.set(
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: {
+					field1: "foo"
+				},
+				valueArray: [
+					{
+						field: "name",
+						value: "bob"
+					}
+				]
+			},
+			undefined
+		);
+
+		const result = await entityStorage.query({
+			conditions: [
+				{
+					property: "value3",
+					value: {
+						field1: "foo"
+					},
+					comparison: ComparisonOperator.Equals
+				}
+			]
+		});
+		expect(result.entities).toEqual([
+			{
+				id: "1",
+				value1: "aaa",
+				value2: 7777,
+				value3: {
+					field1: "foo"
+				},
 				valueArray: [
 					{
 						field: "name",
