@@ -1,5 +1,21 @@
 # @twin.org/entity-storage-connector-gcp-firestore - Changelog
 
+## [0.0.3-next.4](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-gcp-firestore-v0.0.3-next.3...entity-storage-connector-gcp-firestore-v0.0.3-next.4) (2025-12-03)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-connector-gcp-firestore:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.3 to 0.0.3-next.4
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.3 to 0.0.3-next.4
+
 ## [0.0.3-next.3](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-gcp-firestore-v0.0.3-next.2...entity-storage-connector-gcp-firestore-v0.0.3-next.3) (2025-11-26)
 
 
