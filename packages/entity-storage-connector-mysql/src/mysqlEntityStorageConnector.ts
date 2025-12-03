@@ -25,7 +25,7 @@ import {
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import { type Connection, type ConnectionOptions, createConnection } from "mysql2/promise";
+import { type Pool, type PoolOptions, createPool } from "mysql2/promise";
 import type { IMySqlEntityStorageConnectorConfig } from "./models/IMySqlEntityStorageConnectorConfig.js";
 import type { IMySqlEntityStorageConnectorConstructorOptions } from "./models/IMySqlEntityStorageConnectorConstructorOptions.js";
 
@@ -75,10 +75,10 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	private readonly _config: IMySqlEntityStorageConnectorConfig;
 
 	/**
-	 * The configuration for the connector.
+	 * The connection pool for MySql.
 	 * @internal
 	 */
-	private _connection?: Connection;
+	private _pool?: Pool;
 
 	/**
 	 * The primary key property.
@@ -160,7 +160,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
-			const dbConnection = await this.createConnection();
+			const pool = this.getPool();
 
 			const databaseExists = await this.databaseExists();
 			if (!databaseExists) {
@@ -173,7 +173,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 						databaseName: this._config.database
 					}
 				});
-				await dbConnection.query(`CREATE DATABASE IF NOT EXISTS \`${this._config.database}\``);
+				await pool.query(`CREATE DATABASE IF NOT EXISTS \`${this._config.database}\``);
 
 				await this.waitForDatabaseExists();
 			} else {
@@ -200,7 +200,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 					}
 				});
 
-				await dbConnection.query(
+				await pool.query(
 					`CREATE TABLE IF NOT EXISTS \`${this._config.database}\`.\`${this._config.tableName}\` (${this.mapMySqlProperties()})`
 				);
 
@@ -251,7 +251,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const dbConnection = await this.createConnection();
+			const pool = this.getPool();
 
 			const whereClauses: string[] = [];
 			const values: unknown[] = [];
@@ -274,7 +274,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			}
 
 			const query = `SELECT * FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE ${whereClauses.join(" AND ")} LIMIT 1`;
-			const [rows] = await dbConnection.query(query, values);
+			const [rows] = await pool.query(query, values);
 
 			if (Is.array(rows) && rows.length === 1) {
 				const item = ObjectHelper.removeEmptyProperties(rows[0] as T, { removeNull: true });
@@ -354,8 +354,8 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			sql += ` VALUES (${values.map(() => "?").join(", ")})`;
 			sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
 
-			const dbConnection = await this.createConnection();
-			await dbConnection.query(sql, values);
+			const pool = this.getPool();
+			await pool.query(sql, values);
 		} catch (err) {
 			throw new GeneralError(
 				MySqlEntityStorageConnector.CLASS_NAME,
@@ -384,7 +384,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const dbConnection = await this.createConnection();
+			const pool = this.getPool();
 
 			const itemData = await this.get(id, undefined, conditions);
 			if (Is.notEmpty(itemData)) {
@@ -407,7 +407,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 				}
 
 				const query = `DELETE FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE ${whereClauses.join(" AND ")}`;
-				await dbConnection.query(query, values);
+				await pool.query(query, values);
 			}
 		} catch (err) {
 			throw new GeneralError(
@@ -481,8 +481,8 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			sql += ` WHERE ${whereClauses.join(" AND ")} ${orderByClause}`;
 			sql += ` LIMIT ${returnSize} OFFSET ${startIndex}`;
 
-			const dbConnection = await this.createConnection();
-			const [rows] = (await dbConnection.query(sql, values)) ?? [];
+			const pool = this.getPool();
+			const [rows] = (await pool.query(sql, values)) ?? [];
 
 			const entities = rows as Partial<T>[];
 			for (let i = 0; i < entities.length; i++) {
@@ -509,10 +509,8 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	public async tableDrop(): Promise<void> {
 		try {
 			if (await this.tableExists()) {
-				const dbConnection = await this.createConnection();
-				await dbConnection.query(
-					`DROP TABLE \`${this._config.database}\`.\`${this._config.tableName}\`;`
-				);
+				const pool = this.getPool();
+				await pool.query(`DROP TABLE \`${this._config.database}\`.\`${this._config.tableName}\`;`);
 
 				await this.waitForTableNotExists();
 			}
@@ -528,8 +526,8 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	public async tableEmpty(): Promise<void> {
 		try {
 			if (await this.tableExists()) {
-				const dbConnection = await this.createConnection();
-				await dbConnection.query(
+				const pool = this.getPool();
+				await pool.query(
 					`TRUNCATE TABLE \`${this._config.database}\`.\`${this._config.tableName}\`;`
 				);
 			}
@@ -544,11 +542,23 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	 */
 	public async databaseExists(): Promise<boolean> {
 		try {
-			const dbConnection = await this.createConnection();
-			const [rows] = await dbConnection.query("SHOW DATABASES LIKE ?;", [this._config.database]);
+			const pool = this.getPool();
+			const [rows] = await pool.query("SHOW DATABASES LIKE ?;", [this._config.database]);
 			return Is.arrayValue(rows);
 		} catch {
 			return false;
+		}
+	}
+
+	/**
+	 * Close the connection pool and release all connections.
+	 * Should be called when the connector is no longer needed.
+	 * @returns Nothing.
+	 */
+	public async close(): Promise<void> {
+		if (this._pool) {
+			await this._pool.end();
+			this._pool = undefined;
 		}
 	}
 
@@ -574,8 +584,8 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	 */
 	private async tableExists(): Promise<boolean> {
 		try {
-			const dbConnection = await this.createConnection();
-			const [rows] = await dbConnection.query("SHOW TABLES FROM ?? LIKE ?", [
+			const pool = this.getPool();
+			const [rows] = await pool.query("SHOW TABLES FROM ?? LIKE ?", [
 				this._config.database,
 				this._config.tableName
 			]);
@@ -616,30 +626,36 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	}
 
 	/**
-	 * Create a new DB connection.
-	 * @returns The MySql connection.
+	 * Get or create the connection pool.
+	 * @returns The MySql connection pool.
 	 * @internal
 	 */
-	private async createConnection(): Promise<Connection> {
-		if (this._connection) {
-			return this._connection;
-		}
-		const newConnection = await createConnection(this.createConnectionConfig());
-		this._connection = newConnection;
-		return newConnection;
+	private getPool(): Pool {
+		this._pool ??= createPool(this.createPoolConfig());
+		return this._pool;
 	}
 
 	/**
-	 * Create a new DB connection configuration.
-	 * @returns The MySql connection configuration.
+	 * Create the connection pool configuration.
+	 * @returns The MySql pool configuration.
 	 * @internal
 	 */
-	private createConnectionConfig(): ConnectionOptions {
+	private createPoolConfig(): PoolOptions {
+		const poolConfig = this._config.pool ?? {};
+
 		return {
 			host: this._config.host,
 			port: this._config.port ?? 3306,
 			user: this._config.user,
-			password: this._config.password
+			password: this._config.password,
+
+			connectionLimit: poolConfig.connectionLimit ?? 10,
+			maxIdle: poolConfig.maxIdle ?? 10,
+			idleTimeout: poolConfig.idleTimeout ?? 60000,
+			enableKeepAlive: poolConfig.enableKeepAlive ?? true,
+			keepAliveInitialDelay: 0,
+			waitForConnections: poolConfig.waitForConnections ?? true,
+			queueLimit: poolConfig.queueLimit ?? 0
 		};
 	}
 

@@ -296,3 +296,18 @@ Check if the database exists.
 `Promise`\<`boolean`\>
 
 True if the database exists, false otherwise.
+
+***
+
+### close()
+
+> **close**(): `Promise`\<`void`\>
+
+Close the connection pool and release all connections.
+Should be called when the connector is no longer needed.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.

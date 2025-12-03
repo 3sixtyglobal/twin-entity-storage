@@ -21,6 +21,7 @@ import {
 import { LoggingConnectorFactory } from "@twin.org/logging-models";
 import { LoggingService } from "@twin.org/logging-service";
 import { nameof } from "@twin.org/nameof";
+import type { Pool } from "mysql2/promise";
 import { TEST_MYSQL_CONFIG } from "./setupTestEnv.js";
 import type { IMySqlEntityStorageConnectorConfig } from "../src/models/IMySqlEntityStorageConnectorConfig.js";
 import { MySqlEntityStorageConnector } from "../src/mysqlEntityStorageConnector.js";
@@ -159,6 +160,7 @@ describe("MySqlEntityStorageConnector", () => {
 			config
 		});
 		await entityStorage.tableEmpty();
+		await entityStorage.close();
 	});
 
 	test("can fail to construct when there are no options", async () => {
@@ -1584,4 +1586,45 @@ describe("MySqlEntityStorageConnector", () => {
 			}
 		]);
 	});
+
+	test("can reproduce connection timeout auto-reconnect with pool", async () => {
+		const entityStorage = new MySqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+
+		await entityStorage.bootstrap("logging");
+
+		// Set MySQL wait_timeout to 3 seconds for this session
+		// With connection pooling, we need to get a connection from the pool
+		const pool = (entityStorage as unknown as { getPool(): Pool }).getPool();
+		const connection = await pool.getConnection();
+		try {
+			await connection.query("SET SESSION wait_timeout = 3");
+		} finally {
+			connection.release();
+		}
+
+		await entityStorage.set({
+			id: "user-timeout-test",
+			value1: "test@example.com",
+			value2: 123
+		});
+
+		const user1 = await entityStorage.get("user-timeout-test");
+		expect(user1).toBeDefined();
+		expect(user1?.id).toBe("user-timeout-test");
+
+		// Wait for MySQL to close the connection (4 seconds to be safe)
+		await new Promise(resolve => setTimeout(resolve, 4000));
+
+		const user2 = await entityStorage.get("user-timeout-test");
+
+		expect(user2).toBeDefined();
+		expect(user2?.id).toBe("user-timeout-test");
+		expect(user2?.value1).toBe("test@example.com");
+
+		// Clean up: close the pool
+		await entityStorage.close();
+	}, 10000); // Increase timeout for this test to 10 seconds
 });
