@@ -1,5 +1,21 @@
 # @twin.org/entity-storage-connector-postgresql - Changelog
 
+## [0.0.3-next.5](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-postgresql-v0.0.3-next.4...entity-storage-connector-postgresql-v0.0.3-next.5) (2026-01-06)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-connector-postgresql:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.4 to 0.0.3-next.5
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.4 to 0.0.3-next.5
+
 ## [0.0.3-next.4](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-postgresql-v0.0.3-next.3...entity-storage-connector-postgresql-v0.0.3-next.4) (2025-12-03)
 
 
