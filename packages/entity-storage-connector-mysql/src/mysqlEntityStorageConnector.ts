@@ -8,7 +8,8 @@ import {
 	GeneralError,
 	Guards,
 	Is,
-	ObjectHelper
+	ObjectHelper,
+	SharedStore
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
@@ -231,6 +232,15 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		}
 
 		return true;
+	}
+
+	/**
+	 * The component needs to be stopped when the node is closed.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns Nothing.
+	 */
+	public async stop(nodeLoggingComponentType?: string): Promise<void> {
+		await this.close();
 	}
 
 	/**
@@ -557,7 +567,23 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	 */
 	public async close(): Promise<void> {
 		if (this._pool) {
-			await this._pool.end();
+			const poolConfig = this.createPoolConfig();
+			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
+
+			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
+				"mySqlPools"
+			);
+			sharedPools ??= {};
+			if (sharedPools[poolId]) {
+				// Decrease the use counter and close the pool if no longer used
+				sharedPools[poolId].useCounter--;
+				if (sharedPools[poolId].useCounter <= 0) {
+					await this._pool.end();
+					delete sharedPools[poolId];
+				}
+				SharedStore.set("mySqlPools", sharedPools);
+			}
+
 			this._pool = undefined;
 		}
 	}
@@ -631,7 +657,27 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	 * @internal
 	 */
 	private getPool(): Pool {
-		this._pool ??= createPool(this.createPoolConfig());
+		if (!this._pool) {
+			const poolConfig = this.createPoolConfig();
+			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
+
+			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
+				"mySqlPools"
+			);
+			sharedPools ??= {};
+
+			// If there is no pool for the id, create it
+			if (!sharedPools[poolId]) {
+				sharedPools[poolId] = {
+					pool: createPool(poolConfig),
+					useCounter: 0
+				};
+				SharedStore.set("mySqlPools", sharedPools);
+			}
+			// Increase the use counter and return the pool
+			sharedPools[poolId].useCounter++;
+			this._pool = sharedPools[poolId].pool;
+		}
 		return this._pool;
 	}
 
