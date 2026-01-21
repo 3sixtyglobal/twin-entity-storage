@@ -806,7 +806,23 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 		} else if (comparator.comparison === ComparisonOperator.LessThanOrEqual) {
 			return `"${prop}" <= $${valueIndex}`;
 		} else if (comparator.comparison === ComparisonOperator.Includes) {
-			return `EXISTS (SELECT 1 FROM jsonb_array_elements("${prop}") elem WHERE elem @> $${valueIndex}::jsonb)`;
+			// For string fields, use ILIKE for case-insensitive substring matching
+			if (type === EntitySchemaPropertyType.String) {
+				return `"${prop}" ILIKE '%' || $${valueIndex} || '%'`;
+			}
+			// For array and object fields, use jsonb operators
+			if (type === EntitySchemaPropertyType.Array || type === EntitySchemaPropertyType.Object) {
+				return `EXISTS (SELECT 1 FROM jsonb_array_elements("${prop}") elem WHERE elem @> $${valueIndex}::jsonb)`;
+			}
+			// Includes operator is not supported for other types (number, boolean, etc.)
+			throw new GeneralError(
+				PostgreSqlEntityStorageConnector.CLASS_NAME,
+				"comparisonNotSupported",
+				{
+					comparison: comparator.comparison,
+					type
+				}
+			);
 		}
 
 		throw new GeneralError(PostgreSqlEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {

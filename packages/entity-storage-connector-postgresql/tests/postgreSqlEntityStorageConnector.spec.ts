@@ -1528,4 +1528,55 @@ describe("PostgreSqlEntityStorageConnector", () => {
 			}
 		]);
 	});
+
+	test("can query with ComparisonOperator.Includes on string field", async () => {
+		// Test that ComparisonOperator.Includes works correctly on string fields
+		// When a string field contains delimited values (e.g., "||value1||value2||"),
+		// the Includes operator should use LIKE for substring matching,
+		// not JSON_CONTAINS which would fail with "Invalid JSON text" error
+
+		const entityStorage = new PostgreSqlEntityStorageConnector({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+
+		await entityStorage.bootstrap();
+
+		// Create an entity with value1 as a delimited string index
+		// Format: ||value1||value2||value3||
+		await entityStorage.set({
+			id: "vertex-1",
+			value1: "||mobius-261901-003||251702-015||",
+			value2: 1
+		});
+
+		await entityStorage.set({
+			id: "vertex-2",
+			value1: "||other-alias||another-one||",
+			value2: 2
+		});
+
+		// Query using ComparisonOperator.Includes on the string field
+		const result = await entityStorage.query({
+			property: "value1",
+			comparison: ComparisonOperator.Includes,
+			value: "||mobius-261901-003||"
+		});
+
+		expect(result.entities).toBeDefined();
+		expect(result.entities.length).toBe(1);
+		expect((result.entities[0] as TestType).id).toBe("vertex-1");
+		expect((result.entities[0] as TestType).value1).toBe("||mobius-261901-003||251702-015||");
+
+		// Also test partial match (without delimiters)
+		const result2 = await entityStorage.query({
+			property: "value1",
+			comparison: ComparisonOperator.Includes,
+			value: "mobius-261901-003"
+		});
+
+		expect(result2.entities).toBeDefined();
+		expect(result2.entities.length).toBe(1);
+		expect((result2.entities[0] as TestType).id).toBe("vertex-1");
+	});
 });

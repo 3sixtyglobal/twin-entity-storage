@@ -27,6 +27,7 @@
 		"datname",
 		"elem",
 		"Firestore",
+		"ILIKE",
 		"LONGTEXT",
 		"nameof",
 		"regclass",

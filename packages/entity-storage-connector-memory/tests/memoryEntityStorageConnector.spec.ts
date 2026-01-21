@@ -815,4 +815,43 @@ describe("MemoryEntityStorageConnector", () => {
 			}
 		]);
 	});
+
+	// Test: Includes operator on string field
+	test("can query items with Includes operator on string field", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>()
+		});
+		await entityStorage.set({
+			id: "1",
+			value1: "hello world",
+			value2: 123,
+			value3: undefined
+		});
+		await entityStorage.set({
+			id: "2",
+			value1: "worldwide",
+			value2: 456,
+			value3: undefined
+		});
+		await entityStorage.set({
+			id: "3",
+			value1: "foo bar",
+			value2: 789,
+			value3: undefined
+		});
+		const result = await entityStorage.query({
+			conditions: [
+				{
+					property: "value1",
+					value: "world",
+					comparison: ComparisonOperator.Includes
+				}
+			]
+		});
+		expect(result).toBeDefined();
+		expect(result.entities.length).toEqual(2);
+		expect(result.entities.map(e => e.value1)).toEqual(
+			expect.arrayContaining(["hello world", "worldwide"])
+		);
+	});
 });

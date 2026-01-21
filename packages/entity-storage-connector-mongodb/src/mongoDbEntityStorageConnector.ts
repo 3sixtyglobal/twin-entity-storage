@@ -14,6 +14,7 @@ import {
 	type EntityCondition,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
+	EntitySchemaPropertyType,
 	type IEntitySchema,
 	LogicalOperator,
 	type SortDirection
@@ -480,7 +481,15 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 			}
 		} else {
 			const prop = objectPath ? `${objectPath}.${condition.property}` : String(condition.property);
-			const comparison = this.mapComparisonOperator(condition.comparison, condition.value);
+			const propertySchema = this._entitySchema.properties?.find(
+				p => p.property === condition.property
+			);
+			const propertyType = propertySchema?.type;
+			const comparison = this.mapComparisonOperator(
+				condition.comparison,
+				condition.value,
+				propertyType
+			);
 
 			(filter as { [key: string]: unknown })[prop] = comparison;
 		}
@@ -490,10 +499,15 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 	 * Map the framework comparison operators to those in MongoDB.
 	 * @param comparison The comparison operator.
 	 * @param value The value to compare.
+	 * @param type The type of the property from the schema.
 	 * @returns The MongoDB comparison expression.
 	 * @internal
 	 */
-	private mapComparisonOperator(comparison: ComparisonOperator, value: unknown): unknown {
+	private mapComparisonOperator(
+		comparison: ComparisonOperator,
+		value: unknown,
+		type?: EntitySchemaPropertyType
+	): unknown {
 		switch (comparison) {
 			case ComparisonOperator.Equals:
 				return value;
@@ -510,8 +524,25 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 			case ComparisonOperator.In:
 				return { $in: Array.isArray(value) ? value : [value] };
 			case ComparisonOperator.Includes:
+				// For string fields, use regex for substring matching
+				if (type === EntitySchemaPropertyType.String) {
+					// Escape special regex characters in the value
+					const escapedValue = String(value).replace(/[$()*+.?[\\\]^{|}]/g, "\\$&");
+					return { $regex: escapedValue };
+				}
+				// For array and object fields, use $elemMatch
+				if (type === EntitySchemaPropertyType.Array || type === EntitySchemaPropertyType.Object) {
+					return { $elemMatch: { $eq: value } };
+				}
+				// Fallback to $elemMatch for backwards compatibility
 				return { $elemMatch: { $eq: value } };
 			case ComparisonOperator.NotIncludes:
+				// For string fields, use negated regex
+				if (type === EntitySchemaPropertyType.String) {
+					const escapedValue = String(value).replace(/[$()*+.?[\\\]^{|}]/g, "\\$&");
+					return { $not: { $regex: escapedValue } };
+				}
+				// For arrays, use $elemMatch with $ne
 				return { $elemMatch: { $ne: value } };
 			default:
 				throw new GeneralError(

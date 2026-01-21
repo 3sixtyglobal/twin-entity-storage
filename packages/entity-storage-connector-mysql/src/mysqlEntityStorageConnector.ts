@@ -802,6 +802,15 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		} else if (comparator.comparison === ComparisonOperator.LessThanOrEqual) {
 			return `\`${prop}\` <= ?`;
 		} else if (comparator.comparison === ComparisonOperator.Includes) {
+			// For string fields, use LIKE for substring matching
+			if (type === EntitySchemaPropertyType.String) {
+				return `\`${prop}\` LIKE CONCAT('%', ?, '%')`;
+			}
+			// For array and object fields, use JSON_CONTAINS
+			if (type === EntitySchemaPropertyType.Array || type === EntitySchemaPropertyType.Object) {
+				return `JSON_CONTAINS(\`${prop}\`, ?)`;
+			}
+			// Fallback to JSON_CONTAINS for backwards compatibility
 			return `JSON_CONTAINS(\`${prop}\`, ?)`;
 		}
 

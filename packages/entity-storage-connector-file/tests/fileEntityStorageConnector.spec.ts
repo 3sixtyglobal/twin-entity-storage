@@ -782,4 +782,30 @@ describe("FileEntityStorageConnector", () => {
 			}
 		]);
 	});
+
+	// Test: Includes operator on string field
+	test("can query items with Includes operator on string field", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", value1: "hello world", value2: "x" });
+		await entityStorage.set({ id: "2", value1: "worldwide", value2: "y" });
+		await entityStorage.set({ id: "3", value1: "foo bar", value2: "z" });
+		const result = await entityStorage.query({
+			conditions: [
+				{
+					property: "value1",
+					value: "world",
+					comparison: ComparisonOperator.Includes
+				}
+			]
+		});
+		expect(result).toBeDefined();
+		expect(result.entities.length).toEqual(2);
+		expect(result.entities.map(e => e.value1)).toEqual(
+			expect.arrayContaining(["hello world", "worldwide"])
+		);
+	});
 });

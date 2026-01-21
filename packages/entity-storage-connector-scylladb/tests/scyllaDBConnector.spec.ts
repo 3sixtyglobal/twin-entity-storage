@@ -572,6 +572,7 @@ describe("ScyllaDBTableConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_SCYLLA_CONFIG
 		});
+		await entityStorage.bootstrap("logging");
 		for (let i = 0; i < 30; i++) {
 			await entityStorage.set({
 				id: (i + 1).toString(),
@@ -922,5 +923,52 @@ describe("ScyllaDBTableConnector", () => {
 				}
 			}
 		]);
+	});
+
+	test("can query with ComparisonOperator.Includes on string field", async () => {
+		const entityStorage = new ScyllaDBTableConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_SCYLLA_CONFIG
+		});
+
+		await entityStorage.bootstrap("logging");
+
+		// Create test entity with string field containing delimited values
+		await entityStorage.set({
+			id: "vertex-1",
+			value1: "||mobius-261901-003||251702-015||",
+			value2: 1,
+			value3: undefined
+		});
+
+		// Test 1: Query with exact match including delimiters
+		const result1 = await entityStorage.query({
+			conditions: [
+				{
+					property: "value1",
+					value: "||mobius-261901-003||",
+					comparison: ComparisonOperator.Includes
+				}
+			]
+		});
+
+		expect(result1.entities).toBeDefined();
+		expect(result1.entities.length).toBe(1);
+		expect((result1.entities[0] as TestType).id).toBe("vertex-1");
+
+		// Test 2: Query with partial match (no delimiters)
+		const result2 = await entityStorage.query({
+			conditions: [
+				{
+					property: "value1",
+					value: "mobius-261901-003",
+					comparison: ComparisonOperator.Includes
+				}
+			]
+		});
+
+		expect(result2.entities).toBeDefined();
+		expect(result2.entities.length).toBe(1);
+		expect((result2.entities[0] as TestType).id).toBe("vertex-1");
 	});
 });

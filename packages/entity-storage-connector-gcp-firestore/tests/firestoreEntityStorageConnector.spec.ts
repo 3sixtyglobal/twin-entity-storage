@@ -979,4 +979,8 @@ describe("FirestoreEntityStorageConnector", () => {
 			}
 		]);
 	});
+
+	test.skip("can query items with Includes on array field (Firestore only supports array-contains, not string substrings)", async () => {
+		// Skipped: Firestore does not support substring search in string fields, only array-contains for arrays.
+	});
 });

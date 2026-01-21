@@ -960,4 +960,20 @@ describe("CosmosDbEntityStorageConnector", () => {
 			}
 		]);
 	});
+
+	test("can query items with Includes on string field", async () => {
+		const entityStorage = new CosmosDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "inc1", value1: "hello world", value2: 1 });
+		await entityStorage.set({ id: "inc2", value1: "foo bar", value2: 2 });
+		await entityStorage.set({ id: "inc3", value1: "worldwide", value2: 3 });
+
+		const result = await entityStorage.query({
+			conditions: [{ property: "value1", value: "world", comparison: ComparisonOperator.Includes }]
+		});
+		expect(result.entities.map(e => e.id).sort()).toEqual(["inc1", "inc3"]);
+	});
 });
