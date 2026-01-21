@@ -1,5 +1,21 @@
 # @twin.org/entity-storage-connector-mysql - Changelog
 
+## [0.0.3-next.6](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-mysql-v0.0.3-next.5...entity-storage-connector-mysql-v0.0.3-next.6) (2026-01-21)
+
+
+### Bug Fixes
+
+* adding tests and support when neccesary for string include operator when needed ([#72](https://github.com/twinfoundation/entity-storage/issues/72)) ([3c723dd](https://github.com/twinfoundation/entity-storage/commit/3c723dd5694814398099d9d4594089dc6c66ba97))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.5 to 0.0.3-next.6
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.5 to 0.0.3-next.6
+
 ## [0.0.3-next.5](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-mysql-v0.0.3-next.4...entity-storage-connector-mysql-v0.0.3-next.5) (2026-01-06)
 
 
