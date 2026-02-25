@@ -108,7 +108,7 @@ jobs:
         with:
           package: ${{ matrix.package }} # Pass the current package to the setup script
 
-      # Remove the root package.json to prevent dependency conflicts
+      # Remove root manifests so installs only resolve within the current workspace package
       - name: Remove Mono-Repo Node Modules
         run: |
           rm package.json
@@ -145,19 +145,55 @@ jobs:
 
       # Publish the package to NPM and tag the release as next if it's a prerelease
       - name: Publish NPM Package
+        id: publish_npm_package
         run: |
           NPM_TAG=${{ needs.process-workspaces.outputs.branch == 'next' && 'next' || 'latest' }}
           cd ${{ matrix.package }}
           # Check if package is private
           IS_PRIVATE=$(node -e "console.log(require('./package.json').private === true ? 'true' : 'false')")
+          PACKAGE_NAME=$(node -e "console.log(require('./package.json').name)")
+          PACKAGE_VERSION=$(node -e "console.log(require('./package.json').version)")
+
+          echo "package_name=$PACKAGE_NAME" >> $GITHUB_OUTPUT
+          echo "package_version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
 
           if [ "$IS_PRIVATE" = "true" ]; then
             echo "Package is marked as private, skipping publication"
+            echo "published=false" >> $GITHUB_OUTPUT
           else
             npm publish --provenance --access public --tag ${NPM_TAG}
+            echo "published=true" >> $GITHUB_OUTPUT
           fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Wait for package to be available on npm
+        if: steps.publish_npm_package.outputs.published == 'true'
+        run: |
+          PACKAGE_NAME='${{ steps.publish_npm_package.outputs.package_name }}'
+          PACKAGE_VERSION='${{ steps.publish_npm_package.outputs.package_version }}'
+
+          echo "Waiting for ${PACKAGE_NAME}@${PACKAGE_VERSION} to become available on npm..."
+
+          MAX_ATTEMPTS=20
+          SLEEP_SECONDS=30
+
+          for attempt in $(seq 1 $MAX_ATTEMPTS); do
+            if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
+              echo "Package ${PACKAGE_NAME}@${PACKAGE_VERSION} is now available on npm."
+              exit 0
+            fi
+
+            if [ "$attempt" -eq "$MAX_ATTEMPTS" ]; then
+              echo "Timed out waiting for ${PACKAGE_NAME}@${PACKAGE_VERSION} to appear on npm."
+              # Do not fail the workflow here; npm propagation delays are often temporary.
+              # and will resolve by the time the next package is published or the GitHub release is created.
+              exit 0
+            fi
+
+            echo "Not available yet (attempt ${attempt}/${MAX_ATTEMPTS}); retrying in ${SLEEP_SECONDS}s..."
+            sleep $SLEEP_SECONDS
+          done
 
   # Once the packages have been published we create the releases on GitHub
   # No need to use a patched version of please-release here as the version
