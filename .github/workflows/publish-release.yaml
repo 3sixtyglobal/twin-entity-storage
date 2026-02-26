@@ -17,11 +17,16 @@ on:
           - '🚧 prerelease (next branch)' # For prereleases (e.g., 0.1.0-next.1)
           - '🚀 production (main branch)' # For production releases (e.g., 1.0.0, 1.1.0, 1.1.1)
 
+permissions:
+  contents: read
+
 jobs:
   # This job extracts all workspace packages from package.json
   # and prepares them for the matrix strategy in the publish job
   process-workspaces:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       # This output will be consumed by the publish job's matrix
       packages: ${{ steps.read-workspaces.outputs.packages }}
@@ -48,7 +53,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }} # Use the built-in token for GitHub Actions
+          token: ${{ github.token }} # Use the built-in token for GitHub Actions
           ref: ${{ steps.set-branch.outputs.branch }} # Checkout the calculated branch
 
       # Extract workspace package patterns from package.json
@@ -71,6 +76,7 @@ jobs:
   publish-packages:
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       id-token: write # Needed for npm provenance
     needs: process-workspaces # Wait for the process-workspaces job to complete
 
@@ -92,7 +98,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ github.token }}
           ref: ${{ needs.process-workspaces.outputs.branch }} # Checkout the calculated branch
 
       # Configure Node.js and NPM settings
@@ -143,6 +149,13 @@ jobs:
           npm pkg delete scripts
           npm pkg delete devDependencies
 
+      - name: Pack NPM Package
+        id: pack_npm_package
+        run: |
+          cd ${{ matrix.package }}
+          TARBALL_FILENAME=$(npm pack --json | node -e 'const input = JSON.parse(require("fs").readFileSync(0, "utf8")); console.log(input[0].filename);')
+          echo "tarball_filename=${TARBALL_FILENAME}" >> $GITHUB_OUTPUT
+
       # Publish the package to NPM and tag the release as next if it's a prerelease
       - name: Publish NPM Package
         id: publish_npm_package
@@ -161,7 +174,7 @@ jobs:
             echo "Package is marked as private, skipping publication"
             echo "published=false" >> $GITHUB_OUTPUT
           else
-            npm publish --provenance --access public --tag ${NPM_TAG}
+            npm publish "${{ steps.pack_npm_package.outputs.tarball_filename }}" --access public --tag ${NPM_TAG}
             echo "published=true" >> $GITHUB_OUTPUT
           fi
         env:
@@ -176,7 +189,7 @@ jobs:
           echo "Waiting for ${PACKAGE_NAME}@${PACKAGE_VERSION} to become available on npm..."
 
           MAX_ATTEMPTS=20
-          SLEEP_SECONDS=30
+          SLEEP_SECONDS=10
 
           for attempt in $(seq 1 $MAX_ATTEMPTS); do
             if npm view "${PACKAGE_NAME}@${PACKAGE_VERSION}" version >/dev/null 2>&1; then
@@ -200,6 +213,8 @@ jobs:
   # numbers were already incremented in the prepare-release action
   publish-gh-releases:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     needs: [process-workspaces, publish-packages]
 
     steps:
@@ -207,8 +222,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }} # Using GITHUB_TOKEN makes actions run as github-actions bot
+          token: ${{ github.token }} # Using GITHUB_TOKEN makes actions run as github-actions bot
           ref: ${{ needs.process-workspaces.outputs.branch }} # Checkout the calculated branch
+          fetch-depth: 0 # release-please github-release may require full git history/tags
 
       # Configure Node.js and NPM settings
       - name: Setup Node
