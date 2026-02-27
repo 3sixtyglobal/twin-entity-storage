@@ -235,6 +235,18 @@ const tsRestrictedSyntaxCommon = [
 		selector: 'BinaryExpression[operator="instanceof"]',
 		message:
 			'instanceof is disallowed. For checking Error types use the BaseError methods. Use type guards or other type checking methods instead.'
+	},
+	{
+		selector:
+			"Program > VariableDeclaration > VariableDeclarator[init.type='ArrowFunctionExpression']",
+		message:
+			'Do not define root-level functions using variable assignments. Use a function declaration instead.'
+	},
+	{
+		selector:
+			"Program > ExportNamedDeclaration > VariableDeclaration > VariableDeclarator[init.type='ArrowFunctionExpression']",
+		message:
+			'Do not define root-level functions using variable assignments. Use a function declaration instead.'
 	}
 ];
 
