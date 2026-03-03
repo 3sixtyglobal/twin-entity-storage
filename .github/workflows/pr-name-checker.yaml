@@ -6,7 +6,7 @@ on:
 
 jobs:
   pr-name-checker:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     steps:
       # Clone the repository to the runner
       - name: Checkout
@@ -16,7 +16,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       # Install commitlint globally
       - name: Install dependencies

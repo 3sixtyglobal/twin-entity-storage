@@ -53,7 +53,9 @@ runs:
       # the kernel. This is necessary for the CosmosDB Emulator to function properly, as it
       # requires a higher limit for I/O operations.
       # Reference: https://man7.org/linux/man-pages/man5/proc.5.html#fs.aio-max-nr
-      run: echo 1048576 | sudo tee /proc/sys/fs/aio-max-nr
+      run: |
+        cat /proc/sys/fs/aio-max-nr > /tmp/twin-entity-storage-aio-max-nr-before
+        echo 1048576 | sudo tee /proc/sys/fs/aio-max-nr
 
     # Start CosmosDB service only for CosmosDB package
     - name: Pull CosmosDB Emulator Docker Image

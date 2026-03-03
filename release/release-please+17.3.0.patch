@@ -1,9 +1,9 @@
 diff --git a/node_modules/release-please/build/src/versioning-strategies/prerelease.js b/node_modules/release-please/build/src/versioning-strategies/prerelease.js
-index 370f2d0..eef00de 100644
+index 792700c..9120ee5 100644
 --- a/node_modules/release-please/build/src/versioning-strategies/prerelease.js
 +++ b/node_modules/release-please/build/src/versioning-strategies/prerelease.js
-@@ -111,39 +111,6 @@ class PrereleaseVersioningStrategy extends default_1.DefaultVersioningStrategy {
-         this.prereleaseType = options.prereleaseType;
+@@ -112,48 +112,7 @@ class PrereleaseVersioningStrategy extends default_1.DefaultVersioningStrategy {
+         this.prerelease = options.prerelease === true;
      }
      determineReleaseType(version, commits) {
 -        // iterate through list of commits and find biggest commit type
@@ -23,22 +23,32 @@ index 370f2d0..eef00de 100644
 -                features++;
 -            }
 -        }
+-        let bumpedVersionUpdater;
 -        if (breaking > 0) {
 -            if (version.isPreMajor && this.bumpMinorPreMajor) {
--                return new PrereleaseMinorVersionUpdate(this.prereleaseType);
+-                bumpedVersionUpdater = new PrereleaseMinorVersionUpdate(this.prereleaseType);
 -            }
 -            else {
--                return new PrereleaseMajorVersionUpdate(this.prereleaseType);
+-                bumpedVersionUpdater = new PrereleaseMajorVersionUpdate(this.prereleaseType);
 -            }
 -        }
 -        else if (features > 0) {
 -            if (version.isPreMajor && this.bumpPatchForMinorPreMajor) {
--                return new PrereleasePatchVersionUpdate(this.prereleaseType);
+-                bumpedVersionUpdater = new PrereleasePatchVersionUpdate(this.prereleaseType);
 -            }
 -            else {
--                return new PrereleaseMinorVersionUpdate(this.prereleaseType);
+-                bumpedVersionUpdater = new PrereleaseMinorVersionUpdate(this.prereleaseType);
 -            }
 -        }
-         return new PrereleasePatchVersionUpdate(this.prereleaseType);
+-        else {
+-            bumpedVersionUpdater = new PrereleasePatchVersionUpdate(this.prereleaseType);
+-        }
+-        if (!this.prerelease) {
+-            const bumpedVersion = bumpedVersionUpdater.bump(version);
+-            return new versioning_strategy_1.CustomVersionUpdate(version_1.Version.parse(`${bumpedVersion.major}.${bumpedVersion.minor}.${bumpedVersion.patch}`).toString());
+-        }
+-        return bumpedVersionUpdater;
++        return new PrereleasePatchVersionUpdate(this.prereleaseType);
      }
  }
+ exports.PrereleaseVersioningStrategy = PrereleaseVersioningStrategy;

@@ -17,7 +17,7 @@ on:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     permissions:
       contents: write # Needed for creating/updating branches for deployment updates
       pull-requests: write # Needed for creating the PR
@@ -71,7 +71,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       # Create a new branch for the deployment
       - name: Create Deployment Update Branch

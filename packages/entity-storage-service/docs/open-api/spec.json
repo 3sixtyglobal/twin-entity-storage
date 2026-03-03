@@ -529,7 +529,6 @@
 				"required": [
 					"entities"
 				],
-				"additionalProperties": false,
 				"description": "The list of entries from the query."
 			},
 			"EntityStorageSetRequest": {
@@ -567,12 +566,10 @@
 					"name",
 					"message"
 				],
-				"additionalProperties": false,
 				"description": "Model to describe serialized error."
 			},
 			"NotFoundResponse": {
 				"type": "object",
-				"additionalProperties": false,
 				"properties": {
 					"notFoundId": {
 						"type": "string",

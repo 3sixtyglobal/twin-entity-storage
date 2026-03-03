@@ -24,7 +24,7 @@ jobs:
   # This job extracts all workspace packages from package.json
   # and prepares them for the matrix strategy in the publish job
   process-workspaces:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     permissions:
       contents: read
     outputs:
@@ -56,6 +56,13 @@ jobs:
           token: ${{ github.token }} # Use the built-in token for GitHub Actions
           ref: ${{ steps.set-branch.outputs.branch }} # Checkout the calculated branch
 
+      # Configure Node.js and NPM settings
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org' # Required for npm publish
+
       # Extract workspace package patterns from package.json
       # Note: This only extracts the patterns (e.g. "packages/*"), not the resolved directories
       # The matrix will receive these patterns and each job will process one pattern
@@ -74,7 +81,7 @@ jobs:
   # This job publishes each package to NPM
   # It runs once per package pattern from the read-workspaces job
   publish-packages:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     permissions:
       contents: read
       id-token: write # Needed for npm provenance
@@ -105,7 +112,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: 'https://registry.npmjs.org' # Required for npm publish
 
       # Setup any services required for tests here
@@ -208,11 +215,15 @@ jobs:
             sleep $SLEEP_SECONDS
           done
 
+      - name: Teardown Test Environment
+        if: always()
+        uses: ./.github/workflows/teardown-test-env
+
   # Once the packages have been published we create the releases on GitHub
   # No need to use a patched version of please-release here as the version
   # numbers were already incremented in the prepare-release action
   publish-gh-releases:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     permissions:
       contents: read
     needs: [process-workspaces, publish-packages]
@@ -230,7 +241,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           registry-url: 'https://registry.npmjs.org' # Required for npm publish
 
       # Publish the GitHub releases
@@ -239,3 +250,23 @@ jobs:
           CONFIG_FILE=release/release-please-config.${{ needs.process-workspaces.outputs.branch == 'next' && 'prerelease' || 'prod' }}.json
           MANIFEST_FILE=release/release-please-manifest.${{ needs.process-workspaces.outputs.branch == 'next' && 'prerelease' || 'prod' }}.json
           npx --yes release-please github-release --config-file=${CONFIG_FILE} --manifest-file=${MANIFEST_FILE} --repo-url=${{ github.repository }} --target-branch=${{ needs.process-workspaces.outputs.branch }} --token=${{ secrets.GHA_RELEASE_TOKEN }}
+
+  # Trigger workspace notification workflow after a successful release publish
+  trigger-notify-workspace:
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+    permissions:
+      contents: read
+    needs: [process-workspaces, publish-gh-releases]
+
+    steps:
+      - name: Trigger Notify Workspace workflow
+        env:
+          GH_TOKEN: ${{ secrets.GHA_RELEASE_TOKEN }}
+        run: |
+          gh api repos/${{ github.repository }}/actions/workflows/notify-workspace.yaml/dispatches \
+            --method POST \
+            --input - <<EOF
+          {
+            "ref": "${{ needs.process-workspaces.outputs.branch }}"
+          }
+          EOF

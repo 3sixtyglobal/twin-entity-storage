@@ -35,7 +35,7 @@
 		"@twin.org/entity-storage-models": "0.0.3-next.6",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next",
-		"mysql2": "3.15.3"
+		"mysql2": "3.18.2"
 	},
 	"devDependencies": {
 		"@twin.org/entity-storage-connector-memory": "0.0.3-next.6",
@@ -44,17 +44,17 @@
 		"@twin.org/nameof-transformer": "next",
 		"@twin.org/nameof-vitest-plugin": "next",
 		"@twin.org/validate-locales": "next",
-		"@types/node": "24.10.0",
-		"@vitest/coverage-v8": "4.0.8",
+		"@types/node": "25.3.3",
+		"@vitest/coverage-v8": "4.0.18",
 		"copyfiles": "2.4.1",
-		"dotenv": "17.2.3",
-		"rimraf": "6.1.0",
+		"dotenv": "17.3.1",
+		"rimraf": "6.1.3",
 		"ts-patch": "3.3.0",
-		"nodemon": "3.1.10",
-		"typedoc": "0.28.14",
-		"typedoc-plugin-markdown": "4.9.0",
+		"nodemon": "3.1.14",
+		"typedoc": "0.28.17",
+		"typedoc-plugin-markdown": "4.10.0",
 		"typescript": "5.9.3",
-		"vitest": "4.0.8"
+		"vitest": "4.0.18"
 	},
 	"main": "./dist/es/index.js",
 	"types": "./dist/types/index.d.ts",

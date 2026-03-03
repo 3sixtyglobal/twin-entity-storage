@@ -25,7 +25,7 @@ jobs:
   # Prepare all the packages by updating their versions to the latest for production
   # or to 'next' for next updates
   versions-prepare:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     permissions:
       contents: write # Needed for creating/updating branches for version updates
       pull-requests: write # Needed for creating the PR
@@ -91,7 +91,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
 
       # Create a new branch for the version update
       - name: Create Version Update Branch
@@ -131,7 +131,7 @@ jobs:
         run: |
           npm run format
           npm run lint
-          node ./scripts/workspaces.mjs dist
+          npm run dist
 
       # Stage all changes for commit
       - name: Commit Changes
@@ -176,3 +176,8 @@ jobs:
             gpg --batch --yes --delete-secret-keys "$FINGERPRINT" || true
             gpg --batch --yes --delete-keys "$FINGERPRINT" || true
           fi
+
+      # Always teardown the environment, necessary to cleanup self-hosted
+      - name: Teardown Test Environment
+        if: always()
+        uses: ./.github/workflows/teardown-test-env
