@@ -31,7 +31,7 @@ permissions:
 
 jobs:
   update-docs:
-    runs-on: 'ubuntu-latest'
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
 
     steps:
       # Checkout the branch that triggered the workflow dispatch.
