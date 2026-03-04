@@ -12,6 +12,10 @@ on:
     types: [closed]
     branches: [next]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   notify-workspace:
     # Continue for workflow dispatches and pushes, and for closed PRs only if they were merged.
