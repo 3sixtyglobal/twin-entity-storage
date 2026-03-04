@@ -25,6 +25,35 @@ import { CosmosDbEntityStorageConnector } from "../src/cosmosDbEntityStorageConn
 import type { ICosmosDbEntityStorageConnectorConfig } from "../src/models/ICosmosDbEntityStorageConnectorConfig.js";
 
 /**
+ * Clears all items from the Cosmos DB container used for testing.
+ * @param entityStorage The CosmosDbEntityStorageConnector instance to use for clearing the container.
+ */
+async function clearContainerItems(
+	entityStorage: CosmosDbEntityStorageConnector<TestType>
+): Promise<void> {
+	const internalConnector = entityStorage as unknown as {
+		_container: {
+			items: {
+				query: <T>(query: string) => {
+					fetchAll: () => Promise<{ resources: T[] }>;
+				};
+			};
+			item: (id: string, partitionKey: string) => {
+				delete: () => Promise<void>;
+			};
+		};
+	};
+
+	const { resources } = await internalConnector._container.items
+		.query<{ id: string; partitionId: string }>("SELECT c.id, c.partitionId FROM c")
+		.fetchAll();
+
+	for (const resource of resources) {
+		await internalConnector._container.item(resource.id, resource.partitionId).delete();
+	}
+}
+
+/**
  * Test SubType Definition.
  */
 @entity()
@@ -88,7 +117,10 @@ class TestType {
 let currentUser = "user";
 
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
-const config: ICosmosDbEntityStorageConnectorConfig = TEST_COSMOS_CONFIG;
+const config: ICosmosDbEntityStorageConnectorConfig = {
+	...TEST_COSMOS_CONFIG,
+	containerId: `${TEST_COSMOS_CONFIG.containerId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+};
 
 describe("CosmosDbEntityStorageConnector", () => {
 	beforeAll(async () => {
@@ -103,6 +135,7 @@ describe("CosmosDbEntityStorageConnector", () => {
 	});
 
 	beforeEach(async () => {
+		currentUser = "user";
 		memoryEntityStorage = new MemoryEntityStorageConnector<LogEntry>({
 			entitySchema: nameof<LogEntry>()
 		});
@@ -112,6 +145,18 @@ describe("CosmosDbEntityStorageConnector", () => {
 	});
 
 	afterEach(async () => {
+		const entityStorage = new CosmosDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+
+		try {
+			await entityStorage.bootstrap("logging");
+			await clearContainerItems(entityStorage);
+		} catch {}
+	});
+
+	afterAll(async () => {
 		const entityStorage = new CosmosDbEntityStorageConnector({
 			entitySchema: nameof<TestType>(),
 			config
