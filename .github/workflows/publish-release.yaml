@@ -255,13 +255,14 @@ jobs:
   trigger-notify-workspace:
     runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     permissions:
+      actions: write
       contents: read
     needs: [process-workspaces, publish-gh-releases]
 
     steps:
       - name: Trigger Notify Workspace workflow
         env:
-          GH_TOKEN: ${{ secrets.GHA_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           gh api repos/${{ github.repository }}/actions/workflows/notify-workspace.yaml/dispatches \
             --method POST \
