@@ -25,6 +25,8 @@ jobs:
   prepare:
     runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
     permissions:
+      actions: write # Needed to dispatch and monitor docs-update workflow runs
+      checks: read # Needed when querying workflow/check run state
       contents: write # Needed for creating/updating branches for version bumps
       pull-requests: write # Needed for creating the release PR
       id-token: write # Keep existing permissions for authentication
@@ -56,6 +58,58 @@ jobs:
           echo "semver_type=$SEMVER_TYPE" >> $GITHUB_OUTPUT
           echo "Using branch: $BRANCH"
           echo "Using semver type: $SEMVER_TYPE"
+
+      # Ensure docs are refreshed on the target branch before release preparation starts.
+      - name: Run docs update workflow
+        run: |
+          TARGET_BRANCH="${{ steps.set-branch.outputs.branch }}"
+          REPO="${{ github.repository }}"
+          START_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          gh workflow run docs-update.yaml \
+            --repo "$REPO" \
+            --ref "$TARGET_BRANCH" \
+            -f dryRun=false
+
+          RUN_ID=""
+          for i in {1..180}; do
+            if [ -z "$RUN_ID" ]; then
+              RUN_ID=$(gh run list \
+                --repo "$REPO" \
+                --workflow "Docs Update" \
+                --branch "$TARGET_BRANCH" \
+                --event workflow_dispatch \
+                --json databaseId,createdAt \
+                --jq "map(select(.createdAt >= \"$START_TIME\")) | sort_by(.createdAt) | reverse | .[0].databaseId")
+
+              if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+                echo "Docs Update run not visible yet (attempt $i/180), retrying in 10s..."
+                sleep 10
+                continue
+              fi
+
+              echo "Docs Update run found: $RUN_ID"
+            fi
+
+            RUN_STATUS=$(gh run view "$RUN_ID" --repo "$REPO" --json status --jq '.status')
+            RUN_CONCLUSION=$(gh run view "$RUN_ID" --repo "$REPO" --json conclusion --jq '.conclusion')
+
+            if [ "$RUN_STATUS" = "completed" ]; then
+              echo "Docs Update completed with conclusion: $RUN_CONCLUSION"
+              if [ "$RUN_CONCLUSION" = "success" ]; then
+                exit 0
+              fi
+              exit 1
+            fi
+
+            echo "Docs Update status=$RUN_STATUS (attempt $i/180), retrying in 10s..."
+            sleep 10
+          done
+
+          echo "Timed out waiting for Docs Update to be discovered and complete."
+          exit 1
+        env:
+          GH_TOKEN: ${{ github.token }}
 
       # Clone the repository to the runner
       - name: Checkout

@@ -14,7 +14,7 @@
 		"node": ">=20.0.0"
 	},
 	"scripts": {
-		"clean": "rimraf dist coverage docs/reference",
+		"clean": "rimraf dist coverage",
 		"build": "tspc",
 		"dev": "nodemon --watch src --ext ts --exec \"npm run build\"",
 		"test": "vitest --run --config ./vitest.config.ts --no-cache",
@@ -25,8 +25,8 @@
 		"docs:generate": "typedoc",
 		"docs:api": "ts-to-openapi ./ts-to-openapi.json ./docs/open-api/spec.json",
 		"docs": "npm run docs:clean && npm run docs:generate && npm run docs:api",
-		"dist": "npm run clean && npm run build && npm run validate-locales && npm run test:build && npm run test && npm run docs",
-		"dist:no-test": "npm run clean && npm run build && npm run test:build && npm run docs"
+		"dist": "npm run clean && npm run build && npm run validate-locales && npm run test:build && npm run test",
+		"dist:no-test": "npm run clean && npm run build && npm run test:build"
 	},
 	"dependencies": {
 		"@twin.org/api-models": "next",
