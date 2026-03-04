@@ -38,7 +38,10 @@ async function clearContainerItems(
 					fetchAll: () => Promise<{ resources: T[] }>;
 				};
 			};
-			item: (id: string, partitionKey: string) => {
+			item: (
+				id: string,
+				partitionKey: string
+			) => {
 				delete: () => Promise<void>;
 			};
 		};
