@@ -1,7 +1,7 @@
 {
 	"name": "@twin.org/entity-storage-rest-client",
 	"version": "0.0.3-next.6",
-	"description": "REST client for calling entity storage services from applications and tools.",
+	"description": "REST client for calling storage services from applications and tools.",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/twinfoundation/entity-storage.git",

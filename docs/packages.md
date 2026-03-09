@@ -2,7 +2,7 @@
 
 ## entity-storage-models
 
-This package defines the shared domain models used by the entity storage ecosystem, including contracts, requests, responses and connector capabilities.
+This package is a core part of the repository and its primary purpose is to provide shared models for storage contracts, requests, responses and connector capabilities.
 
 - [README](../packages/entity-storage-models/README.md)
 - [Examples](../packages/entity-storage-models/docs/examples.md)
@@ -10,7 +10,7 @@ This package defines the shared domain models used by the entity storage ecosyst
 
 ## entity-storage-connector-memory
 
-This package provides an in-memory connector that keeps entity data in process memory, making it well suited to local development, automated testing and short-lived runtime scenarios.
+This package is a core part of the repository and its primary purpose is to provide in-memory connector for local development, testing and short-lived workloads.
 
 - [README](../packages/entity-storage-connector-memory/README.md)
 - [Examples](../packages/entity-storage-connector-memory/docs/examples.md)
@@ -18,7 +18,7 @@ This package provides an in-memory connector that keeps entity data in process m
 
 ## entity-storage-service
 
-This package implements the service-facing contracts and REST endpoint definitions for entity storage, enabling consistent service integration across environments.
+This package is a core part of the repository and its primary purpose is to provide service layer exposing storage contracts and rest endpoint definitions.
 
 - [README](../packages/entity-storage-service/README.md)
 - [Examples](../packages/entity-storage-service/docs/examples.md)
@@ -26,7 +26,7 @@ This package implements the service-facing contracts and REST endpoint definitio
 
 ## entity-storage-rest-client
 
-This package supplies a REST client that lets applications and tooling call entity storage service endpoints using the shared contract model.
+This package is a core part of the repository and its primary purpose is to provide rest client for calling storage services from applications and tools.
 
 - [README](../packages/entity-storage-rest-client/README.md)
 - [Examples](../packages/entity-storage-rest-client/docs/examples.md)
@@ -34,7 +34,7 @@ This package supplies a REST client that lets applications and tooling call enti
 
 ## entity-storage-connector-file
 
-This package provides a file-based connector that persists entities on local or mounted disks, offering a straightforward option for simple deployments and development setups.
+This package is a core part of the repository and its primary purpose is to provide file-based connector that stores entities on disk for straightforward deployments.
 
 - [README](../packages/entity-storage-connector-file/README.md)
 - [Examples](../packages/entity-storage-connector-file/docs/examples.md)
@@ -42,7 +42,7 @@ This package provides a file-based connector that persists entities on local or 
 
 ## entity-storage-connector-scylladb
 
-This package delivers a ScyllaDB-backed connector for distributed workloads that need low latency and high-throughput entity persistence.
+This package is a core part of the repository and its primary purpose is to provide scylladb connector for distributed, high-throughput persistence. It centres on integration with [ScyllaDB](https://www.scylladb.com/) so the same storage contracts can be used across environments.
 
 - [README](../packages/entity-storage-connector-scylladb/README.md)
 - [Examples](../packages/entity-storage-connector-scylladb/docs/examples.md)
@@ -50,7 +50,7 @@ This package delivers a ScyllaDB-backed connector for distributed workloads that
 
 ## entity-storage-connector-dynamodb
 
-This package integrates entity storage with Amazon DynamoDB to provide managed NoSQL persistence for cloud-native applications.
+This package is a core part of the repository and its primary purpose is to provide amazon dynamodb connector for managed nosql persistence. It centres on integration with [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) so the same storage contracts can be used across environments.
 
 - [README](../packages/entity-storage-connector-dynamodb/README.md)
 - [Examples](../packages/entity-storage-connector-dynamodb/docs/examples.md)
@@ -58,7 +58,7 @@ This package integrates entity storage with Amazon DynamoDB to provide managed N
 
 ## entity-storage-connector-gcp-firestore
 
-This package integrates entity storage with Google Cloud Firestore, enabling managed document-based persistence for distributed services.
+This package is a core part of the repository and its primary purpose is to provide google cloud firestore connector for document-based persistence. It centres on integration with [Google Cloud Firestore](https://cloud.google.com/firestore) so the same storage contracts can be used across environments.
 
 - [README](../packages/entity-storage-connector-gcp-firestore/README.md)
 - [Examples](../packages/entity-storage-connector-gcp-firestore/docs/examples.md)
@@ -66,7 +66,7 @@ This package integrates entity storage with Google Cloud Firestore, enabling man
 
 ## entity-storage-connector-mysql
 
-This package provides a MySQL connector for relational persistence, supporting structured storage patterns and SQL-driven access.
+This package is a core part of the repository and its primary purpose is to provide mysql connector for relational persistence with sql querying. It centres on integration with [MySQL](https://www.mysql.com/) so the same storage contracts can be used across environments.
 
 - [README](../packages/entity-storage-connector-mysql/README.md)
 - [Examples](../packages/entity-storage-connector-mysql/docs/examples.md)
@@ -74,7 +74,7 @@ This package provides a MySQL connector for relational persistence, supporting s
 
 ## entity-storage-connector-mongodb
 
-This package provides a MongoDB connector for document-oriented persistence where schema flexibility and rich document modelling are important.
+This package is a core part of the repository and its primary purpose is to provide mongodb connector for flexible document-oriented persistence. It centres on integration with [MongoDB](https://www.mongodb.com/) so the same storage contracts can be used across environments.
 
 - [README](../packages/entity-storage-connector-mongodb/README.md)
 - [Examples](../packages/entity-storage-connector-mongodb/docs/examples.md)
@@ -82,7 +82,7 @@ This package provides a MongoDB connector for document-oriented persistence wher
 
 ## entity-storage-connector-postgresql
 
-This package integrates entity storage with PostgreSQL for relational persistence, including workloads that benefit from advanced SQL capabilities.
+This package is a core part of the repository and its primary purpose is to provide postgresql connector for relational persistence and advanced sql features. It centres on integration with [PostgreSQL](https://www.postgresql.org/) so the same storage contracts can be used across environments.
 
 - [README](../packages/entity-storage-connector-postgresql/README.md)
 - [Examples](../packages/entity-storage-connector-postgresql/docs/examples.md)
@@ -90,7 +90,7 @@ This package integrates entity storage with PostgreSQL for relational persistenc
 
 ## entity-storage-connector-cosmosdb
 
-This package provides an Azure Cosmos DB connector for globally distributed entity storage scenarios that require broad regional availability.
+This package is a core part of the repository and its primary purpose is to provide azure cosmos db connector for globally distributed persistence. It centres on integration with [Azure Cosmos DB](https://azure.microsoft.com/en-gb/products/cosmos-db/) so the same storage contracts can be used across environments.
 
 - [README](../packages/entity-storage-connector-cosmosdb/README.md)
 - [Examples](../packages/entity-storage-connector-cosmosdb/docs/examples.md)

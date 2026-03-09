@@ -1,11 +1,19 @@
-# TWIN Entity Storage Connector GCP Firestore
+# Entity Storage Connector GCP Firestore
 
-This package integrates entity storage with Google Cloud Firestore, enabling managed document-based persistence for distributed services. It is designed to work with the wider entity storage ecosystem so applications can keep storage behaviour consistent across connectors and environments.
+This package provides a Google Cloud Firestore backend for managed document persistence in distributed systems. It is designed to work with the wider storage ecosystem so applications can keep behaviour consistent across connectors and environments.
 
 ## Installation
 
 ```shell
 npm install @twin.org/entity-storage-connector-gcp-firestore
+```
+
+## Docker
+
+To perform testing of this component it may be necessary to launch a local instance to communicate with.
+
+```shell
+docker run -d --name twin-entity-storage-gcp-firestore -p 20200:8080 gcr.io/google.com/cloudsdktool/cloud-sdk:emulators gcloud beta emulators firestore start --host-port=0.0.0.0:8080
 ```
 
 ## Examples

@@ -1,11 +1,19 @@
-# TWIN Entity Storage Connector ScyllaDB
+# Entity Storage Connector ScyllaDB
 
-This package delivers a ScyllaDB-backed connector for distributed workloads that need low latency and high-throughput entity persistence. It is designed to work with the wider entity storage ecosystem so applications can keep storage behaviour consistent across connectors and environments.
+This package provides a ScyllaDB backend for distributed workloads that need low latency and high throughput. It is designed to work with the wider storage ecosystem so applications can keep behaviour consistent across connectors and environments.
 
 ## Installation
 
 ```shell
 npm install @twin.org/entity-storage-connector-scylladb
+```
+
+## Docker
+
+To perform testing of this component it may be necessary to launch a local instance to communicate with.
+
+```shell
+docker run -d --name twin-entity-storage-scylladb -p 9500:9042 scylladb/scylla:5.4.9
 ```
 
 ## Examples

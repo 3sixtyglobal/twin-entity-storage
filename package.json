@@ -1,7 +1,7 @@
 {
 	"name": "@twin.org/entity-storage",
 	"version": "0.0.0",
-	"description": "Packages for modelling, serving and connecting entity storage across multiple backends.",
+	"description": "Unified packages for modelling, serving and connecting entity storage across multiple backends.",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/twinfoundation/entity-storage.git"

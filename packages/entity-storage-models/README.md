@@ -1,6 +1,6 @@
-# TWIN Entity Storage Models
+# Entity Storage Models
 
-This package defines the shared domain models used by the entity storage ecosystem, including contracts, requests, responses and connector capabilities. It is designed to work with the wider entity storage ecosystem so applications can keep storage behaviour consistent across connectors and environments.
+This package defines the shared domain models that standardise storage contracts, requests, responses and connector capabilities. It is designed to work with the wider storage ecosystem so applications can keep behaviour consistent across connectors and environments.
 
 ## Installation
 

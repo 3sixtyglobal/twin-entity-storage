@@ -1,6 +1,6 @@
-# TWIN Entity Storage Service
+# Entity Storage Service
 
-This package implements the service-facing contracts and REST endpoint definitions for entity storage, enabling consistent service integration across environments. It is designed to work with the wider entity storage ecosystem so applications can keep storage behaviour consistent across connectors and environments.
+This package defines the service-facing contracts and REST endpoint definitions used to expose storage behaviour consistently. It is designed to work with the wider storage ecosystem so applications can keep behaviour consistent across connectors and environments.
 
 ## Installation
 
