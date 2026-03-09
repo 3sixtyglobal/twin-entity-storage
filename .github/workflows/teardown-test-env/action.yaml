@@ -7,20 +7,10 @@ runs:
     - name: Teardown Docker Test Environment
       shell: bash
       run: |
-        docker stop twin-entity-storage-postgresql 2>/dev/null || true
-        docker rm twin-entity-storage-postgresql 2>/dev/null || true
-        docker stop twin-entity-storage-scylladb 2>/dev/null || true
-        docker rm twin-entity-storage-scylladb 2>/dev/null || true
-        docker stop twin-entity-storage-dynamodb 2>/dev/null || true
-        docker rm twin-entity-storage-dynamodb 2>/dev/null || true
-        docker stop twin-entity-storage-mysql 2>/dev/null || true
-        docker rm twin-entity-storage-mysql 2>/dev/null || true
-        docker stop twin-entity-storage-mongo 2>/dev/null || true
-        docker rm twin-entity-storage-mongo 2>/dev/null || true
-        docker stop twin-entity-storage-firestore 2>/dev/null || true
-        docker rm twin-entity-storage-firestore 2>/dev/null || true
-        docker stop twin-entity-storage-cosmos 2>/dev/null || true
-        docker rm twin-entity-storage-cosmos 2>/dev/null || true
+        docker stop $(docker ps -aq) || true
+        docker rm $(docker ps -aq) || true
+        docker rmi -f $(docker images -aq) || true
+        docker system prune -a --volumes -f || true
 
         if [ -f /tmp/twin-entity-storage-aio-max-nr-before ]; then
           sudo tee /proc/sys/fs/aio-max-nr < /tmp/twin-entity-storage-aio-max-nr-before >/dev/null || true
