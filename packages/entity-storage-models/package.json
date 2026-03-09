@@ -1,7 +1,7 @@
 {
 	"name": "@twin.org/entity-storage-models",
 	"version": "0.0.3-next.6",
-	"description": "Models which define the structure of the entity storage contracts and connectors",
+	"description": "Shared models for entity storage contracts, requests and connector behaviour.",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/twinfoundation/entity-storage.git",

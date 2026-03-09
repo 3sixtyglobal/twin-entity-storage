@@ -1,7 +1,7 @@
 {
 	"name": "@twin.org/entity-storage-connector-file",
 	"version": "0.0.3-next.6",
-	"description": "Entity Storage connector implementation using file storage",
+	"description": "File-based connector that stores entities on disk for simple deployments.",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/twinfoundation/entity-storage.git",

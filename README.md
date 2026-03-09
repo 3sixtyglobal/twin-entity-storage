@@ -1,21 +1,23 @@
 # TWIN Entity Storage
 
-This mono-repository contains the packages to use with Entity Storage in TWIN applications.
+Entity Storage packages provide a consistent way to model, store and retrieve entities across multiple backing technologies. The repository brings together shared models, a service layer, a client library and a range of storage connectors so teams can adopt a single contract while choosing infrastructure that fits their operational needs.
+
+By keeping interfaces aligned across connectors, the project helps reduce integration overhead and makes it easier to move between local development, managed cloud services and production databases without redesigning application-level behaviour.
 
 ## Packages
 
-- [entity-storage-models](packages/entity-storage-models/README.md) - Models which define the structure of the entity storage contracts and connectors.
-- [entity-storage-connector-memory](packages/entity-storage-connector-memory/README.md) - Entity Storage connector implementation using in-memory storage.
-- [entity-storage-connector-file](packages/entity-storage-connector-file/README.md) - Entity Storage connector implementation using file storage.
-- [entity-storage-connector-scylladb](packages/entity-storage-connector-scylladb/README.md) - Entity Storage connector implementation using ScyllaDB.
-- [entity-storage-connector-dynamodb](packages/entity-storage-connector-dynamodb/README.md) - Entity Storage connector implementation using DynamoDB.
-- [entity-storage-connector-gcp-firestore](packages/entity-storage-connector-gcp-firestore/README.md) - Entity Storage connector implementation using GCP Firestore.
-- [entity-storage-connector-cosmosdb](packages/entity-storage-connector-cosmosdb/README.md) - Entity Storage connector implementation using CosmosDB.
-- [entity-storage-connector-mysql](packages/entity-storage-connector-mysql/README.md) - Entity Storage connector implementation using MySql.
-- [entity-storage-connector-mongodb](packages/entity-storage-connector-mongodb/README.md) - Entity Storage connector implementation using MongoDb.
-- [entity-storage-connector-postgresql](packages/entity-storage-connector-postgresql/README.md) - Entity Storage connector implementation using PostgreSQL.
-- [entity-storage-service](packages/entity-storage-service/README.md) - Entity Storage contract implementation and REST endpoint definitions.
-- [entity-storage-rest-client](packages/entity-storage-rest-client/README.md) - Entity Storage contract implementation which can connect to REST endpoints.
+- [entity-storage-models](packages/entity-storage-models/README.md) - Shared models for entity storage contracts, requests and connector behaviour.
+- [entity-storage-connector-memory](packages/entity-storage-connector-memory/README.md) - In-memory connector for local development, testing and ephemeral workloads.
+- [entity-storage-service](packages/entity-storage-service/README.md) - Service layer that exposes entity storage contracts and REST endpoint definitions.
+- [entity-storage-rest-client](packages/entity-storage-rest-client/README.md) - REST client for calling entity storage services from applications and tools.
+- [entity-storage-connector-file](packages/entity-storage-connector-file/README.md) - File-based connector that stores entities on disk for simple deployments.
+- [entity-storage-connector-scylladb](packages/entity-storage-connector-scylladb/README.md) - ScyllaDB connector for distributed, high-throughput entity persistence.
+- [entity-storage-connector-dynamodb](packages/entity-storage-connector-dynamodb/README.md) - Amazon DynamoDB connector for managed NoSQL entity persistence.
+- [entity-storage-connector-gcp-firestore](packages/entity-storage-connector-gcp-firestore/README.md) - Google Cloud Firestore connector for document-based entity persistence.
+- [entity-storage-connector-mysql](packages/entity-storage-connector-mysql/README.md) - MySQL connector for relational entity persistence with SQL-based querying.
+- [entity-storage-connector-mongodb](packages/entity-storage-connector-mongodb/README.md) - MongoDB connector for flexible document-oriented entity persistence.
+- [entity-storage-connector-postgresql](packages/entity-storage-connector-postgresql/README.md) - PostgreSQL connector for relational entity persistence and advanced SQL features.
+- [entity-storage-connector-cosmosdb](packages/entity-storage-connector-cosmosdb/README.md) - Azure Cosmos DB connector for globally distributed entity persistence.
 
 ## Contributing
 

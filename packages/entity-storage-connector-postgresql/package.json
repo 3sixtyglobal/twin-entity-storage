@@ -1,7 +1,7 @@
 {
 	"name": "@twin.org/entity-storage-connector-postgresql",
 	"version": "0.0.3-next.6",
-	"description": "Entity Storage connector implementation using PostgreSql storage",
+	"description": "PostgreSQL connector for relational entity persistence and advanced SQL features.",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/twinfoundation/entity-storage.git",

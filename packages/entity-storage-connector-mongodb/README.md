@@ -1,25 +1,11 @@
-# TWIN Entity Storage Connector MongoDb
+# TWIN Entity Storage Connector MongoDB
 
-Entity Storage connector implementation using MongoDb storage.
+This package provides a MongoDB connector for document-oriented persistence where schema flexibility and rich document modelling are important. It is designed to work with the wider entity storage ecosystem so applications can keep storage behaviour consistent across connectors and environments.
 
 ## Installation
 
 ```shell
 npm install @twin.org/entity-storage-connector-mongodb
-```
-
-## Testing
-
-The tests developed are functional tests and need an instance of MongoDb up and running. To run MongoDb locally:
-
-```sh
-docker run -p 27500:27017 --name twin-entity-storage-mongodb --hostname mongo -d mongo
-```
-
-Afterwards you can run the tests as follows:
-
-```sh
-npm run test
 ```
 
 ## Examples

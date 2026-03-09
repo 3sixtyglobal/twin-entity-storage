@@ -1,6 +1,6 @@
 # TWIN Entity Storage Connector File
 
-Entity Storage connector implementation using file storage.
+This package provides a file-based connector that persists entities on local or mounted disks, offering a straightforward option for simple deployments and development setups. It is designed to work with the wider entity storage ecosystem so applications can keep storage behaviour consistent across connectors and environments.
 
 ## Installation
 
