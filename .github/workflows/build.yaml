@@ -64,6 +64,7 @@ jobs:
         run: |
           npm run lint
           npm run dist
+          npm run docs
 
       # Always teardown the environment, necessary to cleanup self-hosted
       - name: Teardown Test Environment

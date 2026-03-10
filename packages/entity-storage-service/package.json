@@ -22,7 +22,7 @@
 		"validate-locales": "validate-locales",
 		"test:coverage": "vitest --run --coverage --config ./vitest.config.ts --no-cache",
 		"docs:clean": "rimraf docs/reference",
-		"docs:generate": "typedoc",
+		"docs:generate": "typedoc --options typedoc.config.mjs",
 		"docs:api": "ts-to-openapi ./ts-to-openapi.json ./docs/open-api/spec.json",
 		"docs": "npm run docs:clean && npm run docs:generate && npm run docs:api",
 		"dist": "npm run clean && npm run build && npm run validate-locales && npm run test:build && npm run test",
