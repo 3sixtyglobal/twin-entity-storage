@@ -7,15 +7,18 @@ on:
 jobs:
   pr-name-checker:
     if: ${{ github.event.action == 'opened' || github.event.changes.title != null }}
-    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+    runs-on:
+        labels: ${{ github.event.repository.private && 'self-hosted-small' || 'ubuntu-latest' }}
+        group:  ${{ github.event.repository.private && 'small' || 'default' }}
+
     steps:
       # Clone the repository to the runner
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       # Setup Node
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
 

@@ -113,7 +113,7 @@ jobs:
 
       # Clone the repository to the runner
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           token: ${{ secrets.GHA_RELEASE_TOKEN }} # Use admin PAT instead of GITHUB_TOKEN
           ref: ${{ steps.set-branch.outputs.branch }} # Checkout the calculated branch
@@ -121,7 +121,7 @@ jobs:
 
       # Set up Node.js environment for running npm commands
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
 

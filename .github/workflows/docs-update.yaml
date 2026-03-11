@@ -36,14 +36,14 @@ jobs:
     steps:
       # Checkout the branch that triggered the workflow dispatch.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           token: ${{ github.token }}
           ref: ${{ github.ref_name }}
 
       # Use the same Node runtime as other CI workflows in this repo.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
 

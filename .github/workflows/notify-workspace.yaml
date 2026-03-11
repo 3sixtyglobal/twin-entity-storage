@@ -20,7 +20,9 @@ jobs:
   notify-workspace:
     # Continue for workflow dispatches and pushes, and for closed PRs only if they were merged.
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'push' || github.event.pull_request.merged == true }}
-    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+    runs-on:
+        labels: ${{ github.event.repository.private && 'self-hosted-small' || 'ubuntu-latest' }}
+        group:  ${{ github.event.repository.private && 'small' || 'default' }}
 
     steps:
       - name: Dispatch submodule change to workspace
