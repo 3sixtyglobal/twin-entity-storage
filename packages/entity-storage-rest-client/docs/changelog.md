@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-rest-client - Changelog
+# Changelog
 
 ## [0.0.3-next.6](https://github.com/twinfoundation/entity-storage/compare/entity-storage-rest-client-v0.0.3-next.5...entity-storage-rest-client-v0.0.3-next.6) (2026-01-21)
 

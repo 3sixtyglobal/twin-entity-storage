@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-connector-gcp-firestore - Changelog
+# Changelog
 
 ## [0.0.3-next.6](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-gcp-firestore-v0.0.3-next.5...entity-storage-connector-gcp-firestore-v0.0.3-next.6) (2026-01-21)
 
