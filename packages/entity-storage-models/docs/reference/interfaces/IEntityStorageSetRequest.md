@@ -4,7 +4,7 @@ Set an entry in entity storage.
 
 ## Properties
 
-### body
+### body {#body}
 
 > **body**: `unknown`
 

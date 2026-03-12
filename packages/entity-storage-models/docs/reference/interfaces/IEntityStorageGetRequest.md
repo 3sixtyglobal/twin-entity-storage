@@ -4,7 +4,7 @@ Get an entry from entity storage.
 
 ## Properties
 
-### pathParams
+### pathParams {#pathparams}
 
 > **pathParams**: `object`
 
@@ -18,7 +18,7 @@ The id of the entity to get.
 
 ***
 
-### query?
+### query? {#query}
 
 > `optional` **query**: `object`
 

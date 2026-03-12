@@ -4,7 +4,7 @@ Configuration for the Firestore Entity Storage Connector.
 
 ## Properties
 
-### projectId
+### projectId {#projectid}
 
 > **projectId**: `string`
 
@@ -12,7 +12,7 @@ The GCP project ID.
 
 ***
 
-### databaseId?
+### databaseId? {#databaseid}
 
 > `optional` **databaseId**: `string`
 
@@ -20,7 +20,7 @@ The database ID, if omitted default database will be used.
 
 ***
 
-### collectionName
+### collectionName {#collectionname}
 
 > **collectionName**: `string`
 
@@ -28,7 +28,7 @@ The name of the collection for the storage.
 
 ***
 
-### credentials?
+### credentials? {#credentials}
 
 > `optional` **credentials**: `string`
 
@@ -36,7 +36,7 @@ The GCP credentials, a base64 encoded version of the JWTInput data type.
 
 ***
 
-### endpoint?
+### endpoint? {#endpoint}
 
 > `optional` **endpoint**: `string`
 
@@ -44,7 +44,7 @@ It's usually only used with an emulator (e.g., "localhost:20200").
 
 ***
 
-### settings?
+### settings? {#settings}
 
 > `optional` **settings**: `object`
 

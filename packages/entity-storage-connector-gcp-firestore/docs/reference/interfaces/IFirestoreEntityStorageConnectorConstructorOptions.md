@@ -4,7 +4,7 @@ Options for the Firestore Entity Storage Connector constructor.
 
 ## Properties
 
-### entitySchema
+### entitySchema {#entityschema}
 
 > **entitySchema**: `string`
 
@@ -12,7 +12,7 @@ The schema for the entity.
 
 ***
 
-### partitionContextIds?
+### partitionContextIds? {#partitioncontextids}
 
 > `optional` **partitionContextIds**: `string`[]
 
@@ -20,7 +20,7 @@ The keys to use from the context ids to create partitions.
 
 ***
 
-### loggingComponentType?
+### loggingComponentType? {#loggingcomponenttype}
 
 > `optional` **loggingComponentType**: `string`
 
@@ -28,7 +28,7 @@ The type of logging component to use, defaults to no logging.
 
 ***
 
-### config
+### config {#config}
 
 > **config**: [`IFirestoreEntityStorageConnectorConfig`](IFirestoreEntityStorageConnectorConfig.md)
 

@@ -4,7 +4,7 @@ Get an entry from entity storage.
 
 ## Properties
 
-### body
+### body {#body}
 
 > **body**: `unknown`
 

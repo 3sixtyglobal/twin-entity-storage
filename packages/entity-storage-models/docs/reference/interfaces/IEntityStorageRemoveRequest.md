@@ -4,7 +4,7 @@ Remove an entry from entity storage.
 
 ## Properties
 
-### pathParams
+### pathParams {#pathparams}
 
 > **pathParams**: `object`
 

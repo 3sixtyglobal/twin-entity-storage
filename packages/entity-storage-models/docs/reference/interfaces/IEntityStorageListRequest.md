@@ -4,7 +4,7 @@ Query the entries from entity storage.
 
 ## Properties
 
-### query?
+### query? {#query}
 
 > `optional` **query**: `object`
 

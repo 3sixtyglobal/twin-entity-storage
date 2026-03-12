@@ -14,7 +14,7 @@ Interface describing an entity storage connector.
 
 ## Methods
 
-### getSchema()
+### getSchema() {#getschema}
 
 > **getSchema**(): `IEntitySchema`
 
@@ -28,7 +28,7 @@ The schema for the entities.
 
 ***
 
-### set()
+### set() {#set}
 
 > **set**(`entity`, `conditions?`): `Promise`\<`void`\>
 
@@ -56,7 +56,7 @@ The id of the entity.
 
 ***
 
-### get()
+### get() {#get}
 
 > **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
 
@@ -90,7 +90,7 @@ The object if it can be found or undefined.
 
 ***
 
-### remove()
+### remove() {#remove}
 
 > **remove**(`id`, `conditions?`): `Promise`\<`void`\>
 
@@ -118,7 +118,7 @@ Nothing.
 
 ***
 
-### query()
+### query() {#query}
 
 > **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `limit?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 

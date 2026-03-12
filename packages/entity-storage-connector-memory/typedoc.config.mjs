@@ -54,5 +54,6 @@ export default {
 	entryFileName: 'index',
 	plugin: ['typedoc-plugin-markdown'],
 	blockTags: [...new Set([...OptionDefaults.blockTags, ...customSchemaTags])],
-	excludeTags: customSchemaTags
+	excludeTags: customSchemaTags,
+	useCustomAnchors: true
 };

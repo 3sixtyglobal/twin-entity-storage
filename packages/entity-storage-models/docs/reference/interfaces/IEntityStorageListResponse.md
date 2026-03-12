@@ -4,7 +4,7 @@ Response to getting the list of entries from a query.
 
 ## Properties
 
-### body
+### body {#body}
 
 > **body**: `object`
 

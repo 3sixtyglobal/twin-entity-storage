@@ -4,7 +4,7 @@ Configuration for the Cosmos DB Entity Storage Connector.
 
 ## Properties
 
-### endpoint
+### endpoint {#endpoint}
 
 > **endpoint**: `string`
 
@@ -12,7 +12,7 @@ The endpoint for the Cosmos DB instance.
 
 ***
 
-### key
+### key {#key}
 
 > **key**: `string`
 
@@ -20,7 +20,7 @@ The primary key for the Cosmos DB instance.
 
 ***
 
-### databaseId
+### databaseId {#databaseid}
 
 > **databaseId**: `string`
 
@@ -28,7 +28,7 @@ The ID of the database to be used.
 
 ***
 
-### containerId
+### containerId {#containerid}
 
 > **containerId**: `string`
 
@@ -36,7 +36,7 @@ The ID of the container for the storage.
 
 ***
 
-### offerThroughput?
+### offerThroughput? {#offerthroughput}
 
 > `optional` **offerThroughput**: `number`
 

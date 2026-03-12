@@ -34,7 +34,7 @@ The dependencies for the entity storage service.
 
 ## Properties
 
-### CLASS\_NAME
+### CLASS\_NAME {#class_name}
 
 > `readonly` `static` **CLASS\_NAME**: `string`
 
@@ -42,7 +42,7 @@ Runtime name for the class.
 
 ## Methods
 
-### className()
+### className() {#classname}
 
 > **className**(): `string`
 
@@ -60,7 +60,7 @@ The class name of the component.
 
 ***
 
-### set()
+### set() {#set}
 
 > **set**(`entity`): `Promise`\<`void`\>
 
@@ -86,7 +86,7 @@ The id of the entity.
 
 ***
 
-### get()
+### get() {#get}
 
 > **get**(`id`, `secondaryIndex?`): `Promise`\<`T` \| `undefined`\>
 
@@ -118,7 +118,7 @@ The object if it can be found or undefined.
 
 ***
 
-### remove()
+### remove() {#remove}
 
 > **remove**(`id`): `Promise`\<`void`\>
 
@@ -144,7 +144,7 @@ Nothing.
 
 ***
 
-### query()
+### query() {#query}
 
 > **query**(`conditions?`, `orderBy?`, `orderByDirection?`, `properties?`, `cursor?`, `limit?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 

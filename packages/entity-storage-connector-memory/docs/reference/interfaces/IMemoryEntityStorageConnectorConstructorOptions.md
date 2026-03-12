@@ -4,7 +4,7 @@ Options for the Memory Entity Storage Connector constructor.
 
 ## Properties
 
-### entitySchema
+### entitySchema {#entityschema}
 
 > **entitySchema**: `string`
 
@@ -12,7 +12,7 @@ The schema for the entity.
 
 ***
 
-### partitionContextIds?
+### partitionContextIds? {#partitioncontextids}
 
 > `optional` **partitionContextIds**: `string`[]
 

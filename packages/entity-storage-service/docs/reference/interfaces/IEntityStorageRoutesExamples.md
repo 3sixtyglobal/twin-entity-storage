@@ -4,7 +4,7 @@ Examples for the entity storage routes.
 
 ## Properties
 
-### set?
+### set? {#set}
 
 > `optional` **set**: `object`
 
@@ -16,7 +16,7 @@ Examples for the set route.
 
 ***
 
-### get?
+### get? {#get}
 
 > `optional` **get**: `object`
 
@@ -32,7 +32,7 @@ Examples for the get route.
 
 ***
 
-### remove?
+### remove? {#remove}
 
 > `optional` **remove**: `object`
 
@@ -44,7 +44,7 @@ Examples for the remove route.
 
 ***
 
-### list?
+### list? {#list}
 
 > `optional` **list**: `object`
 

@@ -4,7 +4,7 @@ Options for the ScyllaDB Table Connector constructor.
 
 ## Properties
 
-### loggingComponentType?
+### loggingComponentType? {#loggingcomponenttype}
 
 > `optional` **loggingComponentType**: `string`
 
@@ -12,7 +12,7 @@ The type of logging component to use, defaults to no logging.
 
 ***
 
-### entitySchema
+### entitySchema {#entityschema}
 
 > **entitySchema**: `string`
 
@@ -20,7 +20,7 @@ The name of the entity schema.
 
 ***
 
-### partitionContextIds?
+### partitionContextIds? {#partitioncontextids}
 
 > `optional` **partitionContextIds**: `string`[]
 
@@ -28,7 +28,7 @@ The keys to use from the context ids to create partitions.
 
 ***
 
-### config
+### config {#config}
 
 > **config**: [`IScyllaDBTableConfig`](IScyllaDBTableConfig.md)
 

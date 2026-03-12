@@ -42,7 +42,7 @@ The options for the connector.
 
 ## Properties
 
-### CLASS\_NAME
+### CLASS\_NAME {#class_name}
 
 > `readonly` `static` **CLASS\_NAME**: `string`
 
@@ -54,7 +54,7 @@ Runtime name for the class.
 
 ## Methods
 
-### getSchema()
+### getSchema() {#getschema}
 
 > **getSchema**(): `IEntitySchema`
 
@@ -76,7 +76,7 @@ The schema for the entities.
 
 ***
 
-### get()
+### get() {#get}
 
 > **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
 
@@ -118,7 +118,7 @@ The object if it can be found or undefined.
 
 ***
 
-### query()
+### query() {#query}
 
 > **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `limit?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 
@@ -173,7 +173,7 @@ and a cursor which can be used to request more entities.
 
 ***
 
-### className()
+### className() {#classname}
 
 > **className**(): `string`
 
@@ -195,7 +195,7 @@ The class name of the component.
 
 ***
 
-### bootstrap()
+### bootstrap() {#bootstrap}
 
 > **bootstrap**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
 
@@ -221,7 +221,7 @@ True if the bootstrapping process was successful.
 
 ***
 
-### set()
+### set() {#set}
 
 > **set**(`entity`): `Promise`\<`void`\>
 
@@ -245,7 +245,7 @@ The entity to set.
 
 ***
 
-### remove()
+### remove() {#remove}
 
 > **remove**(`id`): `Promise`\<`void`\>
 

@@ -34,7 +34,7 @@ The options for the connector.
 
 ## Properties
 
-### CLASS\_NAME
+### CLASS\_NAME {#class_name}
 
 > `readonly` `static` **CLASS\_NAME**: `string`
 
@@ -42,7 +42,7 @@ Runtime name for the class.
 
 ## Methods
 
-### className()
+### className() {#classname}
 
 > **className**(): `string`
 
@@ -60,7 +60,7 @@ The class name of the component.
 
 ***
 
-### getSchema()
+### getSchema() {#getschema}
 
 > **getSchema**(): `IEntitySchema`
 
@@ -78,7 +78,7 @@ The schema for the entities.
 
 ***
 
-### get()
+### get() {#get}
 
 > **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
 
@@ -116,7 +116,7 @@ The object if it can be found or undefined.
 
 ***
 
-### set()
+### set() {#set}
 
 > **set**(`entity`, `conditions?`): `Promise`\<`void`\>
 
@@ -148,7 +148,7 @@ The id of the entity.
 
 ***
 
-### remove()
+### remove() {#remove}
 
 > **remove**(`id`, `conditions?`): `Promise`\<`void`\>
 
@@ -180,7 +180,7 @@ Nothing.
 
 ***
 
-### query()
+### query() {#query}
 
 > **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `limit?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 
@@ -231,7 +231,7 @@ and a cursor which can be used to request more entities.
 
 ***
 
-### getStore()
+### getStore() {#getstore}
 
 > **getStore**(): `T`[]
 
