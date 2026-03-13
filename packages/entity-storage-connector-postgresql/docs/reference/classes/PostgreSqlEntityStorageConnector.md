@@ -86,6 +86,24 @@ The class name of the component.
 
 ***
 
+### stop() {#stop}
+
+> **stop**(): `Promise`\<`void`\>
+
+The component needs to be stopped when the node is closed.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.stop`
+
+***
+
 ### getSchema() {#getschema}
 
 > **getSchema**(): `IEntitySchema`
