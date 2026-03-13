@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-memory",
-	"version": "0.0.3-next.6",
+	"version": "0.0.3-next.7",
 	"description": "In-memory connector for local development, testing and short-lived workloads.",
 	"repository": {
 		"type": "git",
@@ -32,7 +32,7 @@
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
 		"@twin.org/nameof": "next",
-		"@twin.org/entity-storage-models": "0.0.3-next.6"
+		"@twin.org/entity-storage-models": "0.0.3-next.7"
 	},
 	"devDependencies": {
 		"@twin.org/nameof-transformer": "next",

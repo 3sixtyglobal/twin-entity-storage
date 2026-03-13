@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3-next.7](https://github.com/twinfoundation/entity-storage/compare/entity-storage-models-v0.0.3-next.6...entity-storage-models-v0.0.3-next.7) (2026-03-13)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-models:** Synchronize repo versions
+
 ## [0.0.3-next.6](https://github.com/twinfoundation/entity-storage/compare/entity-storage-models-v0.0.3-next.5...entity-storage-models-v0.0.3-next.6) (2026-01-21)
 
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.7](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-postgresql-v0.0.3-next.6...entity-storage-connector-postgresql-v0.0.3-next.7) (2026-03-13)
+
+
+### Bug Fixes
+
+* adding tests and fixes for dot notation ([#76](https://github.com/twinfoundation/entity-storage/issues/76)) ([3879337](https://github.com/twinfoundation/entity-storage/commit/387933797e33543e4d8b2d49b8beeb792512a4ff))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.6 to 0.0.3-next.7
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.6 to 0.0.3-next.7
+
 ## [0.0.3-next.6](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-postgresql-v0.0.3-next.5...entity-storage-connector-postgresql-v0.0.3-next.6) (2026-01-21)
 
 
