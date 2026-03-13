@@ -37,6 +37,18 @@ class SubType {
 }
 
 /**
+ * Nested search entity for dot-notation tests.
+ */
+@entity()
+class NestedSearchType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "object", optional: true })
+	public consignor?: { name: string };
+}
+
+/**
  * Test Type Definition.
  */
 @entity()
@@ -93,6 +105,9 @@ describe("ScyllaDBTableConnector", () => {
 	beforeAll(async () => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
+		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
+			EntitySchemaHelper.getSchema(NestedSearchType)
+		);
 		initSchema();
 
 		ContextIdStore.getContextIds = vi
@@ -114,6 +129,16 @@ describe("ScyllaDBTableConnector", () => {
 		const entityStorage = new ScyllaDBTableConnector({
 			entitySchema: nameof<TestType>(),
 			config: TEST_SCYLLA_CONFIG
+		});
+		try {
+			await entityStorage.truncateTable();
+		} catch {}
+	});
+
+	afterEach(async () => {
+		const entityStorage = new ScyllaDBTableConnector({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...TEST_SCYLLA_CONFIG, tableName: "test_nested" }
 		});
 		try {
 			await entityStorage.truncateTable();
@@ -970,5 +995,60 @@ describe("ScyllaDBTableConnector", () => {
 		expect(result2.entities).toBeDefined();
 		expect(result2.entities.length).toBe(1);
 		expect((result2.entities[0] as TestType).id).toBe("vertex-1");
+	});
+
+	test("throws when querying with ComparisonOperator.Includes on nested object property (dot-notation not supported in CQL)", async () => {
+		const entityStorage = new ScyllaDBTableConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...TEST_SCYLLA_CONFIG, tableName: "test_nested" }
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", consignor: { name: "Alice Smith" } });
+		await expect(
+			entityStorage.query({
+				conditions: [
+					{
+						property: "consignor.name",
+						value: "alice",
+						comparison: ComparisonOperator.Includes
+					}
+				]
+			})
+		).rejects.toMatchObject({ name: "GeneralError" });
+	});
+
+	test("throws when querying with ComparisonOperator.NotEquals on nested object property (dot-notation not supported in CQL)", async () => {
+		const entityStorage = new ScyllaDBTableConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...TEST_SCYLLA_CONFIG, tableName: "test_nested" }
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", consignor: { name: "Alice" } });
+		await expect(
+			entityStorage.query({
+				conditions: [
+					{
+						property: "consignor.name",
+						value: "Alice",
+						comparison: ComparisonOperator.NotEquals
+					}
+				]
+			})
+		).rejects.toMatchObject({ name: "GeneralError" });
+	});
+
+	test("can query with ComparisonOperator.Includes on plain string field", async () => {
+		const entityStorage = new ScyllaDBTableConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_SCYLLA_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", value1: "hello world", value2: 1, value3: undefined });
+		await entityStorage.set({ id: "2", value1: "foo bar", value2: 2, value3: undefined });
+		await entityStorage.set({ id: "3", value1: "worldwide", value2: 3, value3: undefined });
+		const result = await entityStorage.query({
+			conditions: [{ property: "value1", value: "world", comparison: ComparisonOperator.Includes }]
+		});
+		expect(result.entities.map(e => (e as TestType).id).sort()).toEqual(["1", "3"]);
 	});
 });

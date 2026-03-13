@@ -85,6 +85,30 @@ class TestType {
 	}[];
 }
 
+/**
+ * Test entity with nested object and array properties for dot-notation query tests.
+ */
+@entity()
+class NestedSearchType {
+	/**
+	 * Id.
+	 */
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	/**
+	 * Nested object property (e.g. firstConsignor.name use case).
+	 */
+	@property({ type: "object", optional: true })
+	public consignor?: { name: string };
+
+	/**
+	 * Nested array property (e.g. commodities.information use case).
+	 */
+	@property({ type: "array", optional: true })
+	public items?: { label: string }[];
+}
+
 let currentUser = "user";
 
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
@@ -93,6 +117,9 @@ describe("DynamoDbEntityStorageConnector", () => {
 	beforeAll(async () => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
+		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
+			EntitySchemaHelper.getSchema(NestedSearchType)
+		);
 
 		initSchema();
 
@@ -114,6 +141,16 @@ describe("DynamoDbEntityStorageConnector", () => {
 		const entityStorage = new DynamoDbEntityStorageConnector({
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
+		});
+		try {
+			await entityStorage.tableDelete();
+		} catch {}
+	});
+
+	afterEach(async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...TEST_DYNAMODB_CONFIG, tableName: "test_nested" }
 		});
 		try {
 			await entityStorage.tableDelete();
@@ -1041,5 +1078,127 @@ describe("DynamoDbEntityStorageConnector", () => {
 			conditions: [{ property: "value1", value: "world", comparison: ComparisonOperator.Includes }]
 		});
 		expect(result.entities.map(e => e.id).sort()).toEqual(["inc1", "inc3"]);
+	});
+
+	test("REPRODUCES ISSUE: partition key mismatch between write and read", async () => {
+		// This test reproduces the identity-management onboarding issue
+		// where partition keys change between write and read operations
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			partitionContextIds: ["node"],
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+
+		// Simulate write operation with raw DID format
+		const originalGetContextIds = ContextIdStore.getContextIds;
+		const rawDid =
+			"did:iota:testnet:0x4f90da6f080e04dac1be0d13cc8bfe0097236b0c37f150f876921c3d06919a9f";
+
+		ContextIdStore.getContextIds = vi.fn().mockResolvedValue({
+			node: rawDid,
+			tenant: "tenant",
+			user: "user"
+		});
+
+		// Write the record (partition key will be the raw DID)
+		const onboardingId = "HimX-VOmkja_zNB8YhbXGg";
+		await entityStorage.set({
+			id: onboardingId,
+			value1: "test-user@example.com",
+			value2: 100,
+			value3: undefined
+		});
+
+		// Verify the record was written successfully
+		const writtenRecord = await entityStorage.get(onboardingId);
+		expect(writtenRecord).toBeDefined();
+		expect(writtenRecord?.id).toEqual(onboardingId);
+
+		// Simulate read operation with base64-transformed DID
+		// This mimics what happens when a ContextIdHandler transforms the DID
+		const base64Did = "T5DabwgOBNrBvg0TzIv-AJcjaww38VD4dpIcPQaRmp8";
+
+		ContextIdStore.getContextIds = vi.fn().mockResolvedValue({
+			node: base64Did, // Different format!
+			tenant: "tenant",
+			user: "user"
+		});
+
+		// Try to read the same record (should fail because partition key doesn't match)
+		const readRecord = await entityStorage.get(onboardingId);
+
+		// THIS IS THE BUG: The record exists but can't be found due to partition key mismatch
+		// In production, this causes a 404 error in the onboarding complete endpoint
+		expect(readRecord).toBeUndefined(); // Record not found even though it exists!
+
+		// Restore original function
+		ContextIdStore.getContextIds = originalGetContextIds;
+	});
+
+	test("can query with ComparisonOperator.Includes on nested object property (dot-notation)", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...TEST_DYNAMODB_CONFIG, tableName: "test_nested" }
+		});
+		await entityStorage.bootstrap();
+
+		await entityStorage.set({ id: "1", consignor: { name: "alice smith" } });
+		await entityStorage.set({ id: "2", consignor: { name: "bob jones" } });
+		await entityStorage.set({ id: "3", consignor: { name: "alice cooper" } });
+
+		const result = await entityStorage.query({
+			property: "consignor.name",
+			comparison: ComparisonOperator.Includes,
+			value: "alice"
+		});
+
+		expect(result.entities.length).toBe(2);
+		const names = result.entities.map(e => (e as NestedSearchType).consignor?.name);
+		expect(names).toEqual(expect.arrayContaining(["alice smith", "alice cooper"]));
+	});
+
+	test("can query with ComparisonOperator.NotEquals on nested object property (dot-notation)", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...TEST_DYNAMODB_CONFIG, tableName: "test_nested" }
+		});
+		await entityStorage.bootstrap();
+
+		await entityStorage.set({ id: "1", consignor: { name: "alice" } });
+		await entityStorage.set({ id: "2", consignor: { name: "bob" } });
+		await entityStorage.set({ id: "3", consignor: { name: "charlie" } });
+
+		const result = await entityStorage.query({
+			property: "consignor.name",
+			comparison: ComparisonOperator.NotEquals,
+			value: "alice"
+		});
+
+		expect(result.entities.length).toBe(2);
+		const names = result.entities.map(e => (e as NestedSearchType).consignor?.name);
+		expect(names).toEqual(expect.arrayContaining(["bob", "charlie"]));
+	});
+
+	test("can query with ComparisonOperator.Includes on string field", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap();
+
+		await entityStorage.set({ id: "ci-1", value1: "hello world", value2: 1 });
+		await entityStorage.set({ id: "ci-2", value1: "hello again", value2: 2 });
+		await entityStorage.set({ id: "ci-3", value1: "goodbye world", value2: 3 });
+
+		const result = await entityStorage.query({
+			property: "value1",
+			comparison: ComparisonOperator.Includes,
+			value: "hello"
+		});
+
+		expect(result.entities.length).toBe(2);
+		const ids = result.entities.map(e => (e as TestType).id);
+		expect(ids).toEqual(expect.arrayContaining(["ci-1", "ci-2"]));
 	});
 });

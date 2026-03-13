@@ -28,8 +28,8 @@ import type { ICosmosDbEntityStorageConnectorConfig } from "../src/models/ICosmo
  * Clears all items from the Cosmos DB container used for testing.
  * @param entityStorage The CosmosDbEntityStorageConnector instance to use for clearing the container.
  */
-async function clearContainerItems(
-	entityStorage: CosmosDbEntityStorageConnector<TestType>
+async function clearContainerItems<TEntity extends { id: string }>(
+	entityStorage: CosmosDbEntityStorageConnector<TEntity>
 ): Promise<void> {
 	const internalConnector = entityStorage as unknown as {
 		_container: {
@@ -54,6 +54,21 @@ async function clearContainerItems(
 	for (const resource of resources) {
 		await internalConnector._container.item(resource.id, resource.partitionId).delete();
 	}
+}
+
+/**
+ * Nested search entity for dot-notation tests.
+ */
+@entity()
+class NestedSearchType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "object", optional: true })
+	public consignor?: { name: string };
+
+	@property({ type: "array", optional: true })
+	public items?: { label: string }[];
 }
 
 /**
@@ -124,11 +139,18 @@ const config: ICosmosDbEntityStorageConnectorConfig = {
 	...TEST_COSMOS_CONFIG,
 	containerId: `${TEST_COSMOS_CONFIG.containerId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 };
+const nestedConfig: ICosmosDbEntityStorageConnectorConfig = {
+	...TEST_COSMOS_CONFIG,
+	containerId: `${TEST_COSMOS_CONFIG.containerId}-nested-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+};
 
 describe("CosmosDbEntityStorageConnector", () => {
 	beforeAll(async () => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
+		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
+			EntitySchemaHelper.getSchema(NestedSearchType)
+		);
 
 		initSchema();
 
@@ -153,6 +175,17 @@ describe("CosmosDbEntityStorageConnector", () => {
 			config
 		});
 
+		try {
+			await entityStorage.bootstrap("logging");
+			await clearContainerItems(entityStorage);
+		} catch {}
+	});
+
+	afterEach(async () => {
+		const entityStorage = new CosmosDbEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: nestedConfig
+		});
 		try {
 			await entityStorage.bootstrap("logging");
 			await clearContainerItems(entityStorage);
@@ -1023,5 +1056,56 @@ describe("CosmosDbEntityStorageConnector", () => {
 			conditions: [{ property: "value1", value: "world", comparison: ComparisonOperator.Includes }]
 		});
 		expect(result.entities.map(e => e.id).sort()).toEqual(["inc1", "inc3"]);
+	});
+
+	test("can query with ComparisonOperator.Includes on nested object property (dot-notation)", async () => {
+		const entityStorage = new CosmosDbEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: nestedConfig
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", consignor: { name: "alice smith" } });
+		await entityStorage.set({ id: "2", consignor: { name: "bob jones" } });
+		await entityStorage.set({ id: "3", consignor: { name: "alice cooper" } });
+		const result = await entityStorage.query({
+			conditions: [
+				{ property: "consignor.name", value: "alice", comparison: ComparisonOperator.Includes }
+			]
+		});
+		expect(result.entities.map(e => e.id).sort()).toEqual(["1", "3"]);
+	});
+
+	test("can query with ComparisonOperator.NotEquals on nested object property (dot-notation)", async () => {
+		const entityStorage = new CosmosDbEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: nestedConfig
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", consignor: { name: "Alice" } });
+		await entityStorage.set({ id: "2", consignor: { name: "Bob" } });
+		await entityStorage.set({ id: "3", consignor: { name: "Charlie" } });
+		const result = await entityStorage.query({
+			conditions: [
+				{ property: "consignor.name", value: "Alice", comparison: ComparisonOperator.NotEquals }
+			]
+		});
+		expect(result.entities.map(e => e.id).sort()).toEqual(["2", "3"]);
+	});
+
+	test("can query with ComparisonOperator.Includes on plain string field", async () => {
+		const entityStorage = new CosmosDbEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: nestedConfig
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", consignor: { name: "hello world" } });
+		await entityStorage.set({ id: "2", consignor: { name: "hello world" } });
+		await entityStorage.set({ id: "3", consignor: { name: "goodbye" } });
+		const result = await entityStorage.query({
+			conditions: [
+				{ property: "consignor.name", value: "hello", comparison: ComparisonOperator.Includes }
+			]
+		});
+		expect(result.entities.map(e => e.id).sort()).toEqual(["1", "2"]);
 	});
 });

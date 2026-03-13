@@ -91,6 +91,30 @@ class TestType {
 	}[];
 }
 
+/**
+ * Test entity with nested object and array properties for dot-notation query tests.
+ */
+@entity()
+class NestedSearchType {
+	/**
+	 * Id.
+	 */
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	/**
+	 * Nested object property (e.g. firstConsignor.name use case).
+	 */
+	@property({ type: "object", optional: true })
+	public consignor?: { name: string };
+
+	/**
+	 * Nested array property (e.g. commodities.information use case).
+	 */
+	@property({ type: "array", optional: true })
+	public items?: { label: string }[];
+}
+
 let currentUser = "user";
 
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
@@ -100,6 +124,9 @@ describe("MongoDbEntityStorageConnector", () => {
 	beforeAll(async () => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
+		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
+			EntitySchemaHelper.getSchema(NestedSearchType)
+		);
 
 		initSchema();
 
@@ -121,6 +148,15 @@ describe("MongoDbEntityStorageConnector", () => {
 		const entityStorage = new MongoDbEntityStorageConnector({
 			entitySchema: nameof<TestType>(),
 			config
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.collectionDrop();
+	});
+
+	afterEach(async () => {
+		const entityStorage = new MongoDbEntityStorageConnector({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...config, collection: "test_nested" }
 		});
 		await entityStorage.bootstrap("logging");
 		await entityStorage.collectionDrop();
@@ -1334,5 +1370,71 @@ describe("MongoDbEntityStorageConnector", () => {
 		expect(result2.entities).toBeDefined();
 		expect(result2.entities.length).toBe(1);
 		expect((result2.entities[0] as TestType).id).toBe("vertex-1");
+	});
+
+	test("can query with ComparisonOperator.Includes on nested object property (dot-notation)", async () => {
+		const entityStorage = new MongoDbEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...config, collection: "test_nested" }
+		});
+		await entityStorage.bootstrap();
+
+		await entityStorage.set({ id: "1", consignor: { name: "alice smith" } });
+		await entityStorage.set({ id: "2", consignor: { name: "bob jones" } });
+		await entityStorage.set({ id: "3", consignor: { name: "alice cooper" } });
+
+		const result = await entityStorage.query({
+			property: "consignor.name",
+			comparison: ComparisonOperator.Includes,
+			value: "alice"
+		});
+
+		expect(result.entities.length).toBe(2);
+		const names = result.entities.map(e => (e as NestedSearchType).consignor?.name);
+		expect(names).toEqual(expect.arrayContaining(["alice smith", "alice cooper"]));
+	});
+
+	test("can query with ComparisonOperator.NotEquals on nested object property (dot-notation)", async () => {
+		const entityStorage = new MongoDbEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...config, collection: "test_nested" }
+		});
+		await entityStorage.bootstrap();
+
+		await entityStorage.set({ id: "1", consignor: { name: "alice" } });
+		await entityStorage.set({ id: "2", consignor: { name: "bob" } });
+		await entityStorage.set({ id: "3", consignor: { name: "charlie" } });
+
+		const result = await entityStorage.query({
+			property: "consignor.name",
+			comparison: ComparisonOperator.NotEquals,
+			value: "alice"
+		});
+
+		expect(result.entities.length).toBe(2);
+		const names = result.entities.map(e => (e as NestedSearchType).consignor?.name);
+		expect(names).toEqual(expect.arrayContaining(["bob", "charlie"]));
+	});
+
+	test("can query with ComparisonOperator.Includes on string field", async () => {
+		const entityStorage = new MongoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+		await entityStorage.bootstrap();
+
+		await entityStorage.set({ id: "ci-1", value1: "hello world", value2: 1 });
+		await entityStorage.set({ id: "ci-2", value1: "hello again", value2: 2 });
+		await entityStorage.set({ id: "ci-3", value1: "goodbye world", value2: 3 });
+
+		const result = await entityStorage.query({
+			property: "value1",
+			comparison: ComparisonOperator.Includes,
+			value: "hello"
+		});
+
+		expect(result.entities.length).toBe(2);
+		const ids = result.entities.map(e => (e as TestType).id);
+		expect(ids).toEqual(expect.arrayContaining(["ci-1", "ci-2"]));
 	});
 });

@@ -37,6 +37,21 @@ class SubType {
 }
 
 /**
+ * Nested search entity for dot-notation tests.
+ */
+@entity()
+class NestedSearchType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "object", optional: true })
+	public consignor?: { name: string };
+
+	@property({ type: "array", optional: true })
+	public items?: { label: string }[];
+}
+
+/**
  * Test Type Definition.
  */
 @entity()
@@ -77,6 +92,9 @@ const TEST_STORE_NAME = `${TEST_DIRECTORY}/store.json`;
 describe("FileEntityStorageConnector", () => {
 	beforeAll(async () => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
+		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
+			EntitySchemaHelper.getSchema(NestedSearchType)
+		);
 		initSchema();
 
 		ContextIdStore.getContextIds = vi
@@ -807,5 +825,56 @@ describe("FileEntityStorageConnector", () => {
 		expect(result.entities.map(e => e.value1)).toEqual(
 			expect.arrayContaining(["hello world", "worldwide"])
 		);
+	});
+
+	test("can query with ComparisonOperator.Includes on nested object property (dot-notation)", async () => {
+		const entityStorage = new FileEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", consignor: { name: "alice smith" } });
+		await entityStorage.set({ id: "2", consignor: { name: "bob jones" } });
+		await entityStorage.set({ id: "3", consignor: { name: "alice cooper" } });
+		const result = await entityStorage.query({
+			conditions: [
+				{ property: "consignor.name", value: "alice", comparison: ComparisonOperator.Includes }
+			]
+		});
+		expect(result.entities.map(e => e.id).sort()).toEqual(["1", "3"]);
+	});
+
+	test("can query with ComparisonOperator.NotEquals on nested object property (dot-notation)", async () => {
+		const entityStorage = new FileEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", consignor: { name: "Alice" } });
+		await entityStorage.set({ id: "2", consignor: { name: "Bob" } });
+		await entityStorage.set({ id: "3", consignor: { name: "Charlie" } });
+		const result = await entityStorage.query({
+			conditions: [
+				{ property: "consignor.name", value: "Alice", comparison: ComparisonOperator.NotEquals }
+			]
+		});
+		expect(result.entities.map(e => e.id).sort()).toEqual(["2", "3"]);
+	});
+
+	test("can query with ComparisonOperator.Includes on plain string field", async () => {
+		const entityStorage = new FileEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", consignor: { name: "hello world" } });
+		await entityStorage.set({ id: "2", consignor: { name: "hello world" } });
+		await entityStorage.set({ id: "3", consignor: { name: "goodbye" } });
+		const result = await entityStorage.query({
+			conditions: [
+				{ property: "consignor.name", value: "hello", comparison: ComparisonOperator.Includes }
+			]
+		});
+		expect(result.entities.map(e => e.id).sort()).toEqual(["1", "2"]);
 	});
 });

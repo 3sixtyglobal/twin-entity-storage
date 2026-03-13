@@ -37,6 +37,21 @@ class SubType {
 }
 
 /**
+ * Nested search entity for dot-notation tests.
+ */
+@entity()
+class NestedSearchType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "object", optional: true })
+	public consignor?: { name: string };
+
+	@property({ type: "array", optional: true })
+	public items?: { label: string }[];
+}
+
+/**
  * Value Type Definition.
  */
 @entity()
@@ -112,6 +127,9 @@ describe("FirestoreEntityStorageConnector", () => {
 		EntitySchemaFactory.register(nameof<ValueType>(), () =>
 			EntitySchemaHelper.getSchema(ValueType)
 		);
+		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
+			EntitySchemaHelper.getSchema(NestedSearchType)
+		);
 
 		initSchema();
 
@@ -134,6 +152,17 @@ describe("FirestoreEntityStorageConnector", () => {
 			const entityStorage = new FirestoreEntityStorageConnector<TestType>({
 				entitySchema: nameof<TestType>(),
 				config: TEST_FIRESTORE_CONFIG
+			});
+			await entityStorage.bootstrap("logging");
+			await entityStorage.collectionDelete();
+		} catch {}
+	});
+
+	afterEach(async () => {
+		try {
+			const entityStorage = new FirestoreEntityStorageConnector<NestedSearchType>({
+				entitySchema: nameof<NestedSearchType>(),
+				config: { ...TEST_FIRESTORE_CONFIG, collectionName: "test_nested" }
 			});
 			await entityStorage.bootstrap("logging");
 			await entityStorage.collectionDelete();
@@ -982,5 +1011,34 @@ describe("FirestoreEntityStorageConnector", () => {
 
 	test.skip("can query items with Includes on array field (Firestore only supports array-contains, not string substrings)", async () => {
 		// Skipped: Firestore does not support substring search in string fields, only array-contains for arrays.
+	});
+
+	test("can query with ComparisonOperator.NotEquals on nested object property (dot-notation)", async () => {
+		const entityStorage = new FirestoreEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...TEST_FIRESTORE_CONFIG, collectionName: "test_nested" }
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", consignor: { name: "Alice" } });
+		await entityStorage.set({ id: "2", consignor: { name: "Bob" } });
+		await entityStorage.set({ id: "3", consignor: { name: "Charlie" } });
+		const result = await entityStorage.query({
+			conditions: [
+				{ property: "consignor.name", value: "Alice", comparison: ComparisonOperator.NotEquals }
+			]
+		});
+		expect(result.entities.map(e => e.id).sort()).toEqual(["2", "3"]);
+	});
+
+	test.skip("can query with ComparisonOperator.Includes on nested object property (dot-notation not supported — Firestore maps Includes to array-contains)", async () => {
+		// Skipped: Firestore's Includes operator maps to array-contains, which tests membership in
+		// an array field. It does not support substring matching on string fields (nested or otherwise).
+		// Any attempt to use Includes on a string field will either throw or return no results.
+	});
+
+	test.skip("can query with ComparisonOperator.Includes on plain string field (Firestore maps Includes to array-contains — silently returns empty results on non-array fields)", async () => {
+		// Skipped: Firestore's Includes operator maps to array-contains. When used on a non-array
+		// string field it does not throw but silently returns no results, which is misleading.
+		// Substring matching on string fields is not supported by the Firestore query API.
 	});
 });

@@ -224,6 +224,17 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	}
 
 	/**
+	 * The component needs to be stopped when the node is closed.
+	 * @returns Nothing.
+	 */
+	public async stop(): Promise<void> {
+		if (this._connection) {
+			await this._connection.end();
+			this._connection = undefined;
+		}
+	}
+
+	/**
 	 * Get the schema for the entities.
 	 * @returns The schema for the entities.
 	 */
@@ -781,53 +792,86 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 		values.push(dbValue);
 
 		if (comparator.property.split(".").length > 1) {
-			const jsonPath = comparator.property
-				.split(".")
-				.slice(1)
+			const rootProp = comparator.property.split(".")[0];
+			const nestedParts = comparator.property.split(".").slice(1);
+			const rootSchema = this._entitySchema.properties?.find(p => p.property === rootProp);
+			const isArray = rootSchema?.type === EntitySchemaPropertyType.Array;
+			const jsonPath = nestedParts
 				.map((p, i, arr) => (i === arr.length - 1 ? `->> '${p}'` : `-> '${p}'`))
 				.join("");
-			return `("${comparator.property.split(".")[0]}"::jsonb ${jsonPath}) = $${valueIndex}`;
-		} else if (comparator.comparison === ComparisonOperator.Equals) {
-			if (Is.object(comparator.value) || Is.array(comparator.value)) {
-				return `"${prop}" = $${valueIndex}::jsonb`;
-			}
-			return `"${prop}" = $${valueIndex}`;
-		} else if (comparator.comparison === ComparisonOperator.NotEquals) {
-			if (Is.object(comparator.value) || Is.array(comparator.value)) {
-				return `"${prop}" != $${valueIndex}::jsonb`;
-			}
-			return `"${prop}" <> $${valueIndex}`;
-		} else if (comparator.comparison === ComparisonOperator.GreaterThan) {
-			return `"${prop}" > $${valueIndex}`;
-		} else if (comparator.comparison === ComparisonOperator.LessThan) {
-			return `"${prop}" < $${valueIndex}`;
-		} else if (comparator.comparison === ComparisonOperator.GreaterThanOrEqual) {
-			return `"${prop}" >= $${valueIndex}`;
-		} else if (comparator.comparison === ComparisonOperator.LessThanOrEqual) {
-			return `"${prop}" <= $${valueIndex}`;
-		} else if (comparator.comparison === ComparisonOperator.Includes) {
-			// For string fields, use ILIKE for case-insensitive substring matching
-			if (type === EntitySchemaPropertyType.String) {
-				return `"${prop}" ILIKE '%' || $${valueIndex} || '%'`;
-			}
-			// For array and object fields, use jsonb operators
-			if (type === EntitySchemaPropertyType.Array || type === EntitySchemaPropertyType.Object) {
-				return `EXISTS (SELECT 1 FROM jsonb_array_elements("${prop}") elem WHERE elem @> $${valueIndex}::jsonb)`;
-			}
-			// Includes operator is not supported for other types (number, boolean, etc.)
-			throw new GeneralError(
-				PostgreSqlEntityStorageConnector.CLASS_NAME,
-				"comparisonNotSupported",
-				{
-					comparison: comparator.comparison,
-					type
+			const jsonTextExpr = `("${rootProp}"::jsonb ${jsonPath})`;
+
+			switch (comparator.comparison) {
+				case ComparisonOperator.Includes: {
+					values.pop();
+					values.push(`%${String(comparator.value).toLowerCase()}%`);
+					if (isArray) {
+						const elemPath = nestedParts
+							.map((p, i, arr) => (i === arr.length - 1 ? `->>'${p}'` : `->'${p}'`))
+							.join("");
+						return `EXISTS (SELECT 1 FROM jsonb_array_elements("${rootProp}") elem WHERE LOWER(elem${elemPath}) ILIKE $${valueIndex})`;
+					}
+					return `LOWER(${jsonTextExpr}) ILIKE $${valueIndex}`;
 				}
-			);
+				case ComparisonOperator.NotEquals:
+					return `${jsonTextExpr} <> $${valueIndex}`;
+				case ComparisonOperator.GreaterThan:
+					return `${jsonTextExpr} > $${valueIndex}`;
+				case ComparisonOperator.LessThan:
+					return `${jsonTextExpr} < $${valueIndex}`;
+				case ComparisonOperator.GreaterThanOrEqual:
+					return `${jsonTextExpr} >= $${valueIndex}`;
+				case ComparisonOperator.LessThanOrEqual:
+					return `${jsonTextExpr} <= $${valueIndex}`;
+				default:
+					return `${jsonTextExpr} = $${valueIndex}`;
+			}
 		}
 
-		throw new GeneralError(PostgreSqlEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {
-			comparison: comparator.comparison
-		});
+		switch (comparator.comparison) {
+			case ComparisonOperator.Equals:
+				if (Is.object(comparator.value) || Is.array(comparator.value)) {
+					return `"${prop}" = $${valueIndex}::jsonb`;
+				}
+				return `"${prop}" = $${valueIndex}`;
+			case ComparisonOperator.NotEquals:
+				if (Is.object(comparator.value) || Is.array(comparator.value)) {
+					return `"${prop}" != $${valueIndex}::jsonb`;
+				}
+				return `"${prop}" <> $${valueIndex}`;
+			case ComparisonOperator.GreaterThan:
+				return `"${prop}" > $${valueIndex}`;
+			case ComparisonOperator.LessThan:
+				return `"${prop}" < $${valueIndex}`;
+			case ComparisonOperator.GreaterThanOrEqual:
+				return `"${prop}" >= $${valueIndex}`;
+			case ComparisonOperator.LessThanOrEqual:
+				return `"${prop}" <= $${valueIndex}`;
+			case ComparisonOperator.Includes: {
+				if (type === EntitySchemaPropertyType.String) {
+					return `"${prop}" ILIKE '%' || $${valueIndex} || '%'`;
+				}
+				if (type === EntitySchemaPropertyType.Array || type === EntitySchemaPropertyType.Object) {
+					return `EXISTS (SELECT 1 FROM jsonb_array_elements("${prop}") elem WHERE elem @> $${valueIndex}::jsonb)`;
+				}
+				throw new GeneralError(
+					PostgreSqlEntityStorageConnector.CLASS_NAME,
+					"comparisonNotSupported",
+					{
+						comparison: comparator.comparison,
+						type
+					}
+				);
+			}
+			default:
+				throw new GeneralError(
+					PostgreSqlEntityStorageConnector.CLASS_NAME,
+					"comparisonNotSupported",
+					{
+						comparison: comparator.comparison
+					}
+				);
+		}
 	}
 
 	/**

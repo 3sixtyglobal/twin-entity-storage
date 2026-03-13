@@ -294,9 +294,15 @@ export abstract class AbstractScyllaDBConnector<T> {
 				}
 			}
 
-			// TODO: This code needs refactoring to support conditions for sub properties.
 			for (const cond of theConditions) {
 				const condition = cond as IComparator;
+
+				if (String(condition.property).includes(".")) {
+					throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "comparisonNotSupported", {
+						property: condition.property,
+						reason: "dot-notation nested property paths are not supported in CQL"
+					});
+				}
 
 				const descriptor = this._entitySchema.properties?.find(
 					p => p.property === condition.property

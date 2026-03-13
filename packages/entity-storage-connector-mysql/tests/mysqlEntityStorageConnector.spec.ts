@@ -125,6 +125,30 @@ class BlobStorageEntry {
 	public userIdentity?: string;
 }
 
+/**
+ * Test entity with nested object and array properties for dot-notation query tests.
+ */
+@entity()
+class NestedSearchType {
+	/**
+	 * Id.
+	 */
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	/**
+	 * Nested object property (e.g. firstConsignor.name use case).
+	 */
+	@property({ type: "object", optional: true })
+	public consignor?: { name: string };
+
+	/**
+	 * Nested array property (e.g. commodities.information use case).
+	 */
+	@property({ type: "array", optional: true })
+	public items?: { label: string }[];
+}
+
 let currentUser = "user";
 
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
@@ -136,6 +160,9 @@ describe("MySqlEntityStorageConnector", () => {
 		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
 		EntitySchemaFactory.register(nameof<BlobStorageEntry>(), () =>
 			EntitySchemaHelper.getSchema(BlobStorageEntry)
+		);
+		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
+			EntitySchemaHelper.getSchema(NestedSearchType)
 		);
 
 		initSchema();
@@ -158,6 +185,15 @@ describe("MySqlEntityStorageConnector", () => {
 		const entityStorage = new MySqlEntityStorageConnector({
 			entitySchema: nameof<TestType>(),
 			config
+		});
+		await entityStorage.tableEmpty();
+		await entityStorage.close();
+	});
+
+	afterEach(async () => {
+		const entityStorage = new MySqlEntityStorageConnector({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...config, tableName: "test_nested" }
 		});
 		await entityStorage.tableEmpty();
 		await entityStorage.close();
@@ -1679,5 +1715,93 @@ describe("MySqlEntityStorageConnector", () => {
 		expect((result2.entities[0] as TestType).id).toBe("vertex-1");
 
 		await entityStorage.close();
+	});
+
+	test("can query with ComparisonOperator.Includes on nested object property (dot-notation)", async () => {
+		const entityStorage = new MySqlEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...config, tableName: "test_nested" }
+		});
+		await entityStorage.bootstrap();
+
+		await entityStorage.set({ id: "1", consignor: { name: "Alice Smith" } });
+		await entityStorage.set({ id: "2", consignor: { name: "Bob Jones" } });
+		await entityStorage.set({ id: "3", consignor: { name: "alice cooper" } });
+
+		const result = await entityStorage.query({
+			property: "consignor.name",
+			comparison: ComparisonOperator.Includes,
+			value: "alice"
+		});
+
+		expect(result.entities.length).toBe(2);
+		const names = result.entities.map(e => (e as NestedSearchType).consignor?.name);
+		expect(names).toEqual(expect.arrayContaining(["Alice Smith", "alice cooper"]));
+	});
+
+	test("can query with ComparisonOperator.NotEquals on nested object property (dot-notation)", async () => {
+		const entityStorage = new MySqlEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...config, tableName: "test_nested" }
+		});
+		await entityStorage.bootstrap();
+
+		await entityStorage.set({ id: "1", consignor: { name: "Alice" } });
+		await entityStorage.set({ id: "2", consignor: { name: "Bob" } });
+		await entityStorage.set({ id: "3", consignor: { name: "Charlie" } });
+
+		const result = await entityStorage.query({
+			property: "consignor.name",
+			comparison: ComparisonOperator.NotEquals,
+			value: "Alice"
+		});
+
+		expect(result.entities.length).toBe(2);
+		const names = result.entities.map(e => (e as NestedSearchType).consignor?.name);
+		expect(names).toEqual(expect.arrayContaining(["Bob", "Charlie"]));
+	});
+
+	test("can query with ComparisonOperator.Includes on nested array property (dot-notation)", async () => {
+		const entityStorage = new MySqlEntityStorageConnector<NestedSearchType>({
+			entitySchema: nameof<NestedSearchType>(),
+			config: { ...config, tableName: "test_nested" }
+		});
+		await entityStorage.bootstrap();
+
+		await entityStorage.set({ id: "1", items: [{ label: "apple" }] });
+		await entityStorage.set({ id: "2", items: [{ label: "orange" }] });
+		await entityStorage.set({ id: "3", items: [{ label: "pineapple" }] });
+
+		const result = await entityStorage.query({
+			property: "items.label",
+			comparison: ComparisonOperator.Includes,
+			value: "app"
+		});
+
+		expect(result.entities.length).toBe(2);
+		const ids = result.entities.map(e => (e as NestedSearchType).id);
+		expect(ids).toEqual(expect.arrayContaining(["1", "3"]));
+	});
+
+	test("can query with ComparisonOperator.Includes on string field is case-insensitive", async () => {
+		const entityStorage = new MySqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+		await entityStorage.bootstrap();
+
+		await entityStorage.set({ id: "ci-1", value1: "Hello World", value2: 1 });
+		await entityStorage.set({ id: "ci-2", value1: "hello world", value2: 2 });
+		await entityStorage.set({ id: "ci-3", value1: "Goodbye World", value2: 3 });
+
+		const result = await entityStorage.query({
+			property: "value1",
+			comparison: ComparisonOperator.Includes,
+			value: "HELLO"
+		});
+
+		expect(result.entities.length).toBe(2);
+		const ids = result.entities.map(e => (e as TestType).id);
+		expect(ids).toEqual(expect.arrayContaining(["ci-1", "ci-2"]));
 	});
 });

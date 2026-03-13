@@ -32,7 +32,8 @@
 		"abstractScyllaDBConnector": {
 			"getFailed": "Getting item with \"{id}\" failed",
 			"findFailed": "Error while querying data on  \"{table}\"",
-			"parseJSONFailed": "Parsing JSON failed for field \"{name}\" with value \"{value}\""
+			"parseJSONFailed": "Parsing JSON failed for field \"{name}\" with value \"{value}\"",
+			"comparisonNotSupported": "Dot-notation nested property path \"{property}\" is not supported in CQL queries"
 		}
 	}
 }

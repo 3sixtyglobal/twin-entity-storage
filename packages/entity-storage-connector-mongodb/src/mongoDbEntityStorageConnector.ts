@@ -480,11 +480,19 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 				Object.assign(filter, subConditions[0]);
 			}
 		} else {
-			const prop = objectPath ? `${objectPath}.${condition.property}` : String(condition.property);
+			const propertyPath = String(condition.property);
+			const prop = objectPath ? `${objectPath}.${propertyPath}` : propertyPath;
+			const propertyParts = propertyPath.split(".");
+			const schemaLookupName = propertyParts.length > 1 ? propertyParts[0] : propertyPath;
 			const propertySchema = this._entitySchema.properties?.find(
-				p => p.property === condition.property
+				p => p.property === schemaLookupName
 			);
-			const propertyType = propertySchema?.type;
+			// For dot-notation paths the leaf field is always a string value; using the root
+			// type directly would send Includes into $elemMatch which does not work for nested
+			// string fields. Keeping String here causes mapComparisonOperator to emit $regex,
+			// which MongoDB handles correctly for both nested object and array traversal.
+			const propertyType =
+				propertyParts.length > 1 ? EntitySchemaPropertyType.String : propertySchema?.type;
 			const comparison = this.mapComparisonOperator(
 				condition.comparison,
 				condition.value,

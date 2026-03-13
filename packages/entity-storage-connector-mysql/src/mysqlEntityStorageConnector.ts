@@ -782,41 +782,66 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		values.push(dbValue);
 
 		if (comparator.property.split(".").length > 1) {
-			return `JSON_UNQUOTE(JSON_EXTRACT(\`${comparator.property.split(".")[0]}\`, '$.${comparator.property.split(".").slice(1).join(".")}')) = ?`;
-		} else if (comparator.comparison === ComparisonOperator.Equals) {
-			if (Is.object(comparator.value) || Is.array(comparator.value)) {
-				return `JSON_CONTAINS(\`${prop}\`, ?)`;
+			const rootProp = comparator.property.split(".")[0];
+			const nestedPath = comparator.property.split(".").slice(1).join(".");
+			const rootSchema = this._entitySchema.properties?.find(p => p.property === rootProp);
+			const isArray = rootSchema?.type === EntitySchemaPropertyType.Array;
+			const jsonPath = isArray ? `$[*].${nestedPath}` : `$.${nestedPath}`;
+			const jsonExpr = `JSON_UNQUOTE(JSON_EXTRACT(\`${rootProp}\`, '${jsonPath}'))`;
+
+			switch (comparator.comparison) {
+				case ComparisonOperator.Includes: {
+					values.pop();
+					values.push(`%${String(comparator.value).toLowerCase()}%`);
+					return `LOWER(${jsonExpr}) LIKE ?`;
+				}
+				case ComparisonOperator.NotEquals:
+					return `${jsonExpr} <> ?`;
+				case ComparisonOperator.GreaterThan:
+					return `${jsonExpr} > ?`;
+				case ComparisonOperator.LessThan:
+					return `${jsonExpr} < ?`;
+				case ComparisonOperator.GreaterThanOrEqual:
+					return `${jsonExpr} >= ?`;
+				case ComparisonOperator.LessThanOrEqual:
+					return `${jsonExpr} <= ?`;
+				default:
+					return `${jsonExpr} = ?`;
 			}
-			return `\`${prop}\` = ?`;
-		} else if (comparator.comparison === ComparisonOperator.NotEquals) {
-			if (Is.object(comparator.value) || Is.array(comparator.value)) {
-				return `NOT JSON_CONTAINS(\`${prop}\`, ?)`;
-			}
-			return `\`${prop}\` <> ?`;
-		} else if (comparator.comparison === ComparisonOperator.GreaterThan) {
-			return `\`${prop}\` > ?`;
-		} else if (comparator.comparison === ComparisonOperator.LessThan) {
-			return `\`${prop}\` < ?`;
-		} else if (comparator.comparison === ComparisonOperator.GreaterThanOrEqual) {
-			return `\`${prop}\` >= ?`;
-		} else if (comparator.comparison === ComparisonOperator.LessThanOrEqual) {
-			return `\`${prop}\` <= ?`;
-		} else if (comparator.comparison === ComparisonOperator.Includes) {
-			// For string fields, use LIKE for substring matching
-			if (type === EntitySchemaPropertyType.String) {
-				return `\`${prop}\` LIKE CONCAT('%', ?, '%')`;
-			}
-			// For array and object fields, use JSON_CONTAINS
-			if (type === EntitySchemaPropertyType.Array || type === EntitySchemaPropertyType.Object) {
-				return `JSON_CONTAINS(\`${prop}\`, ?)`;
-			}
-			// Fallback to JSON_CONTAINS for backwards compatibility
-			return `JSON_CONTAINS(\`${prop}\`, ?)`;
 		}
 
-		throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {
-			comparison: comparator.comparison
-		});
+		switch (comparator.comparison) {
+			case ComparisonOperator.Equals:
+				if (Is.object(comparator.value) || Is.array(comparator.value)) {
+					return `JSON_CONTAINS(\`${prop}\`, ?)`;
+				}
+				return `\`${prop}\` = ?`;
+			case ComparisonOperator.NotEquals:
+				if (Is.object(comparator.value) || Is.array(comparator.value)) {
+					return `NOT JSON_CONTAINS(\`${prop}\`, ?)`;
+				}
+				return `\`${prop}\` <> ?`;
+			case ComparisonOperator.GreaterThan:
+				return `\`${prop}\` > ?`;
+			case ComparisonOperator.LessThan:
+				return `\`${prop}\` < ?`;
+			case ComparisonOperator.GreaterThanOrEqual:
+				return `\`${prop}\` >= ?`;
+			case ComparisonOperator.LessThanOrEqual:
+				return `\`${prop}\` <= ?`;
+			case ComparisonOperator.Includes: {
+				if (type === EntitySchemaPropertyType.String) {
+					values.pop();
+					values.push(`%${String(comparator.value).toLowerCase()}%`);
+					return `LOWER(\`${prop}\`) LIKE ?`;
+				}
+				return `JSON_CONTAINS(\`${prop}\`, ?)`;
+			}
+			default:
+				throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {
+					comparison: comparator.comparison
+				});
+		}
 	}
 
 	/**
