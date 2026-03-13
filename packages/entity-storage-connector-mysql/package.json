@@ -35,7 +35,7 @@
 		"@twin.org/entity-storage-models": "0.0.3-next.7",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next",
-		"mysql2": "3.18.2"
+		"mysql2": "3.19.1"
 	},
 	"devDependencies": {
 		"@twin.org/entity-storage-connector-memory": "0.0.3-next.7",
