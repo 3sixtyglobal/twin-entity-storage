@@ -11,6 +11,8 @@ export default defineConfig({
 		testTimeout: 300000,
 		hookTimeout: 300000,
 		bail: 1,
+		reporters: ["verbose"],
+		disableConsoleIntercept: true,
 		coverage: {
 			reporter: ["text", "lcov"],
 			include: ["src/**/*.ts"],
