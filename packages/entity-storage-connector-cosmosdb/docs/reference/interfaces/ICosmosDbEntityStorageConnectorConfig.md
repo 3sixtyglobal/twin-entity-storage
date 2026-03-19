@@ -38,6 +38,6 @@ The ID of the container for the storage.
 
 ### offerThroughput? {#offerthroughput}
 
-> `optional` **offerThroughput**: `number`
+> `optional` **offerThroughput?**: `number`
 
 The offer throughput for the container.

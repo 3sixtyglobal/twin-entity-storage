@@ -14,7 +14,7 @@ The host for the MySql instance.
 
 ### port? {#port}
 
-> `optional` **port**: `number`
+> `optional` **port?**: `number`
 
 The port for the MySql instance.
 
@@ -54,42 +54,78 @@ The name of the table to be used.
 
 ### pool? {#pool}
 
-> `optional` **pool**: `object`
+> `optional` **pool?**: `object`
 
 Optional connection pool configuration.
 
 #### connectionLimit?
 
-> `optional` **connectionLimit**: `number`
+> `optional` **connectionLimit?**: `number`
 
 Maximum number of connections in pool.
 
+##### Default
+
+```ts
+10
+```
+
 #### maxIdle?
 
-> `optional` **maxIdle**: `number`
+> `optional` **maxIdle?**: `number`
 
 Maximum number of idle connections.
 
+##### Default
+
+```ts
+10
+```
+
 #### idleTimeout?
 
-> `optional` **idleTimeout**: `number`
+> `optional` **idleTimeout?**: `number`
 
 Time in ms before removing idle connection.
 
+##### Default
+
+```ts
+60000 (1 minute)
+```
+
 #### enableKeepAlive?
 
-> `optional` **enableKeepAlive**: `boolean`
+> `optional` **enableKeepAlive?**: `boolean`
 
 Enable TCP keep-alive.
 
+##### Default
+
+```ts
+true
+```
+
 #### waitForConnections?
 
-> `optional` **waitForConnections**: `boolean`
+> `optional` **waitForConnections?**: `boolean`
 
 Wait for available connection when pool is full.
 
+##### Default
+
+```ts
+true
+```
+
 #### queueLimit?
 
-> `optional` **queueLimit**: `number`
+> `optional` **queueLimit?**: `number`
 
 Maximum queued requests (0 = unlimited).
+
+##### Default
+
+```ts
+0
+```

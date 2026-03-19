@@ -362,7 +362,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/NotFoundResponse"
+									"$ref": "#/components/schemas/Error"
 								},
 								"examples": {
 									"exampleResponse": {
@@ -470,7 +470,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/NotFoundResponse"
+									"$ref": "#/components/schemas/Error"
 								},
 								"examples": {
 									"exampleResponse": {
@@ -535,6 +535,8 @@
 				"description": "The data to be used in the entity."
 			},
 			"Error": {
+				"title": "Error",
+				"description": "Model to describe serialized error.",
 				"type": "object",
 				"properties": {
 					"name": {
@@ -565,61 +567,21 @@
 				"required": [
 					"name",
 					"message"
-				],
-				"description": "Model to describe serialized error."
-			},
-			"NotFoundResponse": {
-				"type": "object",
-				"properties": {
-					"notFoundId": {
-						"type": "string",
-						"description": "The id if the item that was not found."
-					},
-					"name": {
-						"type": "string",
-						"description": "The name for the error."
-					},
-					"message": {
-						"type": "string",
-						"description": "The message for the error."
-					},
-					"source": {
-						"type": "string",
-						"description": "The source of the error."
-					},
-					"properties": {
-						"type": "object",
-						"additionalProperties": {},
-						"description": "Any additional information for the error."
-					},
-					"stack": {
-						"type": "string",
-						"description": "The stack trace for the error."
-					},
-					"cause": {
-						"$ref": "#/components/schemas/Error"
-					}
-				},
-				"required": [
-					"message",
-					"name"
-				],
-				"description": "The body which contains the error."
+				]
 			},
 			"SortDirection": {
+				"title": "SortDirection",
+				"description": "The sort directions.",
 				"anyOf": [
 					{
-						"type": "string",
 						"const": "asc",
 						"description": "Ascending."
 					},
 					{
-						"type": "string",
 						"const": "desc",
 						"description": "Descending."
 					}
-				],
-				"description": "The sort directions."
+				]
 			}
 		},
 		"securitySchemes": {

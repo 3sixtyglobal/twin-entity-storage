@@ -14,7 +14,7 @@ The schema for the entity
 
 ### partitionContextIds? {#partitioncontextids}
 
-> `optional` **partitionContextIds**: `string`[]
+> `optional` **partitionContextIds?**: `string`[]
 
 The keys to use from the context ids to create partitions.
 
@@ -22,7 +22,7 @@ The keys to use from the context ids to create partitions.
 
 ### loggingComponentType? {#loggingcomponenttype}
 
-> `optional` **loggingComponentType**: `string`
+> `optional` **loggingComponentType?**: `string`
 
 The type of logging component to use, defaults to no logging.
 

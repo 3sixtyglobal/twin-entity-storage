@@ -34,6 +34,12 @@ The keyspace to use.
 
 ### port? {#port}
 
-> `optional` **port**: `number`
+> `optional` **port?**: `number`
 
 The port to connect to.
+
+#### Default
+
+```ts
+9042
+```

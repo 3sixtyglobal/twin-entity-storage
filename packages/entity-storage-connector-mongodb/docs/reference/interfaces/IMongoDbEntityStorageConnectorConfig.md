@@ -14,7 +14,7 @@ The host for the MongoDb instance.
 
 ### port? {#port}
 
-> `optional` **port**: `number`
+> `optional` **port?**: `number`
 
 The port for the MongoDb instance.
 
@@ -22,7 +22,7 @@ The port for the MongoDb instance.
 
 ### user? {#user}
 
-> `optional` **user**: `string`
+> `optional` **user?**: `string`
 
 The user for the MongoDb instance.
 
@@ -30,7 +30,7 @@ The user for the MongoDb instance.
 
 ### password? {#password}
 
-> `optional` **password**: `string`
+> `optional` **password?**: `string`
 
 The password for the MongoDb instance.
 

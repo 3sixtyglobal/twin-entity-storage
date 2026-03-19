@@ -14,6 +14,6 @@ The type of the entity storage.
 
 ### config? {#config}
 
-> `optional` **config**: [`IEntityStorageServiceConfig`](IEntityStorageServiceConfig.md)
+> `optional` **config?**: [`IEntityStorageServiceConfig`](IEntityStorageServiceConfig.md)
 
 The configuration for the service.

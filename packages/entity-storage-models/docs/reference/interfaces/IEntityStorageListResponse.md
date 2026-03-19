@@ -18,6 +18,6 @@ The entities from the query.
 
 #### cursor?
 
-> `optional` **cursor**: `string`
+> `optional` **cursor?**: `string`
 
 The cursor for the next page.

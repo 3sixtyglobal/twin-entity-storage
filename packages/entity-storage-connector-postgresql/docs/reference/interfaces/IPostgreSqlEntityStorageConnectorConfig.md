@@ -14,7 +14,7 @@ The host for the PostgreSql instance.
 
 ### port? {#port}
 
-> `optional` **port**: `number`
+> `optional` **port?**: `number`
 
 The port for the PostgreSql instance.
 

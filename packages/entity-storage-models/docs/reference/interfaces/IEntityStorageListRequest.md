@@ -6,42 +6,42 @@ Query the entries from entity storage.
 
 ### query? {#query}
 
-> `optional` **query**: `object`
+> `optional` **query?**: `object`
 
 The parameters from the query.
 
 #### conditions?
 
-> `optional` **conditions**: `string`
+> `optional` **conditions?**: `string`
 
 The condition for the query as JSON version of EntityCondition type.
 
 #### orderBy?
 
-> `optional` **orderBy**: `string`
+> `optional` **orderBy?**: `string`
 
 The order property for the results.
 
 #### orderByDirection?
 
-> `optional` **orderByDirection**: `SortDirection`
+> `optional` **orderByDirection?**: `SortDirection`
 
 The direction for the order, defaults to desc.
 
 #### properties?
 
-> `optional` **properties**: `string`
+> `optional` **properties?**: `string`
 
 The properties to return in the response as a comma separated list, by default returns all properties.
 
 #### limit?
 
-> `optional` **limit**: `string`
+> `optional` **limit?**: `string`
 
 Limit the number of entities to return.
 
 #### cursor?
 
-> `optional` **cursor**: `string`
+> `optional` **cursor?**: `string`
 
 The cursor to get next chunk of data, returned in previous response.

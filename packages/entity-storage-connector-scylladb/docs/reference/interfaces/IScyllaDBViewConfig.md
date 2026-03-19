@@ -46,9 +46,15 @@ The keyspace to use.
 
 ### port? {#port}
 
-> `optional` **port**: `number`
+> `optional` **port?**: `number`
 
 The port to connect to.
+
+#### Default
+
+```ts
+9042
+```
 
 #### Inherited from
 
@@ -58,9 +64,15 @@ The port to connect to.
 
 ### tableName? {#tablename}
 
-> `optional` **tableName**: `string`
+> `optional` **tableName?**: `string`
 
 The name of the table for the storage.
+
+#### Default
+
+```ts
+To the camel case of the entity name.
+```
 
 #### Inherited from
 
@@ -70,6 +82,12 @@ The name of the table for the storage.
 
 ### viewName? {#viewname}
 
-> `optional` **viewName**: `string`
+> `optional` **viewName?**: `string`
 
 The name of view.
+
+#### Default
+
+```ts
+To the camel case of the entity name with View appended.
+```

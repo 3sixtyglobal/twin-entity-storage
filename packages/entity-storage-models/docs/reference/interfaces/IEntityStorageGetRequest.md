@@ -20,12 +20,12 @@ The id of the entity to get.
 
 ### query? {#query}
 
-> `optional` **query**: `object`
+> `optional` **query?**: `object`
 
 The query parameters.
 
 #### secondaryIndex?
 
-> `optional` **secondaryIndex**: `string`
+> `optional` **secondaryIndex?**: `string`
 
 The secondary index to query with the id.
