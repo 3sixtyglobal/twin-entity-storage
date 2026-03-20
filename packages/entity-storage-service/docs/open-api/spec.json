@@ -362,7 +362,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Error"
+									"$ref": "#/components/schemas/NotFoundResponse"
 								},
 								"examples": {
 									"exampleResponse": {
@@ -470,7 +470,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/Error"
+									"$ref": "#/components/schemas/NotFoundResponse"
 								},
 								"examples": {
 									"exampleResponse": {
@@ -535,7 +535,6 @@
 				"description": "The data to be used in the entity."
 			},
 			"Error": {
-				"title": "Error",
 				"description": "Model to describe serialized error.",
 				"type": "object",
 				"properties": {
@@ -569,8 +568,22 @@
 					"message"
 				]
 			},
+			"NotFoundResponse": {
+				"type": "object",
+				"properties": {
+					"notFoundId": {
+						"type": "string",
+						"description": "The id if the item that was not found."
+					}
+				},
+				"allOf": [
+					{
+						"$ref": "#/components/schemas/Error"
+					}
+				],
+				"description": "The body which contains the error."
+			},
 			"SortDirection": {
-				"title": "SortDirection",
 				"description": "The sort directions.",
 				"anyOf": [
 					{
