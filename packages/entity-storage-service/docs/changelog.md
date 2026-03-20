@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.8](https://github.com/twinfoundation/entity-storage/compare/entity-storage-service-v0.0.3-next.7...entity-storage-service-v0.0.3-next.8) (2026-03-20)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-service:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.7 to 0.0.3-next.8
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.7 to 0.0.3-next.8
+
 ## [0.0.3-next.7](https://github.com/twinfoundation/entity-storage/compare/entity-storage-service-v0.0.3-next.6...entity-storage-service-v0.0.3-next.7) (2026-03-13)
 
 

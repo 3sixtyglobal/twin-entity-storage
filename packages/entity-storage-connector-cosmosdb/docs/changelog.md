@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.8](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-cosmosdb-v0.0.3-next.7...entity-storage-connector-cosmosdb-v0.0.3-next.8) (2026-03-20)
+
+
+### Bug Fixes
+
+* tests and fixes for the comparisons for null and undefined ([#79](https://github.com/twinfoundation/entity-storage/issues/79)) ([e7ffd62](https://github.com/twinfoundation/entity-storage/commit/e7ffd62e9ec40ef31498e6e2350bb25d9c84638a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.7 to 0.0.3-next.8
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.7 to 0.0.3-next.8
+
 ## [0.0.3-next.7](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-cosmosdb-v0.0.3-next.6...entity-storage-connector-cosmosdb-v0.0.3-next.7) (2026-03-13)
 
 
