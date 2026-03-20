@@ -788,6 +788,32 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 			const placeholders = inValues.map((_, index) => `$${valueIndex + index}`).join(", ");
 			return `"${prop}" IN (${placeholders})`;
 		}
+
+		// null/undefined must use IS NULL / IS NOT NULL — never a parameterised placeholder.
+		// Passing undefined through propertyToDbValue() coerces it to NaN for number fields
+		// (Number(undefined) === NaN), and null coerces to 0 (Number(null) === 0), both of
+		// which produce semantically wrong or invalid SQL.
+		if (comparator.value === null || comparator.value === undefined) {
+			if (
+				comparator.comparison === ComparisonOperator.Equals ||
+				comparator.comparison === ComparisonOperator.NotEquals
+			) {
+				const nullCheck =
+					comparator.comparison === ComparisonOperator.Equals ? "IS NULL" : "IS NOT NULL";
+
+				if (comparator.property.split(".").length > 1) {
+					const rootProp = comparator.property.split(".")[0];
+					const nestedParts = comparator.property.split(".").slice(1);
+					const jsonPath = nestedParts
+						.map((p, i, arr) => (i === arr.length - 1 ? `->> '${p}'` : `-> '${p}'`))
+						.join("");
+					const jsonTextExpr = `("${rootProp}"::jsonb ${jsonPath})`;
+					return `${jsonTextExpr} ${nullCheck}`;
+				}
+				return `"${prop}" ${nullCheck}`;
+			}
+		}
+
 		const dbValue = this.propertyToDbValue(comparator.value, type);
 		values.push(dbValue);
 

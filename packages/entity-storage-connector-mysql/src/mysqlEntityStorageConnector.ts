@@ -778,6 +778,32 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			const placeholders = inValues.map(() => "?").join(", ");
 			return `\`${prop}\` IN (${placeholders})`;
 		}
+
+		// null/undefined must use IS NULL / IS NOT NULL — never a parameterised placeholder.
+		// Passing undefined through propertyToDbValue() coerces it to NaN for number fields
+		// (Number(undefined) === NaN), and null coerces to 0 (Number(null) === 0), both of
+		// which produce semantically wrong or invalid SQL.
+		if (comparator.value === null || comparator.value === undefined) {
+			if (
+				comparator.comparison === ComparisonOperator.Equals ||
+				comparator.comparison === ComparisonOperator.NotEquals
+			) {
+				const nullCheck =
+					comparator.comparison === ComparisonOperator.Equals ? "IS NULL" : "IS NOT NULL";
+
+				if (comparator.property.split(".").length > 1) {
+					const rootProp = comparator.property.split(".")[0];
+					const nestedPath = comparator.property.split(".").slice(1).join(".");
+					const rootSchema = this._entitySchema.properties?.find(p => p.property === rootProp);
+					const isArray = rootSchema?.type === EntitySchemaPropertyType.Array;
+					const jsonPath = isArray ? `$[*].${nestedPath}` : `$.${nestedPath}`;
+					const jsonExpr = `JSON_UNQUOTE(JSON_EXTRACT(\`${rootProp}\`, '${jsonPath}'))`;
+					return `${jsonExpr} ${nullCheck}`;
+				}
+				return `\`${prop}\` ${nullCheck}`;
+			}
+		}
+
 		const dbValue = this.propertyToDbValue(comparator.value, type);
 		values.push(dbValue);
 

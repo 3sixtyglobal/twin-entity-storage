@@ -6,6 +6,7 @@ import {
 	ComparisonOperator,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
+	LogicalOperator,
 	SortDirection,
 	entity,
 	property
@@ -97,6 +98,21 @@ class TestType {
 	}[];
 }
 
+/**
+ * Test entity with an optional number field.
+ */
+@entity()
+class ExpiryTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string" })
+	public status!: string;
+
+	@property({ type: "number", optional: true })
+	public expires?: number;
+}
+
 let currentUser = "user";
 
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
@@ -107,6 +123,9 @@ describe("ScyllaDBTableConnector", () => {
 		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
 		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
 			EntitySchemaHelper.getSchema(NestedSearchType)
+		);
+		EntitySchemaFactory.register(nameof<ExpiryTestType>(), () =>
+			EntitySchemaHelper.getSchema(ExpiryTestType)
 		);
 		initSchema();
 
@@ -139,6 +158,16 @@ describe("ScyllaDBTableConnector", () => {
 		const entityStorage = new ScyllaDBTableConnector({
 			entitySchema: nameof<NestedSearchType>(),
 			config: { ...TEST_SCYLLA_CONFIG, tableName: "test_nested" }
+		});
+		try {
+			await entityStorage.truncateTable();
+		} catch {}
+	});
+
+	afterEach(async () => {
+		const entityStorage = new ScyllaDBTableConnector<ExpiryTestType>({
+			entitySchema: nameof<ExpiryTestType>(),
+			config: { ...TEST_SCYLLA_CONFIG, tableName: "expires_test" }
 		});
 		try {
 			await entityStorage.truncateTable();
@@ -1050,5 +1079,70 @@ describe("ScyllaDBTableConnector", () => {
 			conditions: [{ property: "value1", value: "world", comparison: ComparisonOperator.Includes }]
 		});
 		expect(result.entities.map(e => (e as TestType).id).sort()).toEqual(["1", "3"]);
+	});
+
+	test("throws when querying with NotEquals and undefined on an optional number field (null comparison not supported in CQL)", async () => {
+		const entityStorage = new ScyllaDBTableConnector<ExpiryTestType>({
+			entitySchema: nameof<ExpiryTestType>(),
+			config: { ...TEST_SCYLLA_CONFIG, tableName: "expires_test" }
+		});
+		await entityStorage.bootstrap();
+
+		await entityStorage.set({ id: "1", status: "pending" });
+		await entityStorage.set({ id: "2", status: "active", expires: 1_000 });
+
+		await expect(
+			entityStorage.query({
+				conditions: [
+					{
+						property: "expires",
+						comparison: ComparisonOperator.LessThan,
+						value: 100_000
+					},
+					{
+						property: "expires",
+						comparison: ComparisonOperator.NotEquals,
+						value: undefined
+					}
+				],
+				logicalOperator: LogicalOperator.And
+			})
+		).rejects.toMatchObject({
+			name: "GeneralError",
+			message: "abstractScyllaDBConnector.comparisonNotSupported"
+		});
+	});
+
+	test("throws when querying with NotEquals and null on an optional number field (null comparison not supported in CQL)", async () => {
+		const entityStorage = new ScyllaDBTableConnector<ExpiryTestType>({
+			entitySchema: nameof<ExpiryTestType>(),
+			config: { ...TEST_SCYLLA_CONFIG, tableName: "expires_test" }
+		});
+		await entityStorage.bootstrap();
+
+		await entityStorage.set({ id: "1", status: "active", expires: 0 });
+		await entityStorage.set({ id: "2", status: "pending" });
+		await entityStorage.set({ id: "3", status: "active", expires: 1_000 });
+
+		await expect(
+			entityStorage.query({
+				conditions: [
+					{
+						property: "expires",
+						comparison: ComparisonOperator.LessThan,
+						value: 100_000
+					},
+					{
+						property: "expires",
+						comparison: ComparisonOperator.NotEquals,
+						value: null as unknown as undefined
+					}
+				],
+				logicalOperator: LogicalOperator.And
+			})
+		).rejects.toMatchObject({
+			name: "GeneralError",
+			message: "abstractScyllaDBConnector.comparisonNotSupported"
+		});
 	});
 });

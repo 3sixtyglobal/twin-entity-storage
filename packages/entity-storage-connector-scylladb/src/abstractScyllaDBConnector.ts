@@ -262,6 +262,37 @@ export abstract class AbstractScyllaDBConnector<T> {
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
+		let conditionsList: EntityCondition<T>[] = [];
+		if (conditions !== undefined) {
+			if ("conditions" in conditions) {
+				conditionsList = conditions.conditions;
+			} else {
+				conditionsList = [conditions];
+			}
+		}
+
+		// Validate conditions before entering the try-catch so that
+		// comparisonNotSupported errors surface directly to the caller.
+		for (const cond of conditionsList) {
+			const comparator = cond as IComparator;
+			if (String(comparator.property).includes(".")) {
+				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "comparisonNotSupported", {
+					property: comparator.property,
+					reason: "dot-notation nested property paths are not supported in CQL"
+				});
+			}
+			if (
+				(comparator.comparison === ComparisonOperator.Equals ||
+					comparator.comparison === ComparisonOperator.NotEquals) &&
+				(comparator.value === null || comparator.value === undefined)
+			) {
+				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "comparisonNotSupported", {
+					property: comparator.property,
+					reason: "null/undefined comparisons are not supported in CQL WHERE clauses"
+				});
+			}
+		}
+
 		try {
 			let returnSize = limit ?? AbstractScyllaDBConnector._DEFAULT_LIMIT;
 			let sql = `SELECT * FROM "${this._fullTableName}"`;
@@ -285,24 +316,8 @@ export abstract class AbstractScyllaDBConnector<T> {
 			let finalConditionQuery = `"${AbstractScyllaDBConnector.PARTITION_KEY}" = ?`;
 			params.push(partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE);
 
-			let theConditions: EntityCondition<T>[] = [];
-			if (!Is.undefined(conditions)) {
-				if ("conditions" in conditions) {
-					theConditions = (conditions as IComparatorGroup).conditions;
-				} else {
-					theConditions.push(conditions as EntityCondition<T>);
-				}
-			}
-
-			for (const cond of theConditions) {
+			for (const cond of conditionsList) {
 				const condition = cond as IComparator;
-
-				if (String(condition.property).includes(".")) {
-					throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "comparisonNotSupported", {
-						property: condition.property,
-						reason: "dot-notation nested property paths are not supported in CQL"
-					});
-				}
 
 				const descriptor = this._entitySchema.properties?.find(
 					p => p.property === condition.property
@@ -332,7 +347,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 					if (condition.comparison === ComparisonOperator.Equals) {
 						conds.push(`"${condition.property}" = ?`);
 					} else if (condition.comparison === ComparisonOperator.NotEquals) {
-						conds.push(`"${condition.property}" <> ?`);
+						conds.push(`"${condition.property}" != ?`);
 					} else if (condition.comparison === ComparisonOperator.GreaterThan) {
 						conds.push(`"${condition.property}" > ?`);
 					} else if (condition.comparison === ComparisonOperator.LessThan) {
@@ -349,7 +364,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 			}
 
 			if (conditionQuery.length > 0) {
-				finalConditionQuery += ` AND (${conditionQuery})`;
+				finalConditionQuery += ` AND ${conditionQuery}`;
 			}
 
 			sql += ` WHERE ${finalConditionQuery}`;

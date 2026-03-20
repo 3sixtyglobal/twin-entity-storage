@@ -663,7 +663,19 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 		let attributeName = this.populateAttributeNames(prop, attributeNames);
 		let propName = `${attributeName.replace(/\./g, "").replace(/@/g, "")}`;
 
-		if (Is.array(comparator.value)) {
+		if (
+			(comparator.comparison === ComparisonOperator.Equals ||
+				comparator.comparison === ComparisonOperator.NotEquals) &&
+			(comparator.value === null || comparator.value === undefined)
+		) {
+			// Cosmos DB SQL null semantics mirror standard SQL: any comparison using = or <>
+			// against null evaluates to UNKNOWN, not TRUE, so no rows are returned.
+			// IS_NULL() and IS_DEFINED() must be used instead (no bound parameter needed).
+			if (comparator.comparison === ComparisonOperator.Equals) {
+				return `(IS_NULL(c.${attributeName}) OR NOT IS_DEFINED(c.${attributeName}))`;
+			}
+			return `(IS_DEFINED(c.${attributeName}) AND NOT IS_NULL(c.${attributeName}))`;
+		} else if (Is.array(comparator.value)) {
 			const dbValues = comparator.value.map(v => this.propertyToDbValue(v, type));
 			const arrAttributeNames = [];
 			for (let i = 0; i < dbValues.length; i++) {

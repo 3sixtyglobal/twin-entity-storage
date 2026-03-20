@@ -90,6 +90,34 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	}
 
 	/**
+	 * Deep-clone condition tree and map `null` to `undefined` on Equals/NotEquals leaves
+	 * so in-memory evaluation matches SQL-style "IS NULL" / "IS NOT NULL" semantics.
+	 * @param condition The user-supplied condition (not mutated).
+	 * @returns A clone safe to pass to {@link EntityConditions.check}.
+	 * @internal
+	 */
+	private static normalizeNullToUndefined<T>(condition: EntityCondition<T>): EntityCondition<T> {
+		if ("conditions" in condition) {
+			return {
+				...condition,
+				conditions: condition.conditions.map(c =>
+					FileEntityStorageConnector.normalizeNullToUndefined(c)
+				)
+			};
+		}
+
+		const leaf = condition;
+		if (
+			(leaf.comparison === ComparisonOperator.Equals ||
+				leaf.comparison === ComparisonOperator.NotEquals) &&
+			leaf.value === null
+		) {
+			return { ...leaf, value: undefined };
+		}
+		return { ...leaf };
+	}
+
+	/**
 	 * Bootstrap the connector by creating and initializing any resources it needs.
 	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the bootstrapping process was successful.
@@ -323,7 +351,9 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		}
 
 		if (!Is.empty(conditions)) {
-			finalConditions.conditions.push(conditions);
+			finalConditions.conditions.push(
+				FileEntityStorageConnector.normalizeNullToUndefined(conditions)
+			);
 		}
 
 		const entities = [];

@@ -7,6 +7,7 @@ import {
 	ComparisonOperator,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
+	LogicalOperator,
 	SortDirection,
 	entity,
 	property
@@ -34,6 +35,21 @@ class SubType {
 	 */
 	@property({ type: "string", format: "date-time" })
 	public field1!: string;
+}
+
+/**
+ * Test entity for optional number field (null/undefined comparison tests).
+ */
+@entity()
+class ExpiryTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string" })
+	public status!: string;
+
+	@property({ type: "number", optional: true })
+	public expires?: number;
 }
 
 /**
@@ -94,6 +110,9 @@ describe("FileEntityStorageConnector", () => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
 			EntitySchemaHelper.getSchema(NestedSearchType)
+		);
+		EntitySchemaFactory.register(nameof<ExpiryTestType>(), () =>
+			EntitySchemaHelper.getSchema(ExpiryTestType)
 		);
 		initSchema();
 
@@ -876,5 +895,67 @@ describe("FileEntityStorageConnector", () => {
 			]
 		});
 		expect(result.entities.map(e => e.id).sort()).toEqual(["1", "2"]);
+	});
+
+	test("can query with NotEquals and undefined on an optional number field", async () => {
+		const entityStorage = new FileEntityStorageConnector<ExpiryTestType>({
+			entitySchema: nameof<ExpiryTestType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap("logging");
+
+		await entityStorage.set({ id: "1", status: "pending" });
+		await entityStorage.set({ id: "2", status: "active", expires: 1_000 });
+
+		const result = await entityStorage.query({
+			conditions: [
+				{
+					property: "expires",
+					comparison: ComparisonOperator.LessThan,
+					value: 100_000
+				},
+				{
+					property: "expires",
+					comparison: ComparisonOperator.NotEquals,
+					value: undefined
+				}
+			],
+			logicalOperator: LogicalOperator.And
+		});
+
+		expect(result.entities.map(e => (e as ExpiryTestType).id)).toEqual(["2"]);
+	});
+
+	test("can query with NotEquals and null on an optional number field", async () => {
+		const entityStorage = new FileEntityStorageConnector<ExpiryTestType>({
+			entitySchema: nameof<ExpiryTestType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap("logging");
+
+		await entityStorage.set({ id: "1", status: "active", expires: 0 });
+		await entityStorage.set({ id: "2", status: "pending" });
+		await entityStorage.set({ id: "3", status: "active", expires: 1_000 });
+
+		const result = await entityStorage.query({
+			conditions: [
+				{
+					property: "expires",
+					comparison: ComparisonOperator.LessThan,
+					value: 100_000
+				},
+				{
+					property: "expires",
+					comparison: ComparisonOperator.NotEquals,
+					value: null as unknown as undefined
+				}
+			],
+			logicalOperator: LogicalOperator.And
+		});
+
+		expect(result.entities.map(e => (e as ExpiryTestType).id)).toEqual(
+			expect.arrayContaining(["1", "3"])
+		);
+		expect(result.entities.map(e => (e as ExpiryTestType).id)).not.toContain("2");
 	});
 });

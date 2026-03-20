@@ -81,6 +81,35 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 	}
 
 	/**
+	 * Deep-clone condition tree and map `null` to `undefined` on Equals/NotEquals leaves
+	 * so in-memory evaluation matches SQL-style "IS NULL" / "IS NOT NULL" semantics.
+	 * @param condition The user-supplied condition (not mutated).
+	 * @returns A clone safe to pass to {@link EntityConditions.check}.
+	 * @internal
+	 */
+	private static normalizeNullToUndefined<T>(condition: EntityCondition<T>): EntityCondition<T> {
+		if ("conditions" in condition) {
+			return {
+				...condition,
+				conditions: condition.conditions.map(c =>
+					MemoryEntityStorageConnector.normalizeNullToUndefined(c)
+				)
+			};
+		}
+
+		// In the non-group branch, `condition` is the leaf comparator.
+		const leaf = condition;
+		if (
+			(leaf.comparison === ComparisonOperator.Equals ||
+				leaf.comparison === ComparisonOperator.NotEquals) &&
+			leaf.value === null
+		) {
+			return { ...leaf, value: undefined };
+		}
+		return { ...leaf };
+	}
+
+	/**
 	 * Returns the class name of the component.
 	 * @returns The class name of the component.
 	 */
@@ -250,7 +279,9 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		}
 
 		if (!Is.empty(conditions)) {
-			finalConditions.conditions.push(conditions);
+			finalConditions.conditions.push(
+				MemoryEntityStorageConnector.normalizeNullToUndefined(conditions)
+			);
 		}
 
 		const entities = [];

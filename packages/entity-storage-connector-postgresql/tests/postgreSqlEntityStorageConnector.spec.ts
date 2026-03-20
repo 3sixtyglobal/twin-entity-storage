@@ -156,6 +156,21 @@ class NestedSearchType {
 	public items?: { label: string }[];
 }
 
+/**
+ * Test entity with an optional number field.
+ */
+@entity()
+class ExpiryTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string" })
+	public status!: string;
+
+	@property({ type: "number", optional: true })
+	public expires?: number;
+}
+
 let currentUser = "user";
 
 let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
@@ -173,6 +188,9 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
 			EntitySchemaHelper.getSchema(NestedSearchType)
+		);
+		EntitySchemaFactory.register(nameof<ExpiryTestType>(), () =>
+			EntitySchemaHelper.getSchema(ExpiryTestType)
 		);
 
 		initSchema();
@@ -204,6 +222,15 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		const entityStorage = new PostgreSqlEntityStorageConnector({
 			entitySchema: nameof<NestedSearchType>(),
 			config: { ...config, tableName: "test_nested" }
+		});
+		await entityStorage.tableDrop();
+		await entityStorage.stop();
+	});
+
+	afterEach(async () => {
+		const entityStorage = new PostgreSqlEntityStorageConnector<ExpiryTestType>({
+			entitySchema: nameof<ExpiryTestType>(),
+			config: { ...config, tableName: "expires_test" }
 		});
 		await entityStorage.tableDrop();
 		await entityStorage.stop();
@@ -1703,5 +1730,71 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		expect(result.entities.length).toBe(2);
 		const ids = result.entities.map(e => (e as TestType).id);
 		expect(ids).toEqual(expect.arrayContaining(["ci-1", "ci-2"]));
+	});
+
+	test("can query with NotEquals and undefined on an optional number field", async () => {
+		const entityStorage = new PostgreSqlEntityStorageConnector<ExpiryTestType>({
+			entitySchema: nameof<ExpiryTestType>(),
+			config: { ...config, tableName: "expires_test" }
+		});
+		await entityStorage.bootstrap();
+
+		const queryThreshold = 100_000;
+
+		await entityStorage.set({ id: "1", status: "pending" });
+		await entityStorage.set({ id: "2", status: "active", expires: 1_000 });
+
+		const result = await entityStorage.query({
+			conditions: [
+				{
+					property: "expires",
+					comparison: ComparisonOperator.LessThan,
+					value: queryThreshold
+				},
+				{
+					property: "expires",
+					comparison: ComparisonOperator.NotEquals,
+					value: undefined
+				}
+			],
+			logicalOperator: LogicalOperator.And
+		});
+
+		expect(result.entities.map(e => (e as ExpiryTestType).id)).toEqual(["2"]);
+	});
+
+	test("can query with NotEquals and null on an optional number field", async () => {
+		const entityStorage = new PostgreSqlEntityStorageConnector<ExpiryTestType>({
+			entitySchema: nameof<ExpiryTestType>(),
+			config: { ...config, tableName: "expires_test" }
+		});
+		await entityStorage.bootstrap();
+
+		const queryThreshold = 100_000;
+
+		await entityStorage.set({ id: "1", status: "active", expires: 0 });
+		await entityStorage.set({ id: "2", status: "pending" });
+		await entityStorage.set({ id: "3", status: "active", expires: 1_000 });
+
+		const result = await entityStorage.query({
+			conditions: [
+				{
+					property: "expires",
+					comparison: ComparisonOperator.LessThan,
+					value: queryThreshold
+				},
+				{
+					property: "expires",
+					comparison: ComparisonOperator.NotEquals,
+					value: null as unknown as undefined
+				}
+			],
+			logicalOperator: LogicalOperator.And
+		});
+
+		expect(result.entities.map(e => (e as ExpiryTestType).id)).toEqual(
+			expect.arrayContaining(["1", "3"])
+		);
+		expect(result.entities.map(e => (e as ExpiryTestType).id)).not.toContain("2");
 	});
 });

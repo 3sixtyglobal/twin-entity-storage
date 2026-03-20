@@ -502,7 +502,12 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 			return query;
 		}
 		// It's a single condition
-		const { property, value, comparison } = condition;
+		const { property, comparison } = condition;
+		// Firestore has no undefined type — the SDK throws on undefined values.
+		// For Equals/NotEquals, null already has the correct semantics:
+		//   == null  matches documents where the field is null OR missing
+		//   != null  matches documents where the field exists and is not null
+		const value = condition.value === undefined ? null : condition.value;
 		switch (comparison) {
 			case ComparisonOperator.Equals:
 				return query.where(property, "==", value);
