@@ -21,7 +21,7 @@ concurrency:
 
 jobs:
   dist-all-packages:
-    if: ${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'Merge pull request') }}
+    if: "${{ github.event_name != 'push' || (!startsWith(github.event.head_commit.message, 'Merge pull request') && github.event.head_commit.message != 'chore: release next') }}"
     runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
 
     # Add env vars for tests

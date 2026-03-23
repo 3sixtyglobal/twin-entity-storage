@@ -17,6 +17,7 @@ import unicornPlugin from 'eslint-plugin-unicorn';
 import unusedImportsPlugin from 'eslint-plugin-unused-imports';
 import globals from 'globals';
 import { fileExists } from './scripts/common.mjs';
+import { repoStructurePlugin } from './scripts/eslint-plugin-repo-structure.mjs';
 
 let customModule;
 if (await fileExists('./eslint.config-custom.js')) {
@@ -575,6 +576,17 @@ const config = [
 	// Global ignores
 	{
 		ignores: ['**/dist/**', '**/coverage/**', '**/vitest.config.ts.timestamp*']
+	},
+
+	// Repository structure naming validation.
+	{
+		files: ['scripts/eslint-plugin-repo-structure.mjs'],
+		plugins: {
+			'repo-structure': repoStructurePlugin
+		},
+		rules: {
+			'repo-structure/validate-repo-structure': 'error'
+		}
 	},
 
 	// Base JavaScript configuration
