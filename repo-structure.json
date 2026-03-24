@@ -1,262 +1,116 @@
 {
-	"ignorePatterns": ["**/src-data/"],
 	"structure": {
-		"name": "<root>",
-		"kind": "folder",
-		"defaults": {
-			"folder": {
-				"case": "kebab"
-			},
-			"file": {
-				"case": "kebab",
-				"splitDots": true,
-				"allow": [
-					"LICENSE",
-					"README.md",
-					"CONTRIBUTING.md",
-					"package.json",
-					"package-lock.json",
-					"tsconfig.eslint.json",
-					"cspell.json",
-					"commitlint.config.mjs",
-					"eslint.config.js",
-					"eslint.config-custom.js",
-					"repo-structure.json"
-				]
-			}
-		},
-		"children": [
-			{
-				"name": ".husky",
-				"kind": "folder",
-				"defaults": {
-					"folder": {
-						"case": "kebab",
-						"allow": ["_"]
+		".": {
+			"**/": "kebab",
+			"**/README.md": "upper",
+			"**/CONTRIBUTING.md": "upper",
+			"**/LICENSE": "upper",
+			"/packages|/apps": {
+				"**/": "kebab",
+				"*": {
+					"case": "kebab"
+				},
+				"**/src": {
+					"**/": "camel",
+					"**/I[A-Z]*.ts": "interface",
+					"**/*.ts": "camel",
+					"**/*.tsx": "pascal"
+				},
+				"**/tests": {
+					"**/": "camel",
+					"**/I[A-Z]*.ts": {
+						"case": "interface",
+						"ignoreSegments": ["spec"]
 					},
-					"file": {
-						"case": "kebab",
-						"splitDots": true
-					}
+					"**/*.ts": {
+						"case": "camel",
+						"ignoreSegments": ["spec"]
+					},
+					"**/*.tsx": "pascal",
+					"**/*.js": "camel",
+					"**/*.json": "camel",
+					"**/*.txt": "camel",
+					"**/*.rest": "camel"
+				},
+				"**/docs": {
+					"**/": "kebab",
+					"**/*.md": "kebab"
+				},
+				"**/locales": {
+					"**/*.json": "kebab"
+				},
+				"**/bin": {
+					"index.js": "kebab"
 				}
 			},
-			{
-				"name": "*.ts",
-				"kind": "file",
-				"case": "typescript",
-				"allow": ["vitest.config.ts"]
+			"/release": {
+				"**/*.patch": "^[a-zA-Z0-9._+\\-]+$",
+				"*": {
+					"case": "kebab",
+					"ignoreSegments": ["prerelease", "prod"]
+				}
 			},
-			{
-				"name": "*.tsx",
-				"kind": "file",
-				"case": "typescript"
+			"/scripts": {
+				"*.mjs": "kebab",
+				"*.sh": "kebab",
+				"*.js": "kebab"
 			},
-			{
-				"name": "packages",
-				"kind": "folder",
-				"children": [
-					{
-						"name": "*",
-						"kind": "folder",
-						"case": "kebab",
-						"defaults": {
-							"folder": {
-								"case": "kebab"
-							},
-							"file": {
-								"case": "kebab",
-								"splitDots": true,
-								"allow": [
-									"LICENSE",
-									"README.md",
-									"package.json",
-									"tsconfig.json",
-									"typedoc.config.mjs",
-									"vitest.config.ts",
-									".validate-ignore"
-								]
-							}
-						},
-						"children": [
-							{
-								"name": "docs",
-								"kind": "folder",
-								"children": [
-									{
-										"name": "reference",
-										"kind": "folder",
-										"defaults": {
-											"folder": {
-												"case": "kebab"
-											},
-											"file": {
-												"case": "kebab",
-												"splitDots": true,
-												"allowPatterns": ["*"]
-											}
-										}
-									}
-								]
-							},
-							{
-								"name": "src",
-								"kind": "folder",
-								"defaults": {
-									"folder": {
-										"case": "camel"
-									},
-									"file": {
-										"case": "typescript"
-									}
-								}
-							},
-							{
-								"name": "tests",
-								"kind": "folder",
-								"defaults": {
-									"folder": {
-										"case": "camel"
-									},
-									"file": {
-										"case": "typescript"
-									}
-								}
-							},
-							{
-								"name": "locales",
-								"kind": "folder",
-								"defaults": {
-									"folder": {
-										"case": "kebab"
-									},
-									"file": {
-										"case": "kebab",
-										"splitDots": true,
-										"allow": [".validate-ignore"]
-									}
-								}
-							}
-						]
-					}
-				]
+			"/docs": {
+				"**/*.md": "kebab",
+				"**/*.mdx": "kebab",
+				"**/*.jsx": "kebab"
 			},
-			{
-				"name": "apps",
-				"kind": "folder",
-				"children": [
-					{
-						"name": "*",
-						"kind": "folder",
-						"case": "kebab",
-						"defaults": {
-							"folder": {
-								"case": "kebab"
-							},
-							"file": {
-								"case": "kebab",
-								"splitDots": true,
-								"allow": [
-									"LICENSE",
-									"README.md",
-									"package.json",
-									"tsconfig.json",
-									"typedoc.config.mjs",
-									"vitest.config.ts",
-									".validate-ignore"
-								]
-							}
-						},
-						"children": [
-							{
-								"name": "docs",
-								"kind": "folder",
-								"children": [
-									{
-										"name": "reference",
-										"kind": "folder",
-										"defaults": {
-											"folder": {
-												"case": "kebab"
-											},
-											"file": {
-												"case": "kebab",
-												"splitDots": true,
-												"allowPatterns": ["*"]
-											}
-										}
-									}
-								]
-							},
-							{
-								"name": "src",
-								"kind": "folder",
-								"defaults": {
-									"folder": {
-										"case": "camel"
-									},
-									"file": {
-										"case": "typescript"
-									}
-								}
-							},
-							{
-								"name": "tests",
-								"kind": "folder",
-								"defaults": {
-									"folder": {
-										"case": "camel"
-									},
-									"file": {
-										"case": "typescript"
-									}
-								}
-							},
-							{
-								"name": "locales",
-								"kind": "folder",
-								"defaults": {
-									"folder": {
-										"case": "kebab"
-									},
-									"file": {
-										"case": "kebab",
-										"splitDots": true,
-										"allow": [".validate-ignore"]
-									}
-								}
-							},
-							{
-								"name": "bin",
-								"kind": "folder",
-								"defaults": {
-									"folder": {
-										"case": "kebab"
-									},
-									"file": {
-										"case": "typescript",
-										"allow": ["index.js"]
-									}
-								}
-							}
-						]
-					}
-				]
-			},
-			{
-				"name": "release",
-				"kind": "folder",
-				"defaults": {
-					"folder": {
-						"case": "kebab"
-					},
-					"file": {
-						"case": "kebab",
-						"splitDots": true,
-						"allow": ["README.md"],
-						"allowPatterns": ["release-please+*.patch"]
-					}
+			"/.github": {
+				"**/": "kebab",
+				"**/*": {
+					"case": "kebab",
+					"ignoreSegments": ["json"]
 				}
 			}
-		]
-	}
+		}
+	},
+	"ignorePatterns": [
+		"**/debug_info",
+		"**/docs/reference",
+		"**/fixtures",
+		"**/src-data",
+		"**/testData",
+		"**/test_contract",
+		"*-env",
+		"*smart-contract-deployments.json",
+		".dockerignore",
+		".env*",
+		".git",
+		".gitignore",
+		".husky",
+		".local-data",
+		".markdownlint-cli2.jsonc",
+		".markdownlint.json",
+		".prettierignore",
+		".tmp",
+		".updatable-packages",
+		".validate-ignore",
+		".vscode",
+		".vercel",
+		"commitlint.config.mjs",
+		"coverage",
+		"cspell.json",
+		"dist",
+		"dockerfile",
+		"eslint.config-custom.js",
+		"eslint.config.js",
+		"node_modules",
+		"nodemon.json",
+		"package-lock.json",
+		"package.json",
+		"prettier.config.mjs",
+		"repo-structure.json",
+		"ts-to-openapi.json",
+		"ts-to-schema.json",
+		"tsconfig.eslint.json",
+		"tsconfig.json",
+		"typedoc.config.mjs",
+		"vitest.config.ts",
+		"vitest.config.ts.timestamp*"
+	]
 }

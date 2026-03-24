@@ -2,461 +2,533 @@
 // SPDX-License-Identifier: Apache-2.0.
 import fs from 'node:fs';
 import path from 'node:path';
-import { camelCase, kebabCase, pascalCase, snakeCase } from './common.mjs';
-
-const STRIP_SUFFIXES = ['.spec', '.test'];
-const VALIDATION_CACHE = new Set();
-const INTERNAL_IGNORE_PATTERNS = ['.git/**'];
-const IS_ESLINT_FIX_MODE =
-	process.argv.includes('--fix') && !process.argv.includes('--fix-dry-run');
-
-/**
- * Convert windows slashes to posix slashes.
- * @param value The path to normalize.
- * @returns The normalized path.
- */
-function toPosix(value) {
-	return value.replace(/\\/g, '/');
-}
+import {
+	camelCase,
+	interfaceCase,
+	kebabCase,
+	pascalCase,
+	snakeCase,
+	upperCase
+} from './common.mjs';
 
 /**
- * Convert a glob pattern to regex.
- * Supports * and **.
- * @param pattern The glob pattern.
- * @returns The compiled regex.
+ * Get the expected name for a given case type.
+ * @param name The original name.
+ * @param caseType The case type (kebab, camel, pascal, interface, upper, snake).
+ * @returns The expected name in the specified case, or empty string if caseType is invalid.
  */
-function globToRegExp(pattern) {
-	const isFolder = pattern.endsWith('/');
-	const normalizedPattern = isFolder ? pattern.slice(0, -1) : pattern;
-	const startsWithGlobstar = normalizedPattern.startsWith('**');
+function getExpectedName(name, caseType) {
+	const ext = path.extname(name);
+	const stem = path.basename(name, ext);
 
-	// Mark glob patterns BEFORE escaping to protect them
-	let marked = normalizedPattern.replace(/\*\*/g, '::GLOBSTAR::').replace(/\*/g, '::SINGLE_STAR::');
-
-	// Escape regex special characters
-	marked = marked
-		.replace(/\./g, '\\.')
-		.replace(/\+/g, '\\+')
-		.replace(/\?/g, '\\?')
-		.replace(/{/g, '\\{')
-		.replace(/}/g, '\\}')
-		.replace(/\|/g, '\\|')
-		.replace(/\^/g, '\\^')
-		.replace(/\$/g, '\\$');
-
-	// Now replace marked patterns with regex equivalents
-	let regexPattern = marked.replace(/::GLOBSTAR::/g, '.*').replace(/::SINGLE_STAR::/g, '[^/]*');
-
-	if (isFolder) {
-		// For patterns starting with **/, adjust to match at any level including root
-		if (startsWithGlobstar && regexPattern.startsWith('.*')) {
-			// regexPattern is like ".*/src-data"
-			// Change to: "(src-data|.*/src-data)" to match both root and nested
-			const pathWithoutLeadingDotStar = regexPattern.slice(2); // Remove ".*/", keep rest like "/src-data"
-			regexPattern = `(${pathWithoutLeadingDotStar.slice(1)}|${regexPattern})`;
+	switch (caseType) {
+		case 'kebab':
+			return `${kebabCase(stem)}${ext}`;
+		case 'camel':
+			return camelCase(stem);
+		case 'pascal':
+			return pascalCase(stem);
+		case 'interface': {
+			const baseName = /^I[A-Z]/.test(stem) ? stem.slice(1) : stem;
+			return `${interfaceCase(baseName)}${ext}`;
 		}
-		// Match folder itself and everything inside
-		return new RegExp(`^${regexPattern}(/.*)?$`);
+		case 'upper':
+			return upperCase(stem);
+		case 'snake':
+			return `${snakeCase(stem)}${ext}`;
+		default:
+			return '';
 	}
-
-	return new RegExp(`^${regexPattern}$`);
 }
 
 /**
- * Replace the final path segment in a relative path.
- * @param relativePath The original relative path.
- * @param newName The new final segment name.
- * @returns The updated relative path.
+ * Check if a name matches the expected case.
+ * @param name The name to check.
+ * @param caseType The case type to validate against.
+ * @returns True if the name matches the case type, false otherwise.
  */
-function replaceBaseName(relativePath, newName) {
-	const slash = relativePath.lastIndexOf('/');
-	if (slash < 0) {
-		return newName;
-	}
+function matchesCase(name, caseType) {
+	const ext = path.extname(name);
+	const stem = path.basename(name, ext);
 
-	return `${relativePath.slice(0, slash + 1)}${newName}`;
+	switch (caseType) {
+		case 'kebab':
+			return kebabCase(stem) === stem;
+		case 'camel':
+			return camelCase(stem) === stem;
+		case 'pascal':
+			return pascalCase(stem) === stem;
+		case 'interface': {
+			if (!/^I[A-Z]/.test(stem)) {
+				return false;
+			}
+			const baseName = stem.slice(1);
+			return pascalCase(baseName) === baseName;
+		}
+		case 'upper':
+			return upperCase(stem) === stem;
+		case 'snake':
+			return snakeCase(stem) === stem;
+		default:
+			return false;
+	}
 }
 
 /**
- * Attempt a safe filesystem rename for a repo entry.
- * @param rootDir The repository root.
- * @param fromRelativePath Existing relative path.
- * @param toRelativePath New relative path.
- * @returns True if the rename happened.
+ * Check if a value is a valid rule.
+ * @param rule A raw rule value.
+ * @returns True if the rule is valid, false otherwise.
  */
-function tryRenameEntry(rootDir, fromRelativePath, toRelativePath) {
-	const fromAbsolutePath = path.join(rootDir, fromRelativePath);
-	const toAbsolutePath = path.join(rootDir, toRelativePath);
-	const fromAbsolutePathLower = fromAbsolutePath.toLowerCase();
-	const toAbsolutePathLower = toAbsolutePath.toLowerCase();
-
-	if (fromAbsolutePath === toAbsolutePath) {
-		return false;
-	}
-
-	if (!fs.existsSync(fromAbsolutePath)) {
-		return false;
-	}
-
-	if (fromAbsolutePathLower === toAbsolutePathLower) {
-		const tempName = `.__repo-structure-rename-${Date.now()}-${Math.random().toString(36).slice(2)}.tmp`;
-		const tempAbsolutePath = path.join(path.dirname(toAbsolutePath), tempName);
-		fs.renameSync(fromAbsolutePath, tempAbsolutePath);
-		fs.renameSync(tempAbsolutePath, toAbsolutePath);
+function isValidRule(rule) {
+	if (typeof rule === 'string') {
 		return true;
 	}
-
-	if (fs.existsSync(toAbsolutePath)) {
-		return false;
-	}
-
-	fs.renameSync(fromAbsolutePath, toAbsolutePath);
-	return true;
-}
-
-/**
- * Expand a .gitignore entry into the glob patterns needed by this plugin.
- * This is intentionally small and only covers the pattern shapes used in this repository.
- * @param pattern The raw .gitignore pattern.
- * @returns The expanded patterns.
- */
-function expandGitignorePattern(pattern) {
-	const normalized = toPosix(pattern.trim()).replace(/\/+$|\/$/g, '');
-
-	if (!normalized) {
-		return [];
-	}
-
-	if (normalized.includes('*')) {
-		return normalized.endsWith('/**') ? [normalized] : [normalized, `${normalized}/**`];
-	}
-
-	if (normalized.includes('/')) {
-		return [normalized, `${normalized}/**`];
-	}
-
-	return [normalized, `**/${normalized}`, `${normalized}/**`, `**/${normalized}/**`];
-}
-
-/**
- * Load ignore patterns from the repository .gitignore.
- * @param rootDir The repository root.
- * @returns The ignore patterns.
- */
-function loadGitignorePatterns(rootDir) {
-	const gitignorePath = path.join(rootDir, '.gitignore');
-
-	let content = '';
-	try {
-		content = fs.readFileSync(gitignorePath, 'utf8');
-	} catch {
-		return INTERNAL_IGNORE_PATTERNS;
-	}
-
-	const patterns = content
-		.split(/\r?\n/u)
-		.map(line => line.trim())
-		.filter(line => line.length > 0 && !line.startsWith('#') && !line.startsWith('!'))
-		.flatMap(line => expandGitignorePattern(line));
-
-	return [...INTERNAL_IGNORE_PATTERNS, ...patterns];
-}
-
-/**
- * Check whether a rule name pattern matches a path segment.
- * @param pattern The rule name pattern.
- * @param segment The current path segment.
- * @returns True if the segment matches.
- */
-function segmentMatches(pattern, segment) {
-	if (pattern === '*') {
+	if (isValidRuleObject(rule)) {
 		return true;
 	}
-
-	return globToRegExp(pattern).test(segment);
+	return false;
 }
 
 /**
- * Choose the best matching child rule for a path segment.
- * Exact names are preferred over glob patterns, and explicit kinds are preferred over implicit kinds.
- * @param node The current structure node.
- * @param segment The path segment to match.
- * @param expectedKind The expected kind, file or folder.
- * @returns The best matching rule or null.
+ * Check if a value is a valid rule.
+ * @param rule A raw rule value.
+ * @returns True if the rule is valid, false otherwise.
  */
-function selectChildRule(node, segment, expectedKind) {
-	const children = node.children ?? [];
+function isValidRuleObject(rule) {
+	if (
+		typeof rule === 'object' &&
+		rule !== null &&
+		!Array.isArray(rule) &&
+		'case' in rule &&
+		typeof rule.case === 'string'
+	) {
+		return true;
+	}
+	return false;
+}
 
-	let best = null;
-	let bestScore = -1;
+/**
+ * Normalise a rule value into a consistent { case, ignoreSegments } or { regex } object.
+ * Rules can be specified as a case type string (kebab, camel, pascal, interface, upper, snake),
+ * a regex pattern string (anything else), or an object with { case, ignoreSegments? }.
+ * If the case property contains a non-standard case type, it is treated as a regex pattern.
+ * @param rule A raw rule value.
+ * @returns A normalised rule object, or undefined if the value is not a valid rule.
+ */
+function normalizeRule(rule) {
+	let caseType;
+	let ignoreSegments = [];
 
-	for (const child of children) {
-		const kind = child.kind ?? 'any';
-		if (kind === 'any' || kind === expectedKind) {
-			if (segmentMatches(child.name, segment)) {
-				let score = 0;
-				if (child.name === segment) {
-					score += 3;
-				} else if (child.name === '*') {
-					score += 1;
-				} else {
-					score += 2;
-				}
+	if (typeof rule === 'string') {
+		caseType = rule;
+	} else if (isValidRuleObject(rule)) {
+		caseType = rule.case;
+		ignoreSegments = rule.ignoreSegments ?? [];
+	}
 
-				if (kind === expectedKind) {
-					score += 1;
-				}
+	if (['kebab', 'camel', 'pascal', 'interface', 'upper', 'snake'].includes(caseType)) {
+		return { case: caseType, ignoreSegments };
+	}
+	// If 'case' property contains a non-standard type string, treat as regex
+	return { regex: caseType, ignoreSegments };
+}
 
-				if (score > bestScore) {
-					best = child;
-					bestScore = score;
-				}
+/**
+ * Find the matching rule for a file in the validation structure.
+ * Rules are checked in priority order: literal filenames, pattern rules, then wildcard.
+ * @param fileName The file name to match.
+ * @param rules The rules object from the validation structure.
+ * @returns The matching rule or undefined if no rule matches.
+ */
+function findMatchingRule(fileName, rules) {
+	if (!rules) {
+		return;
+	}
+
+	// Priority 1: exact filename match (e.g., "LICENSE", "README.md")
+	if (fileName in rules) {
+		return rules[fileName];
+	}
+
+	// Priority 2: glob pattern match (e.g., "*.ts", "I[A-Z]*.ts")
+	for (const [pattern, ruleValue] of Object.entries(rules)) {
+		if (pattern !== '*' && pattern !== '') {
+			const regexPattern = pattern.replace(/\*/g, '.*');
+			if (new RegExp(`^${regexPattern}$`).test(fileName)) {
+				return ruleValue;
 			}
 		}
 	}
 
-	return best;
+	// Priority 3: wildcard fallback
+	return rules['*'];
 }
 
 /**
- * Build an effective rule by overlaying defaults with any explicit child match.
- * @param defaultRule The inherited default rule.
- * @param childRule The explicit child rule.
- * @param expectedKind The current entry kind.
- * @returns The merged effective rule.
+ * Extract file rules for the current directory and rules that propagate to children.
+ * Rules starting with double star-slash are added to both local and propagated sets.
+ * Other rules stay local only. Directory rules with double star-slash are excluded.
+ * @param rules The raw directory rules object.
+ * @returns Local file rules and child-propagated file rules.
+ * @throws Error if a rule value is invalid.
  */
-function mergeRule(defaultRule, childRule, expectedKind) {
-	if (!defaultRule && !childRule) {
-		return null;
+function extractFileRules(rules) {
+	const localFileRules = {};
+	const childPropagatedRules = {};
+
+	if (!rules || typeof rules !== 'object') {
+		return { localFileRules, childPropagatedRules };
 	}
 
-	return {
-		...(defaultRule ?? {}),
-		...(childRule ?? {}),
-		kind: expectedKind
-	};
+	for (const [pattern, value] of Object.entries(rules)) {
+		// Skip directory rules and empty patterns
+		if (pattern === '**/' || pattern === '') {
+			// skip directory rule or empty pattern
+		} else if (
+			typeof value === 'object' &&
+			value !== null &&
+			!Array.isArray(value) &&
+			!('case' in value)
+		) {
+			// Skip nested configuration objects (directories) - they're not file rules
+		} else {
+			// Validate and process file rule
+			if (!isValidRule(value)) {
+				throw new Error(`Invalid rule for pattern '${pattern}': ${JSON.stringify(value)}`);
+			}
+
+			if (pattern.startsWith('**/')) {
+				const localPattern = pattern.slice(3);
+				if (localPattern) {
+					localFileRules[localPattern] = value;
+					childPropagatedRules[localPattern] = value;
+				}
+			} else {
+				localFileRules[pattern] = value;
+			}
+		}
+	}
+
+	return { localFileRules, childPropagatedRules };
 }
 
 /**
- * Resolve the applicable naming rule for a file or folder path.
- * @param structure The root structure node.
- * @param relativePath The entry path relative to repo root.
- * @param kind The entry kind.
- * @returns The effective rule or null.
+ * Extract directory naming rules.
+ * @param rules The raw directory rules object.
+ * @returns Local child directory rule and child-propagated directory rule.
+ * @throws Error if the directory rule is invalid.
  */
-function resolveRule(structure, relativePath, kind) {
-	const segments = relativePath.split('/').filter(Boolean);
-	let node = structure;
-	let rule = null;
-
-	for (let i = 0; i < segments.length; i++) {
-		const segment = segments[i];
-		const isLast = i === segments.length - 1;
-		const expectedKind = isLast ? kind : 'folder';
-
-		const defaults = node.defaults?.[expectedKind] ?? null;
-		const child = selectChildRule(node, segment, expectedKind);
-		rule = mergeRule(defaults, child, expectedKind);
-
-		if (!rule) {
-			return null;
-		}
-
-		if (!isLast) {
-			const nextNode = child ?? {};
-			node = {
-				children: nextNode.children ?? [],
-				defaults: nextNode.defaults ?? node.defaults
-			};
-		}
+function extractDirectoryRules(rules) {
+	if (!rules || typeof rules !== 'object') {
+		return {};
 	}
 
-	return rule;
+	const directoryRuleValue = rules['**/'];
+	if (directoryRuleValue !== undefined && !isValidRule(directoryRuleValue)) {
+		throw new Error(`Invalid directory rule for '**/': ${JSON.stringify(directoryRuleValue)}`);
+	}
+
+	const localDirectoryRule = normalizeRule(directoryRuleValue)?.case;
+	return { localDirectoryRule, childPropagatedDirectoryRule: localDirectoryRule };
 }
 
 /**
- * Remove the supported test-related suffixes from a file base name.
- * @param baseName The file base name without its extension.
- * @returns The base name without supported suffixes.
+ * Load and validate the repository structure configuration, then walk the directory tree.
  */
-function stripKnownSuffixes(baseName) {
-	let current = baseName;
-	for (const suffix of STRIP_SUFFIXES) {
-		if (current.endsWith(suffix)) {
-			current = current.slice(0, -suffix.length);
+function processRepoStructure(context, node, rootDir = process.cwd()) {
+	const configPath = path.join(rootDir, 'repo-structure.json');
+	let rawConfig;
+
+	try {
+		rawConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+	} catch {
+		context.report({
+			node,
+			messageId: 'missingConfig',
+			data: { path: configPath }
+		});
+		return;
+	}
+
+	if (!rawConfig.structure) {
+		context.report({
+			node,
+			messageId: 'missingStructure'
+		});
+		return;
+	}
+
+	walkDirectory(context, rootDir, rawConfig.structure, rootDir, rawConfig.ignorePatterns);
+}
+
+/**
+ * Normalize a path to use forward slashes.
+ * @param pathStr The path to normalize.
+ * @returns The normalized path.
+ */
+function normalizePath(pathStr) {
+	return pathStr.replace(/\\/g, '/');
+}
+
+/**
+ * Escape a character that has special meaning in regex.
+ * @param char The character to escape.
+ * @returns The escaped character, or the original if not special.
+ */
+function escapeRegexCharacter(char) {
+	const specialChars = '$()*+.?[\\]^{|}';
+	return specialChars.includes(char) ? `\\${char}` : char;
+}
+
+/**
+ * Convert a glob-like pattern to a regular expression.
+ * Supports '**' (matches anything including /) and '*' (matches anything except /).
+ * @param pattern The glob-like pattern.
+ * @returns A regular expression matching the pattern.
+ */
+function globToRegex(pattern) {
+	let regex = '^';
+
+	for (let i = 0; i < pattern.length; i++) {
+		const char = pattern[i];
+		const nextChar = pattern[i + 1];
+
+		if (char === '*' && nextChar === '*') {
+			regex += '.*';
+			i++; // Skip next '*'
+		} else if (char === '*') {
+			regex += '[^/]*';
+		} else {
+			regex += escapeRegexCharacter(char);
 		}
 	}
+
+	return new RegExp(`${regex}$`);
+}
+
+/**
+ * Strip ignored segments from a filename before case validation.
+ * E.g. stripIgnoredSegments('foo.spec.ts', ['spec']) returns 'foo.ts'.
+ * @param fileName The original file name.
+ * @param ignoreSegments Segments to remove from dot-separated name parts.
+ * @returns The file name with ignored segments removed, or the original if none to remove.
+ */
+function stripIgnoredSegments(fileName, ignoreSegments) {
+	if (!ignoreSegments?.length) {
+		return fileName;
+	}
+
+	const ext = path.extname(fileName);
+	const stem = path.basename(fileName, ext);
+	const filtered = stem.split('.').filter(segment => !ignoreSegments.includes(segment));
+	return `${filtered.join('.')}${ext}`;
+}
+
+/**
+ * Check if a name should be ignored based on ignore patterns.
+ * Patterns with '/' match against relative path, others match against filename only.
+ * @param name The file or directory name.
+ * @param relativePath The relative path from root.
+ * @param ignorePatterns Array of glob patterns to match against.
+ * @returns True if the name matches any ignore pattern.
+ */
+function shouldIgnore(name, relativePath, ignorePatterns) {
+	if (!ignorePatterns?.length) {
+		return false;
+	}
+
+	const normalizedPath = normalizePath(relativePath);
+
+	return ignorePatterns.some(pattern => {
+		const normalizedPattern = normalizePath(pattern);
+		const matcher = globToRegex(normalizedPattern);
+		// If pattern contains '/', match against full relative path; otherwise match filename only
+		return normalizedPattern.includes('/') ? matcher.test(normalizedPath) : matcher.test(name);
+	});
+}
+
+/**
+ * Get the configuration rules for a specific directory path.
+ * Traverses the config tree using exact keys (e.g. '/packages'), pipe-delimited multi-keys
+ * (e.g. '/packages|/apps'), or glob keys matching any directory at any depth.
+ * Returns undefined if path not configured.
+ * @param dirPath Directory path relative to root.
+ * @param config The configuration object.
+ * @returns The rules object for this directory, or undefined if not configured.
+ */
+function getDirectoryRules(dirPath, config) {
+	const parts = dirPath === '.' ? [] : dirPath.split('/');
+	let current = config['.'];
+
+	for (let i = 0; i < parts.length; i++) {
+		if (!current || typeof current !== 'object') {
+			return;
+		}
+
+		const part = parts[i];
+		const exactKey = `/${part}`;
+
+		// Priority 1: exact key or pipe-delimited multi-key
+		const matchingKey = Object.keys(current).find(
+			k => typeof current[k] === 'object' && k.split('|').includes(exactKey)
+		);
+		if (matchingKey) {
+			current = current[matchingKey];
+		} else {
+			// Priority 2: glob key
+			const globKey = `**/${part}`;
+			if (current[globKey] && typeof current[globKey] === 'object') {
+				current = current[globKey];
+			} else {
+				// Priority 3: check if glob patterns can skip this segment
+				const hasGlobObjectKeys = Object.keys(current).some(
+					k => k.startsWith('**/') && k !== '**/' && typeof current[k] === 'object'
+				);
+				if (!hasGlobObjectKeys) {
+					return;
+				}
+				// else: glob pattern match found, continue to next iteration
+			}
+		}
+	}
+
 	return current;
 }
 
 /**
- * Build the expected file name for a TypeScript source file.
- * @param rawBaseName The file name without its extension.
- * @param extension The original file extension.
- * @returns The expected file name, including its extension.
+ * Recursively walk through directories and validate file and folder naming.
+ * Merges inherited rules with directory-specific rules, propagates rules to children.
  */
-function buildExpectedTypeScriptFileName(rawBaseName, extension) {
-	let suffix = '';
-	let base = rawBaseName;
+function walkDirectory(
+	context,
+	currentPath,
+	validateStructure,
+	rootDir,
+	ignorePatterns,
+	inheritedRules = {},
+	inheritedDirectoryRule
+) {
+	const relativePath = normalizePath(path.relative(rootDir, currentPath)) || '.';
 
-	for (const candidate of STRIP_SUFFIXES) {
-		if (base.endsWith(candidate)) {
-			base = base.slice(0, -candidate.length);
-			suffix = `${candidate}${suffix}`;
-		}
+	// Get rules configured for this directory level
+	const directoryRules = getDirectoryRules(relativePath, validateStructure);
+	const { localFileRules, childPropagatedRules } = extractFileRules(directoryRules);
+	const { localDirectoryRule, childPropagatedDirectoryRule } =
+		extractDirectoryRules(directoryRules);
+
+	// Merge inherited rules with local rules for this directory
+	const rules = { ...inheritedRules, ...localFileRules };
+	const nextInheritedRules = { ...inheritedRules, ...childPropagatedRules };
+	const directoryRule = localDirectoryRule ?? inheritedDirectoryRule;
+	const nextInheritedDirectoryRule = childPropagatedDirectoryRule ?? directoryRule;
+
+	// Early exit if no rules apply and no descendant rules configured
+	if (Object.keys(rules).length === 0 && !directoryRule && !directoryRules) {
+		return;
 	}
 
-	const normalizedBase = base.startsWith('I')
-		? `I${pascalCase(base.slice(1), false) || 'Name'}`
-		: camelCase(base, false);
+	const entries = fs.readdirSync(currentPath, { withFileTypes: true });
+	for (const entry of entries) {
+		const fullPath = path.join(currentPath, entry.name);
+		const relativeEntryPath = normalizePath(path.relative(rootDir, fullPath));
 
-	return `${normalizedBase}${suffix}${extension}`;
-}
+		// Process entry if not ignored
+		if (!shouldIgnore(entry.name, relativeEntryPath, ignorePatterns)) {
+			const relativeDirPath = normalizePath(path.relative(rootDir, fullPath));
 
-/**
- * Apply a configured naming convention to a string.
- * @param caseName The configured case name.
- * @param input The value to transform.
- * @returns The transformed value.
- */
-function applyCase(caseName, input) {
-	switch (caseName) {
-		case 'camel':
-			return camelCase(input, false);
-		case 'pascal':
-			return pascalCase(input, false);
-		case 'kebab':
-			return kebabCase(input, false);
-		case 'snake':
-			return snakeCase(input, false);
-		default:
-			return input;
-	}
-}
+			if (entry.isDirectory()) {
+				const childDirectoryRules = getDirectoryRules(relativeDirPath, validateStructure);
+				const hasExplicitEntry = childDirectoryRules !== undefined;
 
-/**
- * Validate a file or folder name against a simple case convention.
- * @param caseName The configured case name.
- * @param value The name to validate.
- * @returns The validation result.
- */
-function validateSimpleCase(caseName, value) {
-	if (value.startsWith('.')) {
-		return { valid: true, expected: value };
-	}
+				// Validate directory name only if no explicit config entry overrides it
+				if (!hasExplicitEntry && directoryRule && !matchesCase(entry.name, directoryRule)) {
+					context.report({
+						node: context.sourceCode.ast,
+						messageId: 'invalidName',
+						data: {
+							kind: 'Directory',
+							path: normalizePath(fullPath),
+							caseName: directoryRule,
+							expected: getExpectedName(entry.name, directoryRule)
+						}
+					});
+				} else if (!hasExplicitEntry && !directoryRule) {
+					context.report({
+						node: context.sourceCode.ast,
+						messageId: 'missingRule',
+						data: {
+							kind: 'Directory',
+							path: normalizePath(fullPath)
+						}
+					});
+				}
 
-	const expected = applyCase(caseName, value);
-	return {
-		valid: expected === value,
-		expected
-	};
-}
-
-/**
- * Validate a TypeScript file name against the repository naming convention.
- * @param fileName The file name to validate.
- * @returns The validation result.
- */
-function validateTypeScriptCase(fileName) {
-	if (!/\.(ts|tsx)$/.test(fileName) || fileName.endsWith('.d.ts')) {
-		return { valid: true, expected: fileName };
-	}
-
-	const extensionIndex = fileName.lastIndexOf('.');
-	const base = extensionIndex > 0 ? fileName.slice(0, extensionIndex) : fileName;
-	const extension = extensionIndex > 0 ? fileName.slice(extensionIndex) : '';
-	const expected = buildExpectedTypeScriptFileName(base, extension);
-
-	const validInterface = /^I[A-Z][\dA-Za-z]*$/.test(stripKnownSuffixes(base));
-	const validCamel = /^[a-z][\dA-Za-z]*$/.test(stripKnownSuffixes(base));
-	const valid = stripKnownSuffixes(base).startsWith('I') ? validInterface : validCamel;
-
-	return { valid, expected };
-}
-
-/**
- * Recursively collect all file and folder entries beneath a directory.
- * @param rootDir The repository root directory.
- * @param relativeDir The current directory relative to the repository root.
- * @returns The collected entries.
- */
-function collectEntries(rootDir, ignorePatterns, relativeDir = '') {
-	const current = path.join(rootDir, relativeDir);
-	const dirEntries = fs.readdirSync(current, { withFileTypes: true });
-	const entries = [];
-
-	for (const dirEntry of dirEntries) {
-		const relativePath = toPosix(path.posix.join(relativeDir, dirEntry.name));
-		if (!isIgnored(relativePath, ignorePatterns)) {
-			entries.push({
-				path: relativePath,
-				name: dirEntry.name,
-				kind: dirEntry.isDirectory() ? 'folder' : 'file'
-			});
-
-			if (dirEntry.isDirectory()) {
-				entries.push(...collectEntries(rootDir, ignorePatterns, relativePath));
+				// Recurse into directory if it has configured rules or inherited rules can apply
+				if (
+					childDirectoryRules ||
+					Object.keys(nextInheritedRules).length > 0 ||
+					nextInheritedDirectoryRule
+				) {
+					walkDirectory(
+						context,
+						fullPath,
+						validateStructure,
+						rootDir,
+						ignorePatterns,
+						nextInheritedRules,
+						nextInheritedDirectoryRule
+					);
+				}
+			} else {
+				// Validate file naming against matching rules
+				const fileRule = normalizeRule(findMatchingRule(entry.name, rules));
+				if (fileRule) {
+					if (fileRule.regex) {
+						// Custom regex validation - apply to filename without extension
+						const ext = path.extname(entry.name);
+						const stem = path.basename(entry.name, ext);
+						if (!new RegExp(fileRule.regex).test(stem)) {
+							context.report({
+								node: context.sourceCode.ast,
+								messageId: 'invalidName',
+								data: {
+									kind: 'File',
+									path: normalizePath(fullPath),
+									caseName: 'regex pattern',
+									expected: fileRule.regex
+								}
+							});
+						}
+					} else if (fileRule.case) {
+						// Standard case validation
+						const { case: caseType, ignoreSegments } = fileRule;
+						const nameToValidate = stripIgnoredSegments(entry.name, ignoreSegments);
+						if (!matchesCase(nameToValidate, caseType)) {
+							context.report({
+								node: context.sourceCode.ast,
+								messageId: 'invalidName',
+								data: {
+									kind: 'File',
+									path: normalizePath(fullPath),
+									caseName: caseType,
+									expected: getExpectedName(nameToValidate, caseType)
+								}
+							});
+						}
+					}
+				} else {
+					context.report({
+						node: context.sourceCode.ast,
+						messageId: 'missingRule',
+						data: {
+							kind: 'File',
+							path: normalizePath(fullPath)
+						}
+					});
+				}
 			}
 		}
 	}
-
-	return entries;
-}
-
-/**
- * Determine whether a repository entry should be skipped.
- * @param relativePath The entry path relative to the repository root.
- * @param ignorePatterns The configured ignore patterns.
- * @returns True if the entry should be ignored.
- */
-function isIgnored(relativePath, ignorePatterns) {
-	return ignorePatterns.some(pattern => globToRegExp(pattern).test(relativePath));
-}
-
-/**
- * Validate a file or folder name against its resolved rule.
- * @param rule The resolved naming rule.
- * @param name The file or folder name.
- * @param kind The entry kind.
- * @returns The validation result.
- */
-function validateName(rule, name, kind) {
-	if (!rule) {
-		return {
-			valid: false,
-			expected: name,
-			error: `No ${kind} rule matches this path.`
-		};
-	}
-
-	if (rule.allow?.includes(name)) {
-		return { valid: true, expected: name };
-	}
-
-	if (rule.allowPatterns?.some(pattern => globToRegExp(pattern).test(name))) {
-		return { valid: true, expected: name };
-	}
-
-	if (kind === 'file' && rule.case === 'typescript') {
-		return validateTypeScriptCase(name);
-	}
-
-	const targetName = rule.splitDots
-		? name
-				.split('.')
-				.map(part => applyCase(rule.case, part))
-				.join('.')
-		: name;
-	const result = validateSimpleCase(rule.case, name);
-
-	if (rule.splitDots) {
-		return {
-			valid: targetName === name,
-			expected: targetName
-		};
-	}
-
-	return result;
 }
 
 /**
@@ -478,88 +550,10 @@ const validateRepoStructureRule = {
 		}
 	},
 	create(context) {
+		const rootDir = process.cwd();
 		return {
 			Program(node) {
-				const rootDir = process.cwd();
-				if (VALIDATION_CACHE.has(rootDir)) {
-					return;
-				}
-				VALIDATION_CACHE.add(rootDir);
-
-				const configPath = path.join(rootDir, 'repo-structure.json');
-
-				let rawConfig;
-				try {
-					rawConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-				} catch {
-					context.report({
-						loc: { line: 1, column: 0 },
-						messageId: 'missingConfig',
-						data: { path: toPosix(configPath) }
-					});
-					return;
-				}
-
-				const structure = rawConfig.structure;
-
-				if (!structure || typeof structure !== 'object') {
-					context.report({
-						loc: { line: 1, column: 0 },
-						messageId: 'missingStructure'
-					});
-					return;
-				}
-
-				const gitignorePatterns = loadGitignorePatterns(rootDir);
-				const structurePatterns = rawConfig.ignorePatterns || [];
-				const ignore = [...gitignorePatterns, ...structurePatterns];
-
-				const entries = collectEntries(rootDir, ignore);
-
-				// Collect all violations to report them in the repo-structure.json file
-				const violations = [];
-
-				for (const entry of entries) {
-					if (!isIgnored(entry.path, ignore)) {
-						const rule = resolveRule(structure, entry.path, entry.kind);
-						const result = validateName(rule, entry.name, entry.kind);
-
-						if (!rule) {
-							violations.push({
-								messageId: 'missingRule',
-								data: {
-									kind: entry.kind,
-									path: entry.path
-								}
-							});
-						} else if (!result.valid) {
-							const expectedPath = replaceBaseName(entry.path, result.expected);
-							const renamed =
-								IS_ESLINT_FIX_MODE && tryRenameEntry(rootDir, entry.path, expectedPath);
-
-							if (!renamed) {
-								violations.push({
-									messageId: 'invalidName',
-									data: {
-										kind: entry.kind,
-										path: entry.path,
-										caseName: rule.case,
-										expected: entry.kind === 'file' ? expectedPath : result.expected
-									}
-								});
-							}
-						}
-					}
-				}
-
-				// Report all violations in repo-structure.json file
-				for (let i = 0; i < violations.length; i++) {
-					const violation = violations[i];
-					context.report({
-						loc: { line: 1, column: i },
-						...violation
-					});
-				}
+				processRepoStructure(context, node, rootDir);
 			}
 		};
 	}

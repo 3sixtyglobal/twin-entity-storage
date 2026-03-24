@@ -195,7 +195,12 @@ export function pascalCase(input, stripInterfacePrefix = true) {
 			output = output.slice(1);
 		}
 		return words(output)
-			.map(w => `${w[0].toUpperCase()}${w.slice(1).toLowerCase()}`)
+			.map(w => {
+				if (w.length > 1 && w === w.toUpperCase()) {
+					return w;
+				}
+				return `${w[0].toUpperCase()}${w.slice(1).toLowerCase()}`;
+			})
 			.join('');
 	}
 
@@ -219,9 +224,33 @@ export function camelCase(input, stripInterfacePrefix = true) {
 			? ''
 			: `${splitWords[0].toLowerCase()}${splitWords
 					.slice(1)
-					.map(w => `${w[0].toUpperCase()}${w.slice(1).toLowerCase()}`)
+					.map(w => {
+						if (w.length > 1 && w === w.toUpperCase()) {
+							return w;
+						}
+						return `${w[0].toUpperCase()}${w.slice(1).toLowerCase()}`;
+					})
 					.join('')}`;
 	}
 
 	return '';
+}
+
+/**
+ * Convert a string to uppercase.
+ * @param input The input to convert.
+ * @returns The uppercase version of the input.
+ */
+export function upperCase(input) {
+	return input?.toUpperCase() ?? '';
+}
+
+/**
+ * Convert a string to interface case (PascalCase with I prefix).
+ * @param input The input to convert.
+ * @returns The interface case version of the input.
+ */
+export function interfaceCase(input) {
+	const pascal = pascalCase(input, false);
+	return pascal ? `I${pascal}` : '';
 }
