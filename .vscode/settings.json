@@ -14,7 +14,8 @@
 			"source.fixAll.eslint": "always"
 		}
 	},
-	"prettier.configPath": ".prettierrc",
+	// Use repository-local Prettier config.
+	"prettier.configPath": "prettier.config.mjs",
 	"cSpell.autoFormatConfigFile": true,
 	"vitest.disableWorkspaceWarning": true,
 	"markdownlint.lintWorkspaceGlobs": [
