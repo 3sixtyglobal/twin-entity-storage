@@ -6,10 +6,20 @@ inputs:
     description: 'The package to set up the test environment for.'
     required: true
     default: 'all'
+  test_env_vars:
+    description: 'Newline-separated KEY=VALUE pairs to inject as environment variables into the test services.'
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
   steps:
+    - name: Write Test Environment Variables
+      if: inputs.package == 'packages/messaging-connector-aws' || inputs.package == 'all'
+      shell: bash
+      run: |
+        echo "${{ inputs.test_env_vars }}" > /tmp/test_env_vars.txt
+
     # Start PostgreSQL service only for PostgreSQL package
     - name: Start PostgreSQL Service
       if: inputs.package == 'packages/entity-storage-connector-postgresql' || inputs.package == 'all'

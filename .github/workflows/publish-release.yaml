@@ -87,12 +87,6 @@ jobs:
       id-token: write # Needed for npm provenance
     needs: process-workspaces # Wait for the process-workspaces job to complete
 
-    # Add env vars for tests
-    env:
-      TEST_MNEMONIC: ${{ secrets.TEST_MNEMONIC }}
-      TEST_2_MNEMONIC: ${{ secrets.TEST_2_MNEMONIC }}
-      TEST_NODE_MNEMONIC: ${{ secrets.TEST_NODE_MNEMONIC }}
-
     # Use a matrix strategy to process each package pattern in parallel
     # but limit to one at a time for controlled publishing order
     strategy:
@@ -108,6 +102,12 @@ jobs:
           token: ${{ github.token }}
           ref: ${{ needs.process-workspaces.outputs.branch }} # Checkout the calculated branch
 
+      # Load test environment variables into the runner environment
+      - name: Load Test Environment Variables
+        shell: bash
+        run: |
+          printf '%s\n' "${{ secrets.TEST_ENV_VARS }}" >> "$GITHUB_ENV"
+
       # Configure Node.js and NPM settings
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -120,6 +120,7 @@ jobs:
         uses: ./.github/workflows/setup-test-env
         with:
           package: ${{ matrix.package }} # Pass the current package to the setup script
+          test_env_vars: ${{ secrets.TEST_ENV_VARS }}
 
       # Remove root manifests so installs only resolve within the current workspace package
       - name: Remove Mono-Repo Node Modules

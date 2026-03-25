@@ -24,16 +24,16 @@ jobs:
     if: "${{ github.event_name != 'push' || (!startsWith(github.event.head_commit.message, 'Merge pull request') && github.event.head_commit.message != 'chore: release next') }}"
     runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
 
-    # Add env vars for tests
-    env:
-      TEST_MNEMONIC: ${{ secrets.TEST_MNEMONIC }}
-      TEST_2_MNEMONIC: ${{ secrets.TEST_2_MNEMONIC }}
-      TEST_NODE_MNEMONIC: ${{ secrets.TEST_NODE_MNEMONIC }}
-
     steps:
       # Clone the repository to the runner
       - name: Checkout
         uses: actions/checkout@v6
+
+      # Load test environment variables into the runner environment
+      - name: Load Test Environment Variables
+        shell: bash
+        run: |
+          printf '%s\n' "${{ secrets.TEST_ENV_VARS }}" >> "$GITHUB_ENV"
 
       # Setup Node
       - name: Setup Node
@@ -58,6 +58,8 @@ jobs:
       # Setup any services required for tests here
       - name: Setup Test Environment
         uses: ./.github/workflows/setup-test-env
+        with:
+          test_env_vars: ${{ secrets.TEST_ENV_VARS }}
 
       # Run Lint and Dist
       - name: Run Lint and Dist
