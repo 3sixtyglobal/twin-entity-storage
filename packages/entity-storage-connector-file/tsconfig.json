@@ -3,6 +3,7 @@
 		"module": "nodenext",
 		"moduleResolution": "nodenext",
 		"target": "ES2022",
+		"rootDir": "./src",
 		"outDir": "dist/es",
 		"strict": true,
 		"forceConsistentCasingInFileNames": true,
