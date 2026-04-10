@@ -143,11 +143,22 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GHA_RELEASE_TOKEN }}
 
-      # Auto-merge queues merge once required checks/rules are satisfied.
-      - name: Enable auto-merge for docs update PR
+      # Merge immediately when PR is ready; otherwise enable auto-merge.
+      - name: Merge or enable auto-merge for docs update PR
         if: ${{ !inputs.dryRun && steps.create-pr.outputs.pr_number != '' }}
         run: |
-          gh pr merge ${{ steps.create-pr.outputs.pr_number }} --auto --squash --delete-branch
+          PR_NUMBER="${{ steps.create-pr.outputs.pr_number }}"
+          MERGE_STATE=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json mergeStateStatus --jq '.mergeStateStatus')
+
+          echo "PR #$PR_NUMBER mergeStateStatus: $MERGE_STATE"
+
+          if [ "$MERGE_STATE" = "CLEAN" ]; then
+            echo "PR is mergeable now; merging immediately."
+            gh pr merge "$PR_NUMBER" --squash --delete-branch
+          else
+            echo "PR is not mergeable yet; enabling auto-merge."
+            gh pr merge "$PR_NUMBER" --auto --squash --delete-branch
+          fi
         env:
           GH_TOKEN: ${{ secrets.GHA_RELEASE_TOKEN }}
 
