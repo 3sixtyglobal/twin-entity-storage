@@ -306,6 +306,12 @@ const tsRules = {
 		{ selector: 'variable', format: ['camelCase', 'UPPER_CASE'] },
 		{ selector: 'enumMember', format: ['PascalCase'] },
 		{
+			selector: 'method',
+			format: ['camelCase', 'PascalCase'],
+			leadingUnderscore: 'forbid',
+			trailingUnderscore: 'forbid'
+		},
+		{
 			selector: 'property',
 			modifiers: ['static'],
 			leadingUnderscore: 'forbid',
@@ -322,6 +328,10 @@ const tsRules = {
 			modifiers: ['static', 'private'],
 			leadingUnderscore: 'require',
 			format: ['UPPER_CASE', 'camelCase']
+		},
+		{
+			selector: 'class',
+			format: ['PascalCase']
 		}
 	],
 	'@typescript-eslint/no-array-constructor': 'error',
