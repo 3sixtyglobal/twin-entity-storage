@@ -992,7 +992,48 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 
 		const columnDefinitions = props
 			.map(prop => {
-				const sqlType = sqlTypeMap[prop.type] || "TEXT";
+				let sqlType = sqlTypeMap[prop.type] || "TEXT";
+				if (prop.format) {
+					switch (prop.type) {
+						case EntitySchemaPropertyType.String:
+							switch (prop.format) {
+								case "uuid":
+									sqlType = "UUID";
+									break;
+							}
+							break;
+						case EntitySchemaPropertyType.Number:
+							switch (prop.format) {
+								case "float":
+									sqlType = "REAL";
+									break;
+								case "double":
+									sqlType = "DOUBLE PRECISION";
+									break;
+							}
+							break;
+						case EntitySchemaPropertyType.Integer:
+							switch (prop.format) {
+								case "int8":
+								case "uint8":
+									sqlType = "SMALLINT";
+									break;
+								case "int16":
+									sqlType = "SMALLINT";
+									break;
+								case "uint16":
+								case "int32":
+									sqlType = "INTEGER";
+									break;
+								case "uint32":
+								case "int64":
+								case "uint64":
+									sqlType = "BIGINT";
+									break;
+							}
+							break;
+					}
+				}
 				const columnName = String(prop.property);
 				const nullable = prop.optional ? " NULL" : " NOT NULL";
 
