@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.9](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-postgresql-v0.0.3-next.8...entity-storage-connector-postgresql-v0.0.3-next.9) (2026-04-22)
+
+
+### Bug Fixes
+
+* adding integers types handler ([#82](https://github.com/twinfoundation/entity-storage/issues/82)) ([2704717](https://github.com/twinfoundation/entity-storage/commit/2704717fde7c0c8b39e8036b4d2a61654b51f917))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.8 to 0.0.3-next.9
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.8 to 0.0.3-next.9
+
 ## [0.0.3-next.8](https://github.com/twinfoundation/entity-storage/compare/entity-storage-connector-postgresql-v0.0.3-next.7...entity-storage-connector-postgresql-v0.0.3-next.8) (2026-03-20)
 
 
