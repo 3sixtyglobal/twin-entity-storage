@@ -106,7 +106,7 @@ jobs:
       - name: Load Test Environment Variables
         shell: bash
         run: |
-          printf '%s\n' "${{ secrets.TEST_ENV_VARS }}" >> "$GITHUB_ENV"
+          printf '%s\n' "${{ secrets.TWIN_TEST_ENV_VARS }}" >> "$GITHUB_ENV"
 
       # Configure Node.js and NPM settings
       - name: Setup Node
@@ -120,7 +120,7 @@ jobs:
         uses: ./.github/workflows/setup-test-env
         with:
           package: ${{ matrix.package }} # Pass the current package to the setup script
-          test_env_vars: ${{ secrets.TEST_ENV_VARS }}
+          test_env_vars: ${{ secrets.TWIN_TEST_ENV_VARS }}
 
       # Remove root manifests so installs only resolve within the current workspace package
       - name: Remove Mono-Repo Node Modules
@@ -186,7 +186,7 @@ jobs:
             echo "published=true" >> $GITHUB_OUTPUT
           fi
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.TWIN_NPM_TOKEN }}
 
       - name: Wait for package to be available on npm
         if: steps.publish_npm_package.outputs.published == 'true'
@@ -250,7 +250,7 @@ jobs:
         run: |
           CONFIG_FILE=release/release-please-config.${{ needs.process-workspaces.outputs.branch == 'next' && 'prerelease' || 'prod' }}.json
           MANIFEST_FILE=release/release-please-manifest.${{ needs.process-workspaces.outputs.branch == 'next' && 'prerelease' || 'prod' }}.json
-          npx --yes release-please github-release --config-file=${CONFIG_FILE} --manifest-file=${MANIFEST_FILE} --repo-url=${{ github.repository }} --target-branch=${{ needs.process-workspaces.outputs.branch }} --token=${{ secrets.GHA_RELEASE_TOKEN }}
+          npx --yes release-please github-release --config-file=${CONFIG_FILE} --manifest-file=${MANIFEST_FILE} --repo-url=${{ github.repository }} --target-branch=${{ needs.process-workspaces.outputs.branch }} --token=${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
 
   # Trigger workspace notification workflow after a successful release publish
   trigger-notify-workspace:

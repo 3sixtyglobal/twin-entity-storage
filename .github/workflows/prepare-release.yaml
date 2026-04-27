@@ -115,7 +115,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          token: ${{ secrets.GHA_RELEASE_TOKEN }} # Use admin PAT instead of GITHUB_TOKEN
+          token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }} # Use admin PAT instead of GITHUB_TOKEN
           ref: ${{ steps.set-branch.outputs.branch }} # Checkout the calculated branch
           fetch-depth: 0 # Fetch all history for accurate versioning
 
@@ -149,18 +149,18 @@ jobs:
       - name: Import GPG key
         run: |
           # Import the GPG private key from secrets, which should be base64 encoded
-          echo "$GPG_PRIVATE_KEY" | base64 --decode | gpg --import
-          echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
+          echo "$TWIN_GPG_PRIVATE_KEY" | base64 --decode | gpg --import
+          echo "TWIN_GPG_KEY_ID=$TWIN_GPG_KEY_ID" >> $GITHUB_ENV
         env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }} # Base64 encoded private key
-          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }} # GPG key ID
+          TWIN_GPG_PRIVATE_KEY: ${{ secrets.TWIN_GPG_PRIVATE_KEY }} # Base64 encoded private key
+          TWIN_GPG_KEY_ID: ${{ secrets.TWIN_GPG_KEY_ID }} # GPG key ID
 
       # Set git config once for all subsequent steps
       - name: Configure Git
         run: |
           git config --global user.email "github@twindev.org"
           git config --global user.name "TWIN GitHub Bot"
-          git config --global user.signingkey "$GPG_KEY_ID"
+          git config --global user.signingkey "$TWIN_GPG_KEY_ID"
           git config --global commit.gpgsign true
           git config --global tag.gpgsign true
 
@@ -232,4 +232,4 @@ jobs:
         env:
           # We need to use a different token for the approval as you can't approve your own PRs
           # This token must be from a different user with write access to the repository
-          GH_TOKEN: ${{ secrets.GHA_RELEASE_TOKEN }} # Personal access token from a different user
+          GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }} # Personal access token from a different user

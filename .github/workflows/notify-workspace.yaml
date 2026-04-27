@@ -29,7 +29,7 @@ jobs:
         # Personal access token stored in each submodule repo secrets.
         # Must have permission to dispatch events to twinfoundation/workspace.
         env:
-          GH_TOKEN: ${{ secrets.GHA_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
         run: |
           # Send a repository_dispatch event to the workspace repo.
           if [ "${{ github.event_name }}" = "pull_request" ]; then

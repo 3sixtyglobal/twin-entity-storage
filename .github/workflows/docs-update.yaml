@@ -51,11 +51,11 @@ jobs:
       - name: Import GPG key
         if: ${{ !inputs.dryRun }}
         run: |
-          echo "$GPG_PRIVATE_KEY" | base64 --decode | gpg --import
-          echo "GPG_KEY_ID=$GPG_KEY_ID" >> $GITHUB_ENV
+          echo "$TWIN_GPG_PRIVATE_KEY" | base64 --decode | gpg --import
+          echo "TWIN_GPG_KEY_ID=$TWIN_GPG_KEY_ID" >> $GITHUB_ENV
         env:
-          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
-          GPG_KEY_ID: ${{ secrets.GPG_KEY_ID }}
+          TWIN_GPG_PRIVATE_KEY: ${{ secrets.TWIN_GPG_PRIVATE_KEY }}
+          TWIN_GPG_KEY_ID: ${{ secrets.TWIN_GPG_KEY_ID }}
 
       # Configure git identity and enforce signed commits.
       - name: Configure Git
@@ -63,7 +63,7 @@ jobs:
         run: |
           git config --global user.email "github@twindev.org"
           git config --global user.name "TWIN GitHub Bot"
-          git config --global user.signingkey "$GPG_KEY_ID"
+          git config --global user.signingkey "$TWIN_GPG_KEY_ID"
           git config --global commit.gpgsign true
           git config --global tag.gpgsign true
 
@@ -141,7 +141,7 @@ jobs:
         run: |
           gh pr review ${{ steps.create-pr.outputs.pr_number }} --approve
         env:
-          GH_TOKEN: ${{ secrets.GHA_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
 
       # Merge immediately when PR is ready; otherwise enable auto-merge.
       - name: Merge or enable auto-merge for docs update PR
@@ -160,7 +160,7 @@ jobs:
             gh pr merge "$PR_NUMBER" --auto --squash --delete-branch
           fi
         env:
-          GH_TOKEN: ${{ secrets.GHA_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
 
       # Block until the PR is actually merged so callers can safely continue.
       - name: Wait for docs update PR merge
@@ -189,7 +189,7 @@ jobs:
           echo "Timed out waiting for docs update PR #$PR_NUMBER to merge."
           exit 1
         env:
-          GH_TOKEN: ${{ secrets.GHA_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
 
       - name: Dry run summary
         if: ${{ inputs.dryRun }}
@@ -200,7 +200,7 @@ jobs:
       - name: Cleanup GPG key
         if: ${{ always() && !inputs.dryRun }}
         run: |
-          FINGERPRINT=$(gpg --list-secret-keys --with-colons "$GPG_KEY_ID" | awk -F: '/fpr:/ {print $10}' | head -1)
+          FINGERPRINT=$(gpg --list-secret-keys --with-colons "$TWIN_GPG_KEY_ID" | awk -F: '/fpr:/ {print $10}' | head -1)
           if [ -n "$FINGERPRINT" ]; then
             gpg --batch --yes --delete-secret-keys "$FINGERPRINT" || true
             gpg --batch --yes --delete-keys "$FINGERPRINT" || true
