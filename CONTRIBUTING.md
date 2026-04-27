@@ -26,7 +26,7 @@ Thank you for your interest in contributing to this project! This guide will hel
 1. **Fork the repository** and clone your fork:
 
    ```shell
-   git clone https://github.com/twinfoundation/<repo>.git
+   git clone https://github.com/iotaledger/twin-<repo>.git
    cd <repo>
    ```
 
