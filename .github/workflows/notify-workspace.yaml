@@ -42,7 +42,7 @@ jobs:
             PR_NUMBER='null'
           fi
 
-          gh api repos/twinfoundation/workspace/dispatches \
+          gh api repos/twinfoundation/twin-workspace/dispatches \
             --method POST \
             --input - <<EOF
           {
