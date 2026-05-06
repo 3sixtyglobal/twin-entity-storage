@@ -20,14 +20,12 @@ jobs:
   notify-workspace:
     # Continue for workflow dispatches and pushes, and for closed PRs only if they were merged.
     if: "${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.event.head_commit.message != 'chore: release next') || (github.event_name == 'pull_request' && github.event.pull_request.merged == true) }}"
-    runs-on:
-      labels: ${{ github.event.repository.private && 'self-hosted-small' || 'ubuntu-latest' }}
-      group: ${{ github.event.repository.private && 'small' || 'default' }}
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
 
     steps:
       - name: Dispatch submodule change to workspace
         # Personal access token stored in each submodule repo secrets.
-        # Must have permission to dispatch events to twinfoundation/workspace.
+        # Must have permission to dispatch events to iotaledger/workspace.
         env:
           GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
         run: |
@@ -42,7 +40,7 @@ jobs:
             PR_NUMBER='null'
           fi
 
-          gh api repos/twinfoundation/twin-workspace/dispatches \
+          gh api repos/iotaledger/twin-workspace/dispatches \
             --method POST \
             --input - <<EOF
           {

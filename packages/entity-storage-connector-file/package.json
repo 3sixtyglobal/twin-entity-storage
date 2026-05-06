@@ -4,7 +4,7 @@
 	"description": "File-based connector that stores entities on disk for straightforward deployments.",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/twinfoundation/entity-storage.git",
+		"url": "git+https://github.com/iotaledger/entity-storage.git",
 		"directory": "packages/entity-storage-connector-file"
 	},
 	"author": "martyn.janes@iota.org",
@@ -86,7 +86,7 @@
 		"integration"
 	],
 	"bugs": {
-		"url": "git+https://github.com/twinfoundation/entity-storage/issues"
+		"url": "git+https://github.com/iotaledger/entity-storage/issues"
 	},
 	"homepage": "https://twindev.org"
 }

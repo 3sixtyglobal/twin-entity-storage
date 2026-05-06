@@ -10,12 +10,10 @@ on:
 
 jobs:
   add-to-project:
-    runs-on:
-      labels: ${{ github.event.repository.private && 'self-hosted-small' || 'ubuntu-latest' }}
-      group: ${{ github.event.repository.private && 'small' || 'default' }}
+    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
 
     steps:
       - uses: actions/add-to-project@v1.0.2
         with:
-          project-url: https://github.com/orgs/twinfoundation/projects/3
+          project-url: https://github.com/orgs/iotaledger/projects/104
           github-token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}

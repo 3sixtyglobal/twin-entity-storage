@@ -4,7 +4,7 @@
 	"description": "PostgreSQL connector for relational persistence and advanced SQL features.",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/twinfoundation/entity-storage.git",
+		"url": "git+https://github.com/iotaledger/entity-storage.git",
 		"directory": "packages/entity-storage-connector-postgresql"
 	},
 	"author": "adrian.sanchez.sequeira@iota.org",
@@ -87,7 +87,7 @@
 		"integration"
 	],
 	"bugs": {
-		"url": "git+https://github.com/twinfoundation/entity-storage/issues"
+		"url": "git+https://github.com/iotaledger/entity-storage/issues"
 	},
 	"homepage": "https://twindev.org"
 }
