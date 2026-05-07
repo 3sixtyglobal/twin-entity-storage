@@ -206,7 +206,8 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 				{
 					source: MongoDbEntityStorageConnector.CLASS_NAME,
 					status: HealthStatus.Ok,
-					description: "healthDescription"
+					description: "healthDescription",
+					data: { database: this._config.database, collection: this._config.collection }
 				}
 			];
 		} catch {
@@ -215,7 +216,8 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 					source: MongoDbEntityStorageConnector.CLASS_NAME,
 					status: HealthStatus.Error,
 					description: "healthDescription",
-					message: "connectionFailed"
+					message: "connectionFailed",
+					data: { database: this._config.database, collection: this._config.collection }
 				}
 			];
 		}

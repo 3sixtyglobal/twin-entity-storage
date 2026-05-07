@@ -28,8 +28,8 @@
 	},
 	"health": {
 		"mySqlEntityStorageConnector": {
-			"healthDescription": "Checks if the MySQL connection is available",
-			"connectionFailed": "Failed to connect to MySQL"
+			"healthDescription": "Checks if the MySQL table \"{tableName}\" in database \"{database}\" is available",
+			"connectionFailed": "Failed to connect to MySQL table \"{tableName}\" in database \"{database}\""
 		}
 	}
 }

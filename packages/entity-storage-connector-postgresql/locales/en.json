@@ -28,8 +28,8 @@
 	},
 	"health": {
 		"postgreSqlEntityStorageConnector": {
-			"healthDescription": "Checks if the PostgreSQL connection is available",
-			"connectionFailed": "Failed to connect to PostgreSQL"
+			"healthDescription": "Checks if the PostgreSQL table \"{tableName}\" is available",
+			"connectionFailed": "Failed to connect to PostgreSQL table \"{tableName}\""
 		}
 	}
 }

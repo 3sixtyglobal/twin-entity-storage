@@ -43,8 +43,8 @@
 	},
 	"health": {
 		"scyllaDBTableConnector": {
-			"healthDescription": "Checks if the ScyllaDB connection is available",
-			"connectionFailed": "Failed to connect to ScyllaDB"
+			"healthDescription": "Checks if the ScyllaDB table \"{table}\" is available",
+			"connectionFailed": "Failed to connect to ScyllaDB table \"{table}\""
 		}
 	}
 }

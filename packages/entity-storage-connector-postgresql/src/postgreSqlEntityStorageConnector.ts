@@ -237,7 +237,8 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 				{
 					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
 					status: HealthStatus.Ok,
-					description: "healthDescription"
+					description: "healthDescription",
+					data: { tableName: this._config.tableName }
 				}
 			];
 		} catch {
@@ -246,7 +247,8 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
 					status: HealthStatus.Error,
 					description: "healthDescription",
-					message: "connectionFailed"
+					message: "connectionFailed",
+					data: { tableName: this._config.tableName }
 				}
 			];
 		}

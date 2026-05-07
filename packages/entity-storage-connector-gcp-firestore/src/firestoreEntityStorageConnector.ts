@@ -160,7 +160,8 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 				{
 					source: FirestoreEntityStorageConnector.CLASS_NAME,
 					status: HealthStatus.Ok,
-					description: "healthDescription"
+					description: "healthDescription",
+					data: { projectId: this._config.projectId, collectionName: this._config.collectionName }
 				}
 			];
 		} catch {
@@ -169,7 +170,8 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 					source: FirestoreEntityStorageConnector.CLASS_NAME,
 					status: HealthStatus.Error,
 					description: "healthDescription",
-					message: "connectionFailed"
+					message: "connectionFailed",
+					data: { projectId: this._config.projectId, collectionName: this._config.collectionName }
 				}
 			];
 		}

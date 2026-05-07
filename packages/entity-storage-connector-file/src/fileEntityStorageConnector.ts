@@ -235,7 +235,11 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 						status: HealthStatus.Error,
 						description: "healthDescription",
 						message: "diskSpaceError",
-						data: { freeBytes, thresholdBytes: this._diskErrorThresholdBytes }
+						data: {
+							directory: this._directory,
+							freeBytes,
+							thresholdBytes: this._diskErrorThresholdBytes
+						}
 					}
 				];
 			} else if (freeBytes < this._diskWarningThresholdBytes) {
@@ -245,7 +249,11 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 						status: HealthStatus.Warning,
 						description: "healthDescription",
 						message: "diskSpaceWarning",
-						data: { freeBytes, thresholdBytes: this._diskWarningThresholdBytes }
+						data: {
+							directory: this._directory,
+							freeBytes,
+							thresholdBytes: this._diskWarningThresholdBytes
+						}
 					}
 				];
 			}
@@ -253,7 +261,8 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 				{
 					source: FileEntityStorageConnector.CLASS_NAME,
 					status: HealthStatus.Ok,
-					description: "healthDescription"
+					description: "healthDescription",
+					data: { directory: this._directory, freeBytes }
 				}
 			];
 		} catch {
@@ -262,7 +271,8 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 					source: FileEntityStorageConnector.CLASS_NAME,
 					status: HealthStatus.Error,
 					description: "healthDescription",
-					message: "diskSpaceCheckFailed"
+					message: "diskSpaceCheckFailed",
+					data: { directory: this._directory }
 				}
 			];
 		}

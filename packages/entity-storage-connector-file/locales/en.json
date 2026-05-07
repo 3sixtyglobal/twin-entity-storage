@@ -18,10 +18,10 @@
 	},
 	"health": {
 		"fileEntityStorageConnector": {
-			"healthDescription": "Checks if there is sufficient disk space for the file entity storage connector to operate properly",
-			"diskSpaceError": "Disk space critically low, {freeBytes} bytes free, threshold is {thresholdBytes} bytes",
-			"diskSpaceCheckFailed": "Failed to check disk space",
-			"diskSpaceWarning": "Disk space low, {freeBytes} bytes free, threshold is {thresholdBytes} bytes"
+			"healthDescription": "Checks if there is sufficient disk space in directory \"{directory}\" for the file entity storage connector to operate properly",
+			"diskSpaceError": "Disk space critically low in directory \"{directory}\", {freeBytes} bytes free, threshold is {thresholdBytes} bytes",
+			"diskSpaceCheckFailed": "Failed to check disk space in directory \"{directory}\"",
+			"diskSpaceWarning": "Disk space low in directory \"{directory}\", {freeBytes} bytes free, threshold is {thresholdBytes} bytes"
 		}
 	}
 }

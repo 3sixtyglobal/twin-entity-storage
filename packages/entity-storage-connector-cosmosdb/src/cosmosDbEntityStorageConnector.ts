@@ -291,7 +291,8 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 				{
 					source: CosmosDbEntityStorageConnector.CLASS_NAME,
 					status: HealthStatus.Ok,
-					description: "healthDescription"
+					description: "healthDescription",
+					data: { databaseId: this._config.databaseId, containerId: this._config.containerId }
 				}
 			];
 		} catch {
@@ -300,7 +301,8 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 					source: CosmosDbEntityStorageConnector.CLASS_NAME,
 					status: HealthStatus.Error,
 					description: "healthDescription",
-					message: "connectionFailed"
+					message: "connectionFailed",
+					data: { databaseId: this._config.databaseId, containerId: this._config.containerId }
 				}
 			];
 		}

@@ -24,8 +24,8 @@
 	},
 	"health": {
 		"firestoreEntityStorageConnector": {
-			"healthDescription": "Checks if the Firestore connection is available",
-			"connectionFailed": "Failed to connect to Firestore"
+			"healthDescription": "Checks if the Firestore collection \"{collectionName}\" in project \"{projectId}\" is available",
+			"connectionFailed": "Failed to connect to Firestore collection \"{collectionName}\" in project \"{projectId}\""
 		}
 	}
 }

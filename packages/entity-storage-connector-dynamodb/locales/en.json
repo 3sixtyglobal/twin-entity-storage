@@ -30,8 +30,8 @@
 	},
 	"health": {
 		"dynamoDbEntityStorageConnector": {
-			"healthDescription": "Checks if the DynamoDB connection is available",
-			"connectionFailed": "Failed to connect to DynamoDB"
+			"healthDescription": "Checks if the DynamoDB table \"{tableName}\" is available",
+			"connectionFailed": "Failed to connect to DynamoDB table \"{tableName}\""
 		}
 	}
 }

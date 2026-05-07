@@ -135,7 +135,8 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 			{
 				source: MemoryEntityStorageConnector.CLASS_NAME,
 				status: HealthStatus.Ok,
-				description: "healthDescription"
+				description: "healthDescription",
+				data: { entityType: this._entitySchema.type }
 			}
 		];
 	}

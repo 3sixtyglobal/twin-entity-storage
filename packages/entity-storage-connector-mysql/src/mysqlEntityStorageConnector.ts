@@ -159,7 +159,8 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 				{
 					source: MySqlEntityStorageConnector.CLASS_NAME,
 					status: HealthStatus.Ok,
-					description: "healthDescription"
+					description: "healthDescription",
+					data: { database: this._config.database, tableName: this._config.tableName }
 				}
 			];
 		} catch {
@@ -168,7 +169,8 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 					source: MySqlEntityStorageConnector.CLASS_NAME,
 					status: HealthStatus.Error,
 					description: "healthDescription",
-					message: "connectionFailed"
+					message: "connectionFailed",
+					data: { database: this._config.database, tableName: this._config.tableName }
 				}
 			];
 		}

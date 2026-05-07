@@ -31,8 +31,8 @@
 	},
 	"health": {
 		"cosmosDbEntityStorageConnector": {
-			"healthDescription": "Checks if the Cosmos DB connection is available",
-			"connectionFailed": "Failed to connect to Cosmos DB"
+			"healthDescription": "Checks if the Cosmos DB container \"{containerId}\" in database \"{databaseId}\" is available",
+			"connectionFailed": "Failed to connect to Cosmos DB container \"{containerId}\" in database \"{databaseId}\""
 		}
 	}
 }

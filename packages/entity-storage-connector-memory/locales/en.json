@@ -7,7 +7,7 @@
 	},
 	"health": {
 		"memoryEntityStorageConnector": {
-			"healthDescription": "Memory entity storage is always available"
+			"healthDescription": "Memory entity storage for \"{entityType}\" is always available"
 		}
 	}
 }

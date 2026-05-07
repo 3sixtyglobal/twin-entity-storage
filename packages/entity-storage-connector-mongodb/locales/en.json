@@ -24,8 +24,8 @@
 	},
 	"health": {
 		"mongoDbEntityStorageConnector": {
-			"healthDescription": "Checks if the MongoDB connection is available",
-			"connectionFailed": "Failed to connect to MongoDB"
+			"healthDescription": "Checks if the MongoDB collection \"{collection}\" in database \"{database}\" is available",
+			"connectionFailed": "Failed to connect to MongoDB collection \"{collection}\" in database \"{database}\""
 		}
 	}
 }

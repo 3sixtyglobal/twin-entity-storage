@@ -65,7 +65,8 @@ export class ScyllaDBTableConnector<T = unknown>
 				{
 					source: ScyllaDBTableConnector.CLASS_NAME,
 					status: HealthStatus.Ok,
-					description: "healthDescription"
+					description: "healthDescription",
+					data: { table: this._fullTableName }
 				}
 			];
 		} catch {
@@ -74,7 +75,8 @@ export class ScyllaDBTableConnector<T = unknown>
 					source: ScyllaDBTableConnector.CLASS_NAME,
 					status: HealthStatus.Error,
 					description: "healthDescription",
-					message: "connectionFailed"
+					message: "connectionFailed",
+					data: { table: this._fullTableName }
 				}
 			];
 		} finally {
