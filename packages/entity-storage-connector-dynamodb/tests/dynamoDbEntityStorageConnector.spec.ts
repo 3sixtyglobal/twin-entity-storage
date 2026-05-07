@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
-import { ComponentFactory, ObjectHelper } from "@twin.org/core";
+import { ComponentFactory, HealthStatus, ObjectHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -162,7 +162,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			config: TEST_DYNAMODB_CONFIG
 		});
 		try {
-			await entityStorage.tableDelete();
+			await entityStorage.teardown();
 		} catch {}
 	});
 
@@ -172,7 +172,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			config: { ...TEST_DYNAMODB_CONFIG, tableName: "test_nested" }
 		});
 		try {
-			await entityStorage.tableDelete();
+			await entityStorage.teardown();
 		} catch {}
 	});
 
@@ -313,6 +313,84 @@ describe("DynamoDbEntityStorageConnector", () => {
 		expect(result?.value1).toEqual(objectSet.value1);
 		expect(result?.value2).toEqual(objectSet.value2);
 		expect(result?.value3).toEqual(objectSet.value3);
+	});
+
+	test("can fail to set batch with no entities", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+		await expect(entityStorage.setBatch(undefined as unknown as TestType[])).rejects.toMatchObject({
+			name: "GuardError",
+			message: "guard.array",
+			properties: { property: "entities", value: "undefined" }
+		});
+	});
+
+	test("can set batch of items", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.setBatch([
+			{ id: "batch1", value1: "aaa", value2: 11 },
+			{ id: "batch2", value1: "bbb", value2: 22 },
+			{ id: "batch3", value1: "ccc", value2: 33 }
+		]);
+		const item1 = await entityStorage.get("batch1");
+		expect(item1).toMatchObject({ id: "batch1", value1: "aaa", value2: 11 });
+		const item3 = await entityStorage.get("batch3");
+		expect(item3).toMatchObject({ id: "batch3", value1: "ccc", value2: 33 });
+	});
+
+	test("can set batch updating existing items", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "batch1", value1: "aaa", value2: 11 });
+		await entityStorage.setBatch([
+			{ id: "batch1", value1: "aaa-updated", value2: 99 },
+			{ id: "batch2", value1: "bbb", value2: 22 }
+		]);
+		const item1 = await entityStorage.get("batch1");
+		expect(item1).toMatchObject({ id: "batch1", value1: "aaa-updated", value2: 99 });
+		const item2 = await entityStorage.get("batch2");
+		expect(item2).toMatchObject({ id: "batch2", value1: "bbb", value2: 22 });
+	});
+
+	test("can fail to remove batch with no ids", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+		await expect(entityStorage.removeBatch(undefined as unknown as string[])).rejects.toMatchObject(
+			{
+				name: "GuardError",
+				message: "guard.array",
+				properties: { property: "ids", value: "undefined" }
+			}
+		);
+	});
+
+	test("can remove batch of items", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", value1: "aaa", value2: 11 });
+		await entityStorage.set({ id: "2", value1: "bbb", value2: 22 });
+		await entityStorage.set({ id: "3", value1: "ccc", value2: 33 });
+		await entityStorage.removeBatch(["1", "2"]);
+		const count = await entityStorage.count();
+		expect(count).toEqual(1);
+		const remaining = await entityStorage.get("3");
+		expect(remaining).toMatchObject({ id: "3", value1: "ccc", value2: 33 });
 	});
 
 	test("can fail to get an item with no id", async () => {
@@ -1251,7 +1329,7 @@ describe("DynamoDbEntityStorageConnector", () => {
 			expect(result.entities.map(e => (e as ExpiryTestType).id)).toEqual(["2"]);
 		} finally {
 			try {
-				await entityStorage.tableDelete();
+				await entityStorage.teardown();
 			} catch {}
 		}
 	});
@@ -1290,8 +1368,90 @@ describe("DynamoDbEntityStorageConnector", () => {
 			expect(result.entities.map(e => (e as ExpiryTestType).id)).not.toContain("2");
 		} finally {
 			try {
-				await entityStorage.tableDelete();
+				await entityStorage.teardown();
 			} catch {}
 		}
+	});
+
+	test("can empty with no items", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.empty();
+		expect(await entityStorage.count()).toEqual(0);
+	});
+
+	test("can empty the store", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", value1: "aaa", value2: 35 });
+		await entityStorage.set({ id: "2", value1: "bbb", value2: 36 });
+		await entityStorage.set({ id: "3", value1: "ccc", value2: 37 });
+		await entityStorage.empty();
+		expect(await entityStorage.count()).toEqual(0);
+	});
+
+	test("can teardown the store", async () => {
+		const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: TEST_DYNAMODB_CONFIG
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", value1: "aaa", value2: 35 });
+		await entityStorage.teardown();
+		// Bootstrap again to create a fresh table
+		await entityStorage.bootstrap("logging");
+		const count = await entityStorage.count();
+		expect(count).toEqual(0);
+	});
+
+	describe("count", () => {
+		test("can count items", async () => {
+			const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: TEST_DYNAMODB_CONFIG
+			});
+			await entityStorage.bootstrap("logging");
+			await entityStorage.set({ id: "1", value1: "aaa", value2: 35 });
+			await entityStorage.set({ id: "2", value1: "bbb", value2: 36 });
+			await entityStorage.set({ id: "3", value1: "ccc", value2: 37 });
+			const result = await entityStorage.count();
+			expect(result).toEqual(3);
+		});
+	});
+
+	describe("health", () => {
+		test("can get health as ok when connection succeeds", async () => {
+			const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: TEST_DYNAMODB_CONFIG
+			});
+			await entityStorage.bootstrap("logging");
+			const result = await entityStorage.health();
+			expect(result).toHaveLength(1);
+			expect(result[0].status).toEqual(HealthStatus.Ok);
+		});
+
+		test("can get health as error when connection fails", async () => {
+			const entityStorage = new DynamoDbEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: TEST_DYNAMODB_CONFIG
+			});
+			vi.spyOn(
+				entityStorage as unknown as { createConnection: () => unknown },
+				"createConnection"
+			).mockReturnValue({
+				describeTable: vi.fn().mockRejectedValueOnce(new Error("Connection refused"))
+			});
+			const result = await entityStorage.health();
+			expect(result).toHaveLength(1);
+			expect(result[0].status).toEqual(HealthStatus.Error);
+			expect(result[0].message).toEqual("connectionFailed");
+		});
 	});
 });

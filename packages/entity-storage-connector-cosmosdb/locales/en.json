@@ -4,7 +4,9 @@
 			"databaseCreating": "Database \"{databaseId}\" creating",
 			"databaseExists": "Database \"{databaseId}\" created or it already exists",
 			"containerCreating": "Container \"{containerId}\" creating",
-			"containerExists": "Container \"{containerId}\" created or it already exists"
+			"containerExists": "Container \"{containerId}\" created or it already exists",
+			"containerDeleting": "Deleting container \"{containerId}\"",
+			"containerDeleted": "Container \"{containerId}\" deleted"
 		}
 	},
 	"error": {
@@ -19,7 +21,18 @@
 			"sortNotIndexed": "The property \"{property}\" is not indexed and cannot be used for sorting",
 			"containerCreateFailed": "The container couldn't be created \"{containerId}\"",
 			"databaseCreateFailed": "Unable to create database \"{databaseId}\"",
-			"containerDoesNotExist": "Container \"{containerId}\" does not exist"
+			"containerDoesNotExist": "Container \"{containerId}\" does not exist",
+			"setBatchFailed": "Unable to set batch of entities",
+			"countFailed": "Unable to count entities",
+			"emptyFailed": "Unable to empty entity storage",
+			"removeBatchFailed": "Unable to remove batch of entities",
+			"teardownFailed": "Unable to teardown entity storage"
+		}
+	},
+	"health": {
+		"cosmosDbEntityStorageConnector": {
+			"healthDescription": "Checks if the Cosmos DB connection is available",
+			"connectionFailed": "Failed to connect to Cosmos DB"
 		}
 	}
 }

@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
-import { ComponentFactory, ObjectHelper } from "@twin.org/core";
+import { ComponentFactory, HealthStatus, ObjectHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -214,7 +214,11 @@ describe("PostgreSqlEntityStorageConnector", () => {
 			entitySchema: nameof<TestType>(),
 			config
 		});
-		await entityStorage.tableDrop();
+		try {
+			await entityStorage.teardown();
+		} catch {
+			// Table may not exist if test only tests constructor errors
+		}
 		await entityStorage.stop();
 	});
 
@@ -223,7 +227,11 @@ describe("PostgreSqlEntityStorageConnector", () => {
 			entitySchema: nameof<NestedSearchType>(),
 			config: { ...config, tableName: "test_nested" }
 		});
-		await entityStorage.tableDrop();
+		try {
+			await entityStorage.teardown();
+		} catch {
+			// Table may not exist if test only tests constructor errors
+		}
 		await entityStorage.stop();
 	});
 
@@ -232,7 +240,11 @@ describe("PostgreSqlEntityStorageConnector", () => {
 			entitySchema: nameof<ExpiryTestType>(),
 			config: { ...config, tableName: "expires_test" }
 		});
-		await entityStorage.tableDrop();
+		try {
+			await entityStorage.teardown();
+		} catch {
+			// Table may not exist if test only tests constructor errors
+		}
 		await entityStorage.stop();
 	});
 
@@ -508,6 +520,86 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		// Should still have original value set
 		const result = await entityStorage.get(entityId);
 		expect(result).toEqual(objectSet);
+	});
+
+	test("can fail to set batch with no entities", async () => {
+		const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+		await entityStorage.bootstrap("logging");
+		await expect(entityStorage.setBatch(undefined as unknown as TestType[])).rejects.toMatchObject({
+			name: "GuardError",
+			message: "guard.array",
+			properties: { property: "entities", value: "undefined" }
+		});
+	});
+
+	test("can set batch of items", async () => {
+		const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.setBatch([
+			{ id: "batch1", value1: "aaa", value2: 11 },
+			{ id: "batch2", value1: "bbb", value2: 22 },
+			{ id: "batch3", value1: "ccc", value2: 33 }
+		]);
+		const item1 = await entityStorage.get("batch1");
+		expect(item1).toMatchObject({ id: "batch1", value1: "aaa", value2: 11 });
+		const item3 = await entityStorage.get("batch3");
+		expect(item3).toMatchObject({ id: "batch3", value1: "ccc", value2: 33 });
+	});
+
+	test("can set batch updating existing items", async () => {
+		const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "batch1", value1: "aaa", value2: 11 });
+		await entityStorage.setBatch([
+			{ id: "batch1", value1: "aaa-updated", value2: 99 },
+			{ id: "batch2", value1: "bbb", value2: 22 }
+		]);
+		const item1 = await entityStorage.get("batch1");
+		expect(item1).toMatchObject({ id: "batch1", value1: "aaa-updated", value2: 99 });
+		const item2 = await entityStorage.get("batch2");
+		expect(item2).toMatchObject({ id: "batch2", value1: "bbb", value2: 22 });
+	});
+
+	test("can fail to remove batch with no ids", async () => {
+		const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+		await entityStorage.bootstrap("logging");
+		await expect(entityStorage.removeBatch(undefined as unknown as string[])).rejects.toMatchObject(
+			{
+				name: "GuardError",
+				message: "guard.array",
+				properties: { property: "ids", value: "undefined" }
+			}
+		);
+		await entityStorage.stop();
+	});
+
+	test("can remove batch of items", async () => {
+		const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", value1: "aaa", value2: 1 });
+		await entityStorage.set({ id: "2", value1: "bbb", value2: 2 });
+		await entityStorage.set({ id: "3", value1: "ccc", value2: 3 });
+		await entityStorage.removeBatch(["1", "2"]);
+		const count = await entityStorage.count();
+		expect(count).toEqual(1);
+		const remaining = await entityStorage.get("3");
+		expect(remaining).toMatchObject({ id: "3", value1: "ccc", value2: 3 });
+		await entityStorage.stop();
 	});
 
 	test("can fail to get an item with no id", async () => {
@@ -1392,7 +1484,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		expect(result).toEqual(testEntity);
 
 		// Cleanup
-		await entityStorage.tableDrop();
+		await entityStorage.teardown();
 	});
 
 	test("should handle plain text in object field gracefully by returning it as string", async () => {
@@ -1422,7 +1514,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		expect(result?.mnemonic).toBe(plainTextValue);
 		expect(typeof result?.mnemonic).toBe("string");
 
-		await entityStorage.tableDrop();
+		await entityStorage.teardown();
 	});
 
 	test("should handle plain text in object field when querying", async () => {
@@ -1453,7 +1545,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		expect(queryResult.entities[0]?.mnemonic).toBe(plainTextValue);
 		expect(typeof queryResult.entities[0]?.mnemonic).toBe("string");
 
-		await entityStorage.tableDrop();
+		await entityStorage.teardown();
 	});
 
 	test("should handle query with multiple conditions with incremented placeholders", async () => {
@@ -1489,7 +1581,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		expect(result).toBeDefined();
 		expect(result.entities.length).toBeGreaterThan(0);
 
-		await entityStorage.tableDrop();
+		await entityStorage.teardown();
 	});
 
 	test("should handle query with complex multiple conditions of different types", async () => {
@@ -1550,7 +1642,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 			expect(entityResult.value2).toBeLessThan(50);
 		}
 
-		await entityStorage.tableDrop();
+		await entityStorage.teardown();
 	});
 
 	test("can perform a query with an object condition", async () => {
@@ -1796,5 +1888,90 @@ describe("PostgreSqlEntityStorageConnector", () => {
 			expect.arrayContaining(["1", "3"])
 		);
 		expect(result.entities.map(e => (e as ExpiryTestType).id)).not.toContain("2");
+	});
+
+	describe("count", () => {
+		test("can empty with no items", async () => {
+			const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: TEST_POSTGRESQL_CONFIG
+			});
+			await entityStorage.bootstrap("logging");
+			await entityStorage.empty();
+			const result = await entityStorage.count();
+			await entityStorage.stop();
+			expect(result).toEqual(0);
+		});
+
+		test("can empty the store", async () => {
+			const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: TEST_POSTGRESQL_CONFIG
+			});
+			await entityStorage.bootstrap("logging");
+			await entityStorage.set({ id: "1", value1: "aaa", value2: 1 });
+			await entityStorage.set({ id: "2", value1: "bbb", value2: 2 });
+			await entityStorage.set({ id: "3", value1: "ccc", value2: 3 });
+			await entityStorage.empty();
+			const result = await entityStorage.count();
+			await entityStorage.stop();
+			expect(result).toEqual(0);
+		});
+
+		test("can teardown the store", async () => {
+			const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: TEST_POSTGRESQL_CONFIG
+			});
+			await entityStorage.bootstrap("logging");
+			await entityStorage.set({ id: "1", value1: "aaa", value2: 1 });
+			await entityStorage.teardown();
+			// Bootstrap again to create a fresh table
+			await entityStorage.bootstrap("logging");
+			const result = await entityStorage.count();
+			await entityStorage.stop();
+			expect(result).toEqual(0);
+		});
+
+		test("can count items", async () => {
+			const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: TEST_POSTGRESQL_CONFIG
+			});
+			await entityStorage.bootstrap("logging");
+			await entityStorage.set({ id: "1", value1: "aaa", value2: 35 });
+			await entityStorage.set({ id: "2", value1: "bbb", value2: 36 });
+			await entityStorage.set({ id: "3", value1: "ccc", value2: 37 });
+			const result = await entityStorage.count();
+			await entityStorage.stop();
+			expect(result).toEqual(3);
+		});
+	});
+
+	describe("health", () => {
+		test("can get health ok", async () => {
+			const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: TEST_POSTGRESQL_CONFIG
+			});
+			await entityStorage.bootstrap("logging");
+			const health = await entityStorage.health();
+			await entityStorage.stop();
+			expect(health[0].status).toEqual(HealthStatus.Ok);
+		});
+
+		test("can get health error", async () => {
+			const entityStorage = new PostgreSqlEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: TEST_POSTGRESQL_CONFIG
+			});
+			vi.spyOn(
+				entityStorage as unknown as { createConnection: () => unknown },
+				"createConnection"
+			).mockRejectedValueOnce(new Error("Connection failed"));
+			const health = await entityStorage.health();
+			await entityStorage.stop();
+			expect(health[0].status).toEqual(HealthStatus.Error);
+		});
 	});
 });

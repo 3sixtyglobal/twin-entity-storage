@@ -3,7 +3,9 @@
 		"mongoDbEntityStorageConnector": {
 			"databaseCreating": "Database \"{databaseName}\" creating",
 			"databaseExists": "Database \"{databaseName}\" created or it already exists",
-			"collectionExists": "Database \"{collectionName}\" created or it already exists"
+			"collectionExists": "Database \"{collectionName}\" created or it already exists",
+			"collectionDropping": "Dropping collection \"{collection}\"",
+			"collectionDropped": "Collection \"{collection}\" dropped"
 		}
 	},
 	"error": {
@@ -12,7 +14,18 @@
 			"getFailed": "Unable to get entity \"{id}\"",
 			"removeFailed": "Unable to remove entity \"{id}\"",
 			"databaseCreateFailed": "The database creation failed for \"{databaseName}\"",
-			"unsupportedComparisonOperator": "Comparison operator \"{comparison}\" is not supported"
+			"unsupportedComparisonOperator": "Comparison operator \"{comparison}\" is not supported",
+			"setBatchFailed": "Unable to set batch of entities",
+			"removeBatchFailed": "Unable to remove batch of entities",
+			"emptyFailed": "Unable to empty entity storage",
+			"countFailed": "Unable to count entities",
+			"teardownFailed": "Unable to teardown entity storage"
+		}
+	},
+	"health": {
+		"mongoDbEntityStorageConnector": {
+			"healthDescription": "Checks if the MongoDB connection is available",
+			"connectionFailed": "Failed to connect to MongoDB"
 		}
 	}
 }

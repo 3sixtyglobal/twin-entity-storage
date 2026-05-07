@@ -10,11 +10,16 @@ import { Coerce, Guards } from "@twin.org/core";
 import type { EntityCondition, SortDirection } from "@twin.org/entity";
 import type {
 	IEntityStorageComponent,
+	IEntityStorageCountRequest,
+	IEntityStorageCountResponse,
+	IEntityStorageEmptyRequest,
 	IEntityStorageGetRequest,
 	IEntityStorageGetResponse,
 	IEntityStorageListRequest,
 	IEntityStorageListResponse,
+	IEntityStorageRemoveBatchRequest,
 	IEntityStorageRemoveRequest,
+	IEntityStorageSetBatchRequest,
 	IEntityStorageSetRequest
 } from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
@@ -61,6 +66,19 @@ export class EntityStorageRestClient<T>
 	}
 
 	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(EntityStorageRestClient.CLASS_NAME, nameof(entities), entities);
+
+		await this.fetch<IEntityStorageSetBatchRequest, INoContentResponse>("/batch", "POST", {
+			body: entities as unknown[]
+		});
+	}
+
+	/**
 	 * Get an entity.
 	 * @param id The id of the entity to get, or the index value if secondaryIndex is set.
 	 * @param secondaryIndex Get the item using a secondary index.
@@ -98,6 +116,40 @@ export class EntityStorageRestClient<T>
 				id
 			}
 		});
+	}
+
+	/**
+	 * Remove multiple entities by id.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(EntityStorageRestClient.CLASS_NAME, nameof(ids), ids);
+
+		await this.fetch<IEntityStorageRemoveBatchRequest, INoContentResponse>("/batch", "DELETE", {
+			body: ids
+		});
+	}
+
+	/**
+	 * Remove all entities from the storage.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		await this.fetch<IEntityStorageEmptyRequest, INoContentResponse>("/", "DELETE", {});
+	}
+
+	/**
+	 * Count all the entities which match the conditions.
+	 * @returns The total count of entities in the storage.
+	 */
+	public async count(): Promise<number> {
+		const result = await this.fetch<IEntityStorageCountRequest, IEntityStorageCountResponse>(
+			"/count",
+			"GET",
+			{}
+		);
+		return result.body.count;
 	}
 
 	/**

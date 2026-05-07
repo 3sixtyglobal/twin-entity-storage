@@ -4,7 +4,9 @@
 			"databaseCreating": "Database \"{databaseName}\" creating",
 			"databaseExists": "Database \"{databaseName}\" created or it already exists",
 			"tableCreating": "Table \"{tableName}\" creating",
-			"tableExists": "Table \"{tableName}\" created or it already exists"
+			"tableExists": "Table \"{tableName}\" created or it already exists",
+			"tableDropping": "Dropping table \"{tableName}\"",
+			"tableDropped": "Table \"{tableName}\" dropped"
 		}
 	},
 	"error": {
@@ -16,7 +18,18 @@
 			"comparisonNotSupported": "Comparison operator \"{comparison}\" is not supported",
 			"conditionalNotSupported": "Conditional operator \"{operator}\" is not supported",
 			"entitySchemaPropertiesUndefined": "The entity schema properties are undefined",
-			"databaseCreateFailed": "Unable to create database \"{databaseName}\""
+			"databaseCreateFailed": "Unable to create database \"{databaseName}\"",
+			"setBatchFailed": "Unable to set batch of entities",
+			"countFailed": "Unable to count entities",
+			"emptyFailed": "Unable to empty entity storage",
+			"removeBatchFailed": "Unable to remove batch of entities",
+			"teardownFailed": "Unable to teardown entity storage"
+		}
+	},
+	"health": {
+		"mySqlEntityStorageConnector": {
+			"healthDescription": "Checks if the MySQL connection is available",
+			"connectionFailed": "Failed to connect to MySQL"
 		}
 	}
 }

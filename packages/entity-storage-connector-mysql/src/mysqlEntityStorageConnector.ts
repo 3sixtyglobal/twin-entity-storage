@@ -7,9 +7,11 @@ import {
 	ComponentFactory,
 	GeneralError,
 	Guards,
+	HealthStatus,
 	Is,
 	ObjectHelper,
-	SharedStore
+	SharedStore,
+	type IHealth
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
@@ -145,6 +147,34 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	}
 
 	/**
+	 * Get the health of the component.
+	 * @returns The health of the component.
+	 */
+	public async health(): Promise<IHealth[]> {
+		try {
+			await this.getPool().query(
+				`SELECT 1 FROM \`${this._config.database}\`.\`${this._config.tableName}\` LIMIT 0`
+			);
+			return [
+				{
+					source: MySqlEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Ok,
+					description: "healthDescription"
+				}
+			];
+		} catch {
+			return [
+				{
+					source: MySqlEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Error,
+					description: "healthDescription",
+					message: "connectionFailed"
+				}
+			];
+		}
+	}
+
+	/**
 	 * Get the schema for the entities.
 	 * @returns The schema for the entities.
 	 */
@@ -240,7 +270,26 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	 * @returns Nothing.
 	 */
 	public async stop(nodeLoggingComponentType?: string): Promise<void> {
-		await this.close();
+		if (this._pool) {
+			const poolConfig = this.createPoolConfig();
+			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
+
+			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
+				"mySqlPools"
+			);
+			sharedPools ??= {};
+			if (sharedPools[poolId]) {
+				// Decrease the use counter and close the pool if no longer used
+				sharedPools[poolId].useCounter--;
+				if (sharedPools[poolId].useCounter <= 0) {
+					await this._pool.end();
+					delete sharedPools[poolId];
+				}
+				SharedStore.set("mySqlPools", sharedPools);
+			}
+
+			this._pool = undefined;
+		}
 	}
 
 	/**
@@ -379,6 +428,88 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	}
 
 	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(MySqlEntityStorageConnector.CLASS_NAME, nameof(entities), entities);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		for (const entity of entities) {
+			EntitySchemaHelper.validateEntity(entity, this._entitySchema);
+		}
+
+		try {
+			const props = [...(this._entitySchema.properties ?? [])];
+			props.unshift({
+				property: MySqlEntityStorageConnector._PARTITION_KEY as keyof T,
+				type: EntitySchemaPropertyType.String
+			});
+
+			const keys = props.map(p => p.property as string);
+			const allValues: unknown[] = [];
+
+			for (const entity of entities) {
+				const finalEntity = ObjectHelper.clone(entity);
+				ObjectHelper.propertySet(
+					finalEntity,
+					MySqlEntityStorageConnector._PARTITION_KEY,
+					partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE
+				);
+				for (const prop of props) {
+					const val = finalEntity[prop.property];
+					if (
+						prop.type === EntitySchemaPropertyType.Object ||
+						prop.type === EntitySchemaPropertyType.Array
+					) {
+						allValues.push(Is.empty(val) ? null : JSON.stringify(val));
+					} else {
+						allValues.push(Is.empty(val) ? null : val);
+					}
+				}
+			}
+
+			const rowPlaceholder = `(${keys.map(() => "?").join(", ")})`;
+			let sql = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\``;
+			sql += ` (${keys.map(key => `\`${key}\``).join(", ")})`;
+			sql += ` VALUES ${entities.map(() => rowPlaceholder).join(", ")}`;
+			sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
+
+			const pool = this.getPool();
+			await pool.query(sql, allValues);
+		} catch (err) {
+			throw new GeneralError(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				"setBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Empty the entity storage.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const pool = this.getPool();
+			await pool.query(
+				`DELETE FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ?`,
+				[partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE]
+			);
+		} catch (err) {
+			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "emptyFailed", undefined, err);
+		}
+	}
+
+	/**
 	 * Remove the entity.
 	 * @param id The id of the entity to remove.
 	 * @param conditions The optional conditions to match for the entities.
@@ -426,6 +557,78 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 				{
 					id
 				},
+				err
+			);
+		}
+	}
+
+	/**
+	 * Teardown the entity storage by dropping the table.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: MySqlEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "tableDropping",
+			data: { tableName: this._config.tableName }
+		});
+
+		try {
+			if (await this.tableExists()) {
+				const pool = this.getPool();
+				await pool.query(`DROP TABLE \`${this._config.database}\`.\`${this._config.tableName}\`;`);
+				await this.waitForTableNotExists();
+			}
+
+			await nodeLogging?.log({
+				level: "info",
+				source: MySqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "tableDropped",
+				data: { tableName: this._config.tableName }
+			});
+
+			return true;
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: MySqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "teardownFailed",
+				error: BaseError.fromError(err)
+			});
+			return false;
+		}
+	}
+
+	/**
+	 * Remove multiple entities by their primary key IDs.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(MySqlEntityStorageConnector.CLASS_NAME, nameof(ids), ids);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const pool = this.getPool();
+			const sql = `DELETE FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ? AND \`${String(this._primaryKeyProperty.property)}\` IN (?)`;
+			await pool.query(sql, [
+				partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE,
+				ids
+			]);
+		} catch (err) {
+			throw new GeneralError(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				"removeBatchFailed",
+				undefined,
 				err
 			);
 		}
@@ -513,36 +716,25 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	}
 
 	/**
-	 * Drop the table.
-	 * @returns Nothing.
+	 * Count all the entities which match the conditions.
+	 * @returns The total count of entities in the storage.
 	 */
-	public async tableDrop(): Promise<void> {
+	public async count(): Promise<number> {
 		try {
-			if (await this.tableExists()) {
-				const pool = this.getPool();
-				await pool.query(`DROP TABLE \`${this._config.database}\`.\`${this._config.tableName}\`;`);
+			const contextIds = await ContextIdStore.getContextIds();
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				contextIds,
+				this._partitionContextIds
+			);
 
-				await this.waitForTableNotExists();
-			}
-		} catch {
-			// Ignore errors
-		}
-	}
-
-	/**
-	 * Empty the table.
-	 * @returns Nothing.
-	 */
-	public async tableEmpty(): Promise<void> {
-		try {
-			if (await this.tableExists()) {
-				const pool = this.getPool();
-				await pool.query(
-					`TRUNCATE TABLE \`${this._config.database}\`.\`${this._config.tableName}\`;`
-				);
-			}
-		} catch {
-			// Ignore errors
+			const pool = this.getPool();
+			const [rows] = await pool.query(
+				`SELECT COUNT(*) AS count FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ?`,
+				[partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE]
+			);
+			return Number((rows as { count: number }[])[0].count);
+		} catch (err) {
+			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "countFailed", undefined, err);
 		}
 	}
 
@@ -557,34 +749,6 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			return Is.arrayValue(rows);
 		} catch {
 			return false;
-		}
-	}
-
-	/**
-	 * Close the connection pool and release all connections.
-	 * Should be called when the connector is no longer needed.
-	 * @returns Nothing.
-	 */
-	public async close(): Promise<void> {
-		if (this._pool) {
-			const poolConfig = this.createPoolConfig();
-			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
-
-			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
-				"mySqlPools"
-			);
-			sharedPools ??= {};
-			if (sharedPools[poolId]) {
-				// Decrease the use counter and close the pool if no longer used
-				sharedPools[poolId].useCounter--;
-				if (sharedPools[poolId].useCounter <= 0) {
-					await this._pool.end();
-					delete sharedPools[poolId];
-				}
-				SharedStore.set("mySqlPools", sharedPools);
-			}
-
-			this._pool = undefined;
 		}
 	}
 

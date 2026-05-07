@@ -1,11 +1,13 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import {
+	BulkOperationType,
 	type Container,
 	CosmosClient,
 	CosmosDbDiagnosticLevel,
 	type FeedOptions,
 	type ItemDefinition,
+	type OperationInput,
 	PartitionKeyKind,
 	type Resource,
 	type SqlParameter,
@@ -18,6 +20,8 @@ import {
 	ComponentFactory,
 	GeneralError,
 	Guards,
+	HealthStatus,
+	type IHealth,
 	Is,
 	ObjectHelper
 } from "@twin.org/core";
@@ -274,6 +278,35 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 	}
 
 	/**
+	 * Returns the health status of the component.
+	 * @returns The health status of the component.
+	 */
+	public async health(): Promise<IHealth[]> {
+		try {
+			await this._client
+				.database(this._config.databaseId)
+				.container(this._config.containerId)
+				.read();
+			return [
+				{
+					source: CosmosDbEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Ok,
+					description: "healthDescription"
+				}
+			];
+		} catch {
+			return [
+				{
+					source: CosmosDbEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Error,
+					description: "healthDescription",
+					message: "connectionFailed"
+				}
+			];
+		}
+	}
+
+	/**
 	 * Get the schema for the entities.
 	 * @returns The schema for the entities.
 	 */
@@ -429,6 +462,69 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 	}
 
 	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(CosmosDbEntityStorageConnector.CLASS_NAME, nameof(entities), entities);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		for (const entity of entities) {
+			EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		}
+
+		try {
+			await this._container.items.executeBulkOperations(
+				entities.map(
+					entity =>
+						({
+							operationType: BulkOperationType.Upsert,
+							partitionKey: partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
+							resourceBody: {
+								id: entity[this._primaryKey.property] as string,
+								[CosmosDbEntityStorageConnector._PARTITION_KEY]:
+									partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
+								...(entity as { [key: string]: unknown })
+							}
+						}) as OperationInput
+				)
+			);
+		} catch (err) {
+			throw new GeneralError(
+				CosmosDbEntityStorageConnector.CLASS_NAME,
+				"setBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Empty all entities from the storage.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			await this._container.deleteAllItemsForPartitionKey(
+				partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
+			);
+		} catch (err) {
+			throw new GeneralError(
+				CosmosDbEntityStorageConnector.CLASS_NAME,
+				"emptyFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
 	 * Remove the entity.
 	 * @param id The id of the entity to remove.
 	 * @param conditions The optional conditions to match for the entities.
@@ -472,6 +568,80 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 				},
 				err
 			);
+		}
+	}
+
+	/**
+	 * Remove multiple entities by id.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(CosmosDbEntityStorageConnector.CLASS_NAME, nameof(ids), ids);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const operations: OperationInput[] = ids.map(id => ({
+				operationType: BulkOperationType.Delete,
+				id,
+				partitionKey: partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
+			}));
+
+			await this._container.items.executeBulkOperations(operations);
+		} catch (err) {
+			throw new GeneralError(
+				CosmosDbEntityStorageConnector.CLASS_NAME,
+				"removeBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Teardown the storage by deleting the underlying container.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: CosmosDbEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "containerDeleting",
+			data: { containerId: this._config.containerId }
+		});
+
+		try {
+			await this._container.deleteAllItemsForPartitionKey(
+				partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
+			);
+			await this._container.delete();
+
+			await nodeLogging?.log({
+				level: "info",
+				source: CosmosDbEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "containerDeleted",
+				data: { containerId: this._config.containerId }
+			});
+
+			return true;
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: CosmosDbEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "teardownFailed",
+				error: BaseError.fromError(err)
+			});
+			return false;
 		}
 	}
 
@@ -568,20 +738,35 @@ export class CosmosDbEntityStorageConnector<T = unknown> implements IEntityStora
 	}
 
 	/**
-	 * Delete the container.
-	 * @returns Nothing.
+	 * Count all the entities which match the conditions.
+	 * @returns The total count of entities in the storage.
 	 */
-	public async containerDelete(): Promise<void> {
-		const contextIds = await ContextIdStore.getContextIds();
-		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
-
+	public async count(): Promise<number> {
 		try {
-			await this._container.deleteAllItemsForPartitionKey(
-				partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
+			const contextIds = await ContextIdStore.getContextIds();
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				contextIds,
+				this._partitionContextIds
 			);
-			await this._container.delete();
-		} catch {
-			// Ignore errors
+
+			const querySpec: SqlQuerySpec = {
+				query: "SELECT VALUE COUNT(1) FROM c WHERE c.partitionId = @partitionId",
+				parameters: [
+					{
+						name: "@partitionId",
+						value: partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
+					}
+				]
+			};
+			const { resources } = await this._container.items.query(querySpec).fetchAll();
+			return resources[0] ?? 0;
+		} catch (err) {
+			throw new GeneralError(
+				CosmosDbEntityStorageConnector.CLASS_NAME,
+				"countFailed",
+				undefined,
+				err
+			);
 		}
 	}
 

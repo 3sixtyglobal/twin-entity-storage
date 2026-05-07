@@ -150,12 +150,52 @@ export class ScyllaDBViewConnector<T>
 	}
 
 	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
+			methodName: "setBatch"
+		});
+	}
+
+	/**
+	 * Remove all entities from the storage.
+	 */
+	public async empty(): Promise<void> {
+		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
+			methodName: "empty"
+		});
+	}
+
+	/**
 	 * Delete the entity.
 	 * @param id The id of the entity to remove.
 	 */
 	public async remove(id: string): Promise<void> {
 		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
 			methodName: "remove"
+		});
+	}
+
+	/**
+	 * Remove multiple entities.
+	 * @param _ids The ids of the entities to remove.
+	 */
+	public async removeBatch(_ids: string[]): Promise<void> {
+		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
+			methodName: "removeBatch"
+		});
+	}
+
+	/**
+	 * Teardown the entity storage (not supported for views).
+	 * @param _nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(_nodeLoggingComponentType?: string): Promise<boolean> {
+		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
+			methodName: "teardown"
 		});
 	}
 }

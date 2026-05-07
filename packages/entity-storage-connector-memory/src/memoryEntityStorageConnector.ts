@@ -1,7 +1,15 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
-import { Coerce, Guards, Is, ObjectHelper } from "@twin.org/core";
+import {
+	Coerce,
+	ComponentFactory,
+	Guards,
+	HealthStatus,
+	type IHealth,
+	Is,
+	ObjectHelper
+} from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntityConditions,
@@ -15,6 +23,7 @@ import {
 	type SortDirection
 } from "@twin.org/entity";
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
+import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import type { IMemoryEntityStorageConnectorConstructorOptions } from "./models/IMemoryEntityStorageConnectorConstructorOptions.js";
 
@@ -118,6 +127,20 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 	}
 
 	/**
+	 * Returns the health status of the component.
+	 * @returns The health status of the component.
+	 */
+	public async health(): Promise<IHealth[]> {
+		return [
+			{
+				source: MemoryEntityStorageConnector.CLASS_NAME,
+				status: HealthStatus.Ok,
+				description: "healthDescription"
+			}
+		];
+	}
+
+	/**
 	 * Get the schema for the entities.
 	 * @returns The schema for the entities.
 	 */
@@ -198,6 +221,53 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 			this._store[existingIndex] = finalEntity;
 		} else {
 			this._store.push(finalEntity);
+		}
+	}
+
+	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(MemoryEntityStorageConnector.CLASS_NAME, nameof(entities), entities);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		for (const entity of entities) {
+			EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		}
+
+		const indexMap = new Map<string, number>();
+		for (let i = 0; i < this._store.length; i++) {
+			const stored = this._store[i];
+			const storedPartition = ObjectHelper.propertyGet(
+				stored as object,
+				MemoryEntityStorageConnector._PARTITION_KEY
+			);
+			if (!Is.stringValue(partitionKey) || storedPartition === partitionKey) {
+				indexMap.set(stored[this._primaryKey.property] as string, i);
+			}
+		}
+
+		for (const entity of entities) {
+			const finalEntity = ObjectHelper.clone(entity);
+			if (Is.stringValue(partitionKey)) {
+				ObjectHelper.propertySet(
+					finalEntity,
+					MemoryEntityStorageConnector._PARTITION_KEY,
+					partitionKey
+				);
+			}
+			const id = finalEntity[this._primaryKey.property] as string;
+			const existingIndex = indexMap.get(id);
+			if (existingIndex !== undefined) {
+				this._store[existingIndex] = finalEntity;
+			} else {
+				const newIndex = this._store.push(finalEntity) - 1;
+				indexMap.set(id, newIndex);
+			}
 		}
 	}
 
@@ -319,6 +389,103 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 			entities,
 			cursor: nextCursor
 		};
+	}
+
+	/**
+	 * Remove all entities from the storage.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		if (Is.stringValue(partitionKey)) {
+			for (let i = this._store.length - 1; i >= 0; i--) {
+				if (
+					ObjectHelper.propertyGet(
+						this._store[i] as object,
+						MemoryEntityStorageConnector._PARTITION_KEY
+					) === partitionKey
+				) {
+					this._store.splice(i, 1);
+				}
+			}
+		} else {
+			this._store.splice(0, this._store.length);
+		}
+	}
+
+	/**
+	 * Remove multiple entities by id.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(MemoryEntityStorageConnector.CLASS_NAME, nameof(ids), ids);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const finalConditions: { property: keyof T; value: unknown }[] = [];
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.push({
+				property: MemoryEntityStorageConnector._PARTITION_KEY as keyof T,
+				value: partitionKey
+			});
+		}
+
+		for (const id of ids) {
+			const index = this.findItem(id, undefined, finalConditions);
+			if (index >= 0) {
+				this._store.splice(index, 1);
+			}
+		}
+	}
+
+	/**
+	 * Teardown the storage by clearing the underlying store.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: MemoryEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "storeTearingDown"
+		});
+
+		this._store.splice(0, this._store.length);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: MemoryEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "storeTornDown"
+		});
+
+		return true;
+	}
+
+	/**
+	 * Count all the entities which match the conditions.
+	 * @returns The total count of entities in the storage.
+	 */
+	public async count(): Promise<number> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		if (!Is.stringValue(partitionKey)) {
+			return this._store.length;
+		}
+
+		return this._store.filter(
+			item =>
+				ObjectHelper.propertyGet(item as object, MemoryEntityStorageConnector._PARTITION_KEY) ===
+				partitionKey
+		).length;
 	}
 
 	/**

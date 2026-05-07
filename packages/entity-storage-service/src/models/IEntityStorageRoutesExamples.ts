@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0.
 import type { IRestRouteRequestExample, IRestRouteResponseExample } from "@twin.org/api-models";
 import type {
+	IEntityStorageCountRequest,
+	IEntityStorageCountResponse,
 	IEntityStorageGetRequest,
 	IEntityStorageGetResponse,
 	IEntityStorageListRequest,
@@ -42,5 +44,13 @@ export interface IEntityStorageRoutesExamples {
 	list?: {
 		requestExamples: IRestRouteRequestExample<IEntityStorageListRequest>[];
 		responseExamples: IRestRouteResponseExample<IEntityStorageListResponse>[];
+	};
+
+	/**
+	 * Examples for the count route.
+	 */
+	count?: {
+		requestExamples: IRestRouteRequestExample<IEntityStorageCountRequest>[];
+		responseExamples: IRestRouteResponseExample<IEntityStorageCountResponse>[];
 	};
 }

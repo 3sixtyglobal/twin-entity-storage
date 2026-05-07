@@ -1,7 +1,16 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
-import { BaseError, ComponentFactory, GeneralError, Guards, type IError, Is } from "@twin.org/core";
+import {
+	BaseError,
+	ComponentFactory,
+	GeneralError,
+	Guards,
+	HealthStatus,
+	Is,
+	type IError,
+	type IHealth
+} from "@twin.org/core";
 import {
 	EntitySchemaFactory,
 	EntitySchemaHelper,
@@ -41,6 +50,36 @@ export class ScyllaDBTableConnector<T = unknown>
 	 */
 	public className(): string {
 		return ScyllaDBTableConnector.CLASS_NAME;
+	}
+
+	/**
+	 * Get the health of the component.
+	 * @returns The health of the component.
+	 */
+	public async health(): Promise<IHealth[]> {
+		let connection;
+		try {
+			connection = await this.openConnection();
+			await this.queryDB(connection, `SELECT * FROM "${this._fullTableName}" LIMIT 1`, []);
+			return [
+				{
+					source: ScyllaDBTableConnector.CLASS_NAME,
+					status: HealthStatus.Ok,
+					description: "healthDescription"
+				}
+			];
+		} catch {
+			return [
+				{
+					source: ScyllaDBTableConnector.CLASS_NAME,
+					status: HealthStatus.Error,
+					description: "healthDescription",
+					message: "connectionFailed"
+				}
+			];
+		} finally {
+			await this.closeConnection(connection);
+		}
 	}
 
 	/**
@@ -265,6 +304,119 @@ export class ScyllaDBTableConnector<T = unknown>
 	}
 
 	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(ScyllaDBTableConnector.CLASS_NAME, nameof(entities), entities);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		for (const entity of entities) {
+			EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		}
+
+		let connection;
+		try {
+			connection = await this.openConnection();
+			const queries: { query: string; params: unknown[] }[] = [];
+
+			for (const entity of entities) {
+				const propValues: unknown[] = [];
+				const updateValues: string[] = [];
+				const finalConditions: { property: keyof T; value: unknown }[] = [];
+
+				finalConditions.push({
+					property: AbstractScyllaDBConnector.PARTITION_KEY as keyof T,
+					value: partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE
+				});
+
+				for (const propDesc of this._entitySchema.properties ?? []) {
+					if (!propDesc.isPrimary && !propDesc.isSecondary) {
+						propValues.push(this.propertyToDbValue(entity[propDesc.property], propDesc));
+						updateValues.push(`"${String(propDesc.property)}"=?`);
+					} else {
+						finalConditions.push({
+							property: propDesc.property,
+							value: this.propertyToDbValue(entity[propDesc.property], propDesc)
+						});
+					}
+				}
+
+				const { sqlCondition, conditionValues } = this.buildConditions(finalConditions);
+				propValues.push(...conditionValues);
+
+				const sql = `UPDATE "${this._fullTableName}" SET ${updateValues.join(",")} WHERE ${sqlCondition}`;
+				queries.push({ query: sql, params: propValues });
+			}
+
+			await connection.batch(queries, { prepare: true });
+		} catch (err) {
+			throw new GeneralError(ScyllaDBTableConnector.CLASS_NAME, "setBatchFailed", undefined, err);
+		} finally {
+			await this.closeConnection(connection);
+		}
+	}
+
+	/**
+	 * Remove all entities from the storage.
+	 * @param partitionKey The optional partition key.
+	 */
+	public async empty(partitionKey?: string): Promise<void> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const resolvedPartitionKey =
+			partitionKey ??
+			ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds) ??
+			AbstractScyllaDBConnector.PARTITION_KEY_VALUE;
+
+		let connection;
+		try {
+			connection = await this.openConnection();
+
+			const result = await this.queryDB(
+				connection,
+				`SELECT * FROM "${this._fullTableName}" WHERE "${AbstractScyllaDBConnector.PARTITION_KEY}" = ? ALLOW FILTERING`,
+				[resolvedPartitionKey],
+				undefined,
+				0
+			);
+
+			if (result.rows.length === 0) {
+				return;
+			}
+
+			const queries: { query: string; params: unknown[] }[] = [];
+
+			for (const row of result.rows) {
+				const conditions: { property: keyof T; value: unknown }[] = [
+					{
+						property: AbstractScyllaDBConnector.PARTITION_KEY as keyof T,
+						value: resolvedPartitionKey
+					}
+				];
+				for (const prop of this._entitySchema.properties ?? []) {
+					if (prop.isPrimary || prop.isSecondary) {
+						conditions.push({ property: prop.property, value: row[prop.property as string] });
+					}
+				}
+				const { sqlCondition, conditionValues } = this.buildConditions(conditions);
+				queries.push({
+					query: `DELETE FROM "${this._fullTableName}" WHERE ${sqlCondition}`,
+					params: conditionValues
+				});
+			}
+
+			await connection.batch(queries, { prepare: true });
+		} catch (err) {
+			throw new GeneralError(ScyllaDBTableConnector.CLASS_NAME, "emptyFailed", undefined, err);
+		} finally {
+			await this.closeConnection(connection);
+		}
+	}
+
+	/**
 	 * Remove the entity.
 	 * @param id The id of the entity to remove.
 	 * @param conditions The optional conditions to match for the entities.
@@ -318,21 +470,42 @@ export class ScyllaDBTableConnector<T = unknown>
 	}
 
 	/**
-	 * Drops table.
+	 * Remove multiple entities.
+	 * @param ids The ids of the entities to remove.
 	 */
-	public async dropTable(): Promise<void> {
-		let connection;
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(ScyllaDBTableConnector.CLASS_NAME, nameof(ids), ids);
 
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		let connection;
 		try {
 			connection = await this.openConnection();
+			const queries: { query: string; params: unknown[] }[] = [];
 
-			await connection.execute(`DROP TABLE IF EXISTS "${this._fullTableName}"`);
-		} catch (error) {
+			for (const id of ids) {
+				const conditions: { property: keyof T; value: unknown }[] = [
+					{
+						property: AbstractScyllaDBConnector.PARTITION_KEY as keyof T,
+						value: partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE
+					},
+					{ property: this._primaryKey.property, value: id }
+				];
+				const { sqlCondition, conditionValues } = this.buildConditions(conditions);
+				queries.push({
+					query: `DELETE FROM "${this._fullTableName}" WHERE ${sqlCondition}`,
+					params: conditionValues
+				});
+			}
+
+			await connection.batch(queries, { prepare: true });
+		} catch (err) {
 			throw new GeneralError(
 				ScyllaDBTableConnector.CLASS_NAME,
-				"dropTableFailed",
-				{ table: this._fullTableName },
-				error
+				"removeBatchFailed",
+				undefined,
+				err
 			);
 		} finally {
 			await this.closeConnection(connection);
@@ -340,22 +513,45 @@ export class ScyllaDBTableConnector<T = unknown>
 	}
 
 	/**
-	 * Truncates (clear) table.
+	 * Teardown the entity storage by dropping the table.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
 	 */
-	public async truncateTable(): Promise<void> {
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: ScyllaDBTableConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "tableDropping",
+			data: { table: this._fullTableName }
+		});
+
 		let connection;
 
 		try {
 			connection = await this.openConnection();
+			await connection.execute(`DROP TABLE IF EXISTS "${this._fullTableName}"`);
 
-			await connection.execute(`TRUNCATE TABLE "${this._fullTableName}"`);
-		} catch (error) {
-			throw new GeneralError(
-				ScyllaDBTableConnector.CLASS_NAME,
-				"truncateTableFailed",
-				{ table: this._fullTableName },
-				error
-			);
+			await nodeLogging?.log({
+				level: "info",
+				source: ScyllaDBTableConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "tableDropped",
+				data: { table: this._fullTableName }
+			});
+
+			return true;
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: ScyllaDBTableConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "teardownFailed",
+				error: BaseError.fromError(err)
+			});
+			return false;
 		} finally {
 			await this.closeConnection(connection);
 		}

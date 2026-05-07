@@ -1,6 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
+import { HealthStatus } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -243,6 +244,51 @@ describe("MemoryEntityStorageConnector", () => {
 		expect(result?.value1).toEqual(objectSet.value1);
 		expect(result?.value2).toEqual(objectSet.value2);
 		expect(result?.value3).toEqual(objectSet.value3);
+	});
+
+	test("can fail to set batch with no entities", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>()
+		});
+		await expect(entityStorage.setBatch(undefined as unknown as TestType[])).rejects.toMatchObject({
+			name: "GuardError",
+			message: "guard.array",
+			properties: {
+				property: "entities",
+				value: "undefined"
+			}
+		});
+	});
+
+	test("can set batch of items", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>()
+		});
+		await entityStorage.setBatch([
+			{ id: "1", value1: "aaa", value2: 10 },
+			{ id: "2", value1: "bbb", value2: 20 },
+			{ id: "3", value1: "ccc", value2: 30 }
+		]);
+		expect(entityStorage.getStore().length).toEqual(3);
+		const result1 = await entityStorage.get("1");
+		expect(result1?.value1).toEqual("aaa");
+		const result3 = await entityStorage.get("3");
+		expect(result3?.value2).toEqual(30);
+	});
+
+	test("can set batch updating existing items", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>()
+		});
+		await entityStorage.set({ id: "1", value1: "aaa", value2: 10 });
+		await entityStorage.setBatch([
+			{ id: "1", value1: "aaa-updated", value2: 99 },
+			{ id: "2", value1: "bbb", value2: 20 }
+		]);
+		expect(entityStorage.getStore().length).toEqual(2);
+		const result = await entityStorage.get("1");
+		expect(result?.value1).toEqual("aaa-updated");
+		expect(result?.value2).toEqual(99);
 	});
 
 	test("can fail to get an item with no id", async () => {
@@ -993,5 +1039,99 @@ describe("MemoryEntityStorageConnector", () => {
 			expect.arrayContaining(["1", "3"])
 		);
 		expect(result.entities.map(e => (e as ExpiryTestType).id)).not.toContain("2");
+	});
+
+	describe("health", () => {
+		test("can get health as ok", async () => {
+			const entityStorage = new MemoryEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>()
+			});
+			const result = await entityStorage.health();
+			expect(result).toHaveLength(1);
+			expect(result[0].status).toEqual(HealthStatus.Ok);
+			expect(result[0].description).toEqual("healthDescription");
+		});
+	});
+
+	test("can empty with no items", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>()
+		});
+		await entityStorage.empty();
+		expect(await entityStorage.count()).toEqual(0);
+	});
+
+	test("can empty the store", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>()
+		});
+		await entityStorage.set({ id: "1", value1: "aaa", value2: 35 });
+		await entityStorage.set({ id: "2", value1: "bbb", value2: 36 });
+		await entityStorage.set({ id: "3", value1: "ccc", value2: 37 });
+		await entityStorage.empty();
+		expect(await entityStorage.count()).toEqual(0);
+	});
+
+	test("can fail to remove batch with no ids", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>()
+		});
+		await expect(entityStorage.removeBatch(undefined as unknown as string[])).rejects.toMatchObject(
+			{
+				name: "GuardError",
+				message: "guard.array",
+				properties: { property: "ids", value: "undefined" }
+			}
+		);
+	});
+
+	test("can remove batch of items", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>()
+		});
+		await entityStorage.set({ id: "1", value1: "aaa", value2: 35 });
+		await entityStorage.set({ id: "2", value1: "bbb", value2: 36 });
+		await entityStorage.set({ id: "3", value1: "ccc", value2: 37 });
+		await entityStorage.removeBatch(["1", "2"]);
+		expect(await entityStorage.count()).toEqual(1);
+		expect(await entityStorage.get("3")).toBeDefined();
+	});
+
+	test("can teardown the store", async () => {
+		const entityStorage = new MemoryEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>()
+		});
+		await entityStorage.set({ id: "1", value1: "aaa", value2: 35 });
+		await entityStorage.set({ id: "2", value1: "bbb", value2: 36 });
+		await entityStorage.teardown();
+		expect(await entityStorage.count()).toEqual(0);
+	});
+
+	describe("count", () => {
+		test("can count items", async () => {
+			const entityStorage = new MemoryEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>()
+			});
+			await entityStorage.set({ id: "1", value1: "aaa", value2: 35 });
+			await entityStorage.set({ id: "2", value1: "bbb", value2: 36 });
+			await entityStorage.set({ id: "3", value1: "ccc", value2: 37 });
+			const result = await entityStorage.count();
+			expect(result).toEqual(3);
+		});
+
+		test("can count items with a partition key", async () => {
+			const entityStorage = new MemoryEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				partitionContextIds: ["node", "tenant", "user"]
+			});
+			currentUser = "user1";
+			await entityStorage.set({ id: "1", value1: "aaa", value2: 35 });
+			await entityStorage.set({ id: "2", value1: "bbb", value2: 36 });
+			currentUser = "user2";
+			await entityStorage.set({ id: "3", value1: "ccc", value2: 37 });
+			currentUser = "user1";
+			const result = await entityStorage.count();
+			expect(result).toEqual(2);
+		});
 	});
 });

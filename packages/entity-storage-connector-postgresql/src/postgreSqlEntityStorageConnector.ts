@@ -7,8 +7,10 @@ import {
 	ComponentFactory,
 	GeneralError,
 	Guards,
+	HealthStatus,
 	Is,
-	ObjectHelper
+	ObjectHelper,
+	type IHealth
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
@@ -224,6 +226,33 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	}
 
 	/**
+	 * Get the health of the component.
+	 * @returns The health of the component.
+	 */
+	public async health(): Promise<IHealth[]> {
+		try {
+			const sql = await this.createConnection();
+			await sql`SELECT 1 FROM ${sql(this._config.tableName)} LIMIT 0`;
+			return [
+				{
+					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Ok,
+					description: "healthDescription"
+				}
+			];
+		} catch {
+			return [
+				{
+					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Error,
+					description: "healthDescription",
+					message: "connectionFailed"
+				}
+			];
+		}
+	}
+
+	/**
 	 * The component needs to be stopped when the node is closed.
 	 * @returns Nothing.
 	 */
@@ -370,12 +399,6 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 				partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
 			);
 
-			ObjectHelper.propertySet(
-				finalEntity,
-				PostgreSqlEntityStorageConnector._PARTITION_KEY,
-				partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
-			);
-
 			const keys: string[] = [];
 			const values: unknown[] = [];
 
@@ -405,6 +428,91 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 				{
 					id
 				},
+				err
+			);
+		}
+	}
+
+	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(PostgreSqlEntityStorageConnector.CLASS_NAME, nameof(entities), entities);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		for (const entity of entities) {
+			EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		}
+
+		try {
+			const props = [...(this._entitySchema.properties ?? [])];
+			props.unshift({
+				property: PostgreSqlEntityStorageConnector._PARTITION_KEY as keyof T,
+				type: EntitySchemaPropertyType.String
+			});
+			const keys = props.map(p => p.property as string);
+
+			const allValues: unknown[] = [];
+			const rowPlaceholders: string[] = [];
+
+			for (const entity of entities) {
+				const finalEntity = ObjectHelper.clone(entity);
+				ObjectHelper.propertySet(
+					finalEntity,
+					PostgreSqlEntityStorageConnector._PARTITION_KEY,
+					partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
+				);
+
+				const rowValues: string[] = [];
+				for (const prop of props) {
+					const val = finalEntity[prop.property];
+					allValues.push(Is.empty(val) ? null : val);
+					rowValues.push(`$${allValues.length}`);
+				}
+				rowPlaceholders.push(`(${rowValues.join(", ")})`);
+			}
+
+			let sql = `INSERT INTO "${this._config.tableName}"`;
+			sql += ` (${keys.map(key => `"${key}"`).join(", ")})`;
+			sql += ` VALUES ${rowPlaceholders.join(", ")}`;
+			sql += ` ON CONFLICT ("${PostgreSqlEntityStorageConnector._PARTITION_KEY}", "${this._primaryKeyProperty.property as string}")`;
+			sql += ` DO UPDATE SET ${keys.map(key => `"${key}" = EXCLUDED."${key}"`).join(", ")};`;
+
+			const dbConnection = await this.createConnection();
+			await dbConnection.unsafe(sql, allValues as ParameterOrJSON<never>[]);
+		} catch (err) {
+			throw new GeneralError(
+				PostgreSqlEntityStorageConnector.CLASS_NAME,
+				"setBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Empty all the entities.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const sql = `DELETE FROM "${this._config.tableName}" WHERE "${PostgreSqlEntityStorageConnector._PARTITION_KEY}" = $1`;
+			const dbConnection = await this.createConnection();
+			await dbConnection.unsafe(sql, [
+				partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
+			]);
+		} catch (err) {
+			throw new GeneralError(
+				PostgreSqlEntityStorageConnector.CLASS_NAME,
+				"emptyFailed",
+				undefined,
 				err
 			);
 		}
@@ -464,6 +572,79 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 				},
 				err
 			);
+		}
+	}
+
+	/**
+	 * Remove multiple entities by their primary key IDs.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(PostgreSqlEntityStorageConnector.CLASS_NAME, nameof(ids), ids);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const sql = `DELETE FROM "${this._config.tableName}" WHERE "${PostgreSqlEntityStorageConnector._PARTITION_KEY}" = $1 AND "${this._primaryKeyProperty.property as string}" = ANY($2)`;
+			const dbConnection = await this.createConnection();
+			await dbConnection.unsafe(sql, [
+				partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE,
+				ids
+			] as ParameterOrJSON<never>[]);
+		} catch (err) {
+			throw new GeneralError(
+				PostgreSqlEntityStorageConnector.CLASS_NAME,
+				"removeBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Teardown the entity storage by dropping the table.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "tableDropping",
+			data: { tableName: this._config.tableName }
+		});
+
+		try {
+			const tableExists = await this.tableExists();
+			if (tableExists) {
+				const dbConnection = await this.createConnection();
+				await dbConnection.unsafe(`DROP TABLE "${this._config.tableName}";`);
+				await this.waitForTableNotExists();
+			}
+
+			await nodeLogging?.log({
+				level: "info",
+				source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "tableDropped",
+				data: { tableName: this._config.tableName }
+			});
+
+			return true;
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "teardownFailed",
+				error: BaseError.fromError(err)
+			});
+			return false;
 		}
 	}
 
@@ -582,21 +763,28 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	}
 
 	/**
-	 * Drop the table.
-	 * @returns Nothing.
+	 * Count all the entities which match the conditions.
+	 * @returns The total count of entities in the storage.
 	 */
-	public async tableDrop(): Promise<void> {
+	public async count(): Promise<number> {
 		try {
-			const tableExists = await this.tableExists();
-			if (!tableExists) {
-				return;
-			}
-			const dbConnection = await this.createConnection();
-			await dbConnection.unsafe(`DROP TABLE "${this._config.tableName}";`);
+			const contextIds = await ContextIdStore.getContextIds();
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				contextIds,
+				this._partitionContextIds
+			);
 
-			await this.waitForTableNotExists();
-		} catch {
-			// Ignore errors
+			const sql = await this.createConnection();
+			const result =
+				await sql`SELECT COUNT(*) AS count FROM ${sql(this._config.tableName)} WHERE "partitionId" = ${partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE}`;
+			return Number(result[0].count);
+		} catch (err) {
+			throw new GeneralError(
+				PostgreSqlEntityStorageConnector.CLASS_NAME,
+				"countFailed",
+				undefined,
+				err
+			);
 		}
 	}
 

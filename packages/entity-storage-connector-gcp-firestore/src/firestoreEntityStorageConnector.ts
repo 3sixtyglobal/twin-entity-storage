@@ -13,6 +13,8 @@ import {
 	Converter,
 	GeneralError,
 	Guards,
+	HealthStatus,
+	type IHealth,
 	Is,
 	ObjectHelper
 } from "@twin.org/core";
@@ -145,6 +147,32 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	 */
 	public className(): string {
 		return FirestoreEntityStorageConnector.CLASS_NAME;
+	}
+
+	/**
+	 * Returns the health status of the component.
+	 * @returns The health status of the component.
+	 */
+	public async health(): Promise<IHealth[]> {
+		try {
+			await this._firestoreClient.listCollections();
+			return [
+				{
+					source: FirestoreEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Ok,
+					description: "healthDescription"
+				}
+			];
+		} catch {
+			return [
+				{
+					source: FirestoreEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Error,
+					description: "healthDescription",
+					message: "connectionFailed"
+				}
+			];
+		}
 	}
 
 	/**
@@ -326,6 +354,74 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	}
 
 	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(FirestoreEntityStorageConnector.CLASS_NAME, nameof(entities), entities);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		for (const entity of entities) {
+			EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		}
+
+		try {
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const chunkSize = 500;
+			for (let i = 0; i < entities.length; i += chunkSize) {
+				const chunk = entities.slice(i, i + chunkSize);
+				const batch = this._firestoreClient.batch();
+				for (const entity of chunk) {
+					const id = entity[this._primaryKey.property] as string;
+					const docRef = collection.doc(id);
+					batch.set(docRef, entity as { [key: string]: unknown });
+				}
+				await batch.commit();
+			}
+		} catch (err) {
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"setBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Empty the storage by deleting all entities in the collection.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const snapshot = await collection.get();
+			const chunkSize = 500;
+			for (let i = 0; i < snapshot.docs.length; i += chunkSize) {
+				const chunk = snapshot.docs.slice(i, i + chunkSize);
+				const batch = this._firestoreClient.batch();
+				for (const doc of chunk) {
+					batch.delete(doc.ref);
+				}
+				await batch.commit();
+			}
+		} catch (err) {
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"emptyFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
 	 * Remove the entity.
 	 * @param id The id of the entity to remove.
 	 * @param conditions The optional conditions to apply to the delete.
@@ -373,6 +469,89 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 				{ id },
 				err
 			);
+		}
+	}
+
+	/**
+	 * Remove multiple entities by their primary key IDs using a Firestore WriteBatch.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(FirestoreEntityStorageConnector.CLASS_NAME, nameof(ids), ids);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const chunkSize = 500;
+			for (let i = 0; i < ids.length; i += chunkSize) {
+				const chunk = ids.slice(i, i + chunkSize);
+				const batch = this._firestoreClient.batch();
+				for (const id of chunk) {
+					const docRef = collection.doc(id);
+					batch.delete(docRef);
+				}
+				await batch.commit();
+			}
+		} catch (err) {
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"removeBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Teardown the storage by deleting all documents in the partition collection.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: FirestoreEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "storeTearingDown"
+		});
+
+		try {
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const snapshot = await collection.get();
+			const chunkSize = 500;
+			for (let i = 0; i < snapshot.docs.length; i += chunkSize) {
+				const chunk = snapshot.docs.slice(i, i + chunkSize);
+				const batch = this._firestoreClient.batch();
+				for (const doc of chunk) {
+					batch.delete(doc.ref);
+				}
+				await batch.commit();
+			}
+
+			await nodeLogging?.log({
+				level: "info",
+				source: FirestoreEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "storeTornDown"
+			});
+
+			return true;
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: FirestoreEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "teardownFailed",
+				error: BaseError.fromError(err)
+			});
+			return false;
 		}
 	}
 
@@ -465,23 +644,26 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	}
 
 	/**
-	 * Delete all entities in the collection.
-	 * @returns Nothing.
-	 * @internal
+	 * Count all the entities which match the conditions.
+	 * @returns The total count of entities in the storage.
 	 */
-	public async collectionDelete(): Promise<void> {
-		const collection = this._firestoreClient.collection(this.collectionName());
-		const batchSize = 500;
-		const query = collection.limit(batchSize);
-
+	public async count(): Promise<number> {
 		try {
-			await this.deleteQueryBatch(query, batchSize);
-		} catch (error) {
+			const contextIds = await ContextIdStore.getContextIds();
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				contextIds,
+				this._partitionContextIds
+			);
+
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const snapshot = await collection.count().get();
+			return snapshot.data().count;
+		} catch (err) {
 			throw new GeneralError(
 				FirestoreEntityStorageConnector.CLASS_NAME,
-				"collectionDeleteFailed",
-				{ collectionName: this._config.collectionName },
-				error
+				"countFailed",
+				undefined,
+				err
 			);
 		}
 	}
@@ -532,30 +714,6 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 					"unsupportedComparisonOperator",
 					{ comparison }
 				);
-		}
-	}
-
-	/**
-	 * Delete all entities in the collection.
-	 * @returns Nothing.
-	 * @internal
-	 */
-	private async deleteQueryBatch(query: Query, batchSize: number): Promise<void> {
-		const snapshot = await query.get();
-
-		if (snapshot.size === 0) {
-			return;
-		}
-
-		const batch = this._firestoreClient.batch();
-		for (const doc of snapshot.docs) {
-			batch.delete(doc.ref);
-		}
-
-		await batch.commit();
-
-		if (snapshot.size === batchSize) {
-			await this.deleteQueryBatch(query, batchSize);
 		}
 	}
 

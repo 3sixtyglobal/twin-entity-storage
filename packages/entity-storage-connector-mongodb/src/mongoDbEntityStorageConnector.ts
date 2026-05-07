@@ -6,6 +6,8 @@ import {
 	ComponentFactory,
 	GeneralError,
 	Guards,
+	HealthStatus,
+	type IHealth,
 	Is,
 	ObjectHelper
 } from "@twin.org/core";
@@ -174,11 +176,49 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 	}
 
 	/**
+	 * The component needs to be stopped when the node is closed.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns Nothing.
+	 */
+	public async stop?(nodeLoggingComponentType?: string): Promise<void> {
+		await this._client.close();
+	}
+
+	/**
 	 * Returns the class name of the component.
 	 * @returns The class name of the component.
 	 */
 	public className(): string {
 		return MongoDbEntityStorageConnector.CLASS_NAME;
+	}
+
+	/**
+	 * Returns the health status of the component.
+	 * @returns The health status of the component.
+	 */
+	public async health(): Promise<IHealth[]> {
+		try {
+			await this._client
+				.db(this._config.database)
+				.collection(this._config.collection)
+				.estimatedDocumentCount();
+			return [
+				{
+					source: MongoDbEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Ok,
+					description: "healthDescription"
+				}
+			];
+		} catch {
+			return [
+				{
+					source: MongoDbEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Error,
+					description: "healthDescription",
+					message: "connectionFailed"
+				}
+			];
+		}
 	}
 
 	/**
@@ -294,6 +334,88 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 	}
 
 	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(MongoDbEntityStorageConnector.CLASS_NAME, nameof(entities), entities);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
+
+		for (const entity of entities) {
+			EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		}
+
+		try {
+			const collection = await this.getCollection();
+			await collection.bulkWrite(
+				entities.map(entity => {
+					const finalEntity = ObjectHelper.clone(entity);
+					const filter: { [key: string]: unknown } = {
+						[primaryKey.property]: entity[primaryKey.property]
+					};
+					if (Is.stringValue(partitionKey)) {
+						filter[MongoDbEntityStorageConnector._PARTITION_KEY] = partitionKey;
+						ObjectHelper.propertySet(
+							finalEntity,
+							MongoDbEntityStorageConnector._PARTITION_KEY,
+							partitionKey
+						);
+					}
+					return {
+						updateOne: {
+							filter,
+							update: {
+								$set: ObjectHelper.removeEmptyProperties(finalEntity) as Partial<Document>
+							},
+							upsert: true
+						}
+					};
+				})
+			);
+		} catch (err) {
+			throw new GeneralError(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				"setBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Empty the entity storage.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		try {
+			const contextIds = await ContextIdStore.getContextIds();
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				contextIds,
+				this._partitionContextIds
+			);
+
+			const filter: { [key: string]: unknown } = {};
+			if (Is.stringValue(partitionKey)) {
+				filter[MongoDbEntityStorageConnector._PARTITION_KEY] = partitionKey;
+			}
+
+			const collection = await this.getCollection();
+			await collection.deleteMany(filter);
+		} catch (err) {
+			throw new GeneralError(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				"emptyFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
 	 * Remove the entity.
 	 * @param id The id of the entity to remove.
 	 * @param conditions The optional conditions to match for the entities.
@@ -326,6 +448,80 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 			await collection.deleteOne(query);
 		} catch (err) {
 			throw new GeneralError(MongoDbEntityStorageConnector.CLASS_NAME, "removeFailed", { id }, err);
+		}
+	}
+
+	/**
+	 * Remove multiple entities by id.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(MongoDbEntityStorageConnector.CLASS_NAME, nameof(ids), ids);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
+			const filter: { [key: string]: unknown } = {
+				[primaryKey.property]: { $in: ids }
+			};
+
+			if (Is.stringValue(partitionKey)) {
+				filter[MongoDbEntityStorageConnector._PARTITION_KEY] = partitionKey;
+			}
+
+			const collection = await this.getCollection();
+			await collection.deleteMany(filter);
+		} catch (err) {
+			throw new GeneralError(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				"removeBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Teardown the entity storage by dropping the collection.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: MongoDbEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "collectionDropping",
+			data: { collection: this._config.collection }
+		});
+
+		try {
+			const collection = await this.getCollection();
+			await collection.drop();
+
+			await nodeLogging?.log({
+				level: "info",
+				source: MongoDbEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "collectionDropped",
+				data: { collection: this._config.collection }
+			});
+
+			return true;
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: MongoDbEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "teardownFailed",
+				error: BaseError.fromError(err)
+			});
+			return false;
 		}
 	}
 
@@ -413,15 +609,33 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 	}
 
 	/**
-	 * Drop the collection.
-	 * @returns Nothing.
+	 * Count all the entities which match the conditions.
+	 * @returns The total count of entities in the storage.
 	 */
-	public async collectionDrop(): Promise<void> {
+	public async count(): Promise<number> {
 		try {
-			const collection = await this.getCollection();
-			await collection.drop();
-		} catch {
-			// Ignore errors
+			const contextIds = await ContextIdStore.getContextIds();
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				contextIds,
+				this._partitionContextIds
+			);
+
+			const filter: { [key: string]: unknown } = {};
+			if (Is.stringValue(partitionKey)) {
+				filter[MongoDbEntityStorageConnector._PARTITION_KEY] = partitionKey;
+			}
+
+			return await this._client
+				.db(this._config.database)
+				.collection(this._config.collection)
+				.countDocuments(filter);
+		} catch (err) {
+			throw new GeneralError(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				"countFailed",
+				undefined,
+				err
+			);
 		}
 	}
 

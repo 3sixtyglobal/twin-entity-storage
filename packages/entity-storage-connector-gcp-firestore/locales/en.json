@@ -2,7 +2,9 @@
 	"info": {
 		"firestoreEntityStorageConnector": {
 			"firestoreCreating": "Creating Firestore",
-			"firestoreCreated": "Created Firestore"
+			"firestoreCreated": "Created Firestore",
+			"storeTearingDown": "Tearing down entity storage",
+			"storeTornDown": "Entity storage torn down"
 		}
 	},
 	"error": {
@@ -12,8 +14,18 @@
 			"getEntityFailed": "Failed to get entity \"{id}\"",
 			"removeEntityFailed": "Failed to remove entity \"{id}\"",
 			"queryFailed": "The query failed when issuing the following command \"{queryDescription}\"",
-			"collectionDeleteFailed": "Failed to delete collection \"{collectionName}\"",
-			"unsupportedComparisonOperator": "Comparison operator \"{comparison}\" is not supported"
+			"unsupportedComparisonOperator": "Comparison operator \"{comparison}\" is not supported",
+			"setBatchFailed": "Failed to set batch of entities",
+			"countFailed": "Unable to count entities",
+			"emptyFailed": "Failed to empty entity storage",
+			"removeBatchFailed": "Unable to remove batch of entities",
+			"teardownFailed": "Unable to teardown entity storage"
+		}
+	},
+	"health": {
+		"firestoreEntityStorageConnector": {
+			"healthDescription": "Checks if the Firestore connection is available",
+			"connectionFailed": "Failed to connect to Firestore"
 		}
 	}
 }

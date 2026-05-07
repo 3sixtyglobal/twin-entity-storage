@@ -33,7 +33,10 @@
 		"regclass",
 		"scylladb",
 		"Stiftung",
+		"statfs",
+		"bavail",
 		"TINYINT",
+		"teardown",
 		"unmarshall"
 	],
 	"ignoreRegExpList": [

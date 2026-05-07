@@ -3,12 +3,25 @@
 		"fileEntityStorageConnector": {
 			"directoryCreating": "Creating directory \"{directory}\"",
 			"directoryCreated": "Created directory \"{directory}\"",
-			"directoryExists": "Skipping create directory \"{directory}\" as it already exists"
+			"directoryExists": "Skipping create directory \"{directory}\" as it already exists",
+			"storeTearingDown": "Tearing down entity storage",
+			"storeTornDown": "Entity storage torn down"
 		}
 	},
 	"error": {
 		"fileEntityStorageConnector": {
-			"directoryCreateFailed": "Creating directory \"{directory}\" failed"
+			"directoryCreateFailed": "Creating directory \"{directory}\" failed",
+			"emptyFailed": "Unable to empty entity storage",
+			"removeBatchFailed": "Unable to remove batch of entities",
+			"teardownFailed": "Unable to teardown entity storage"
+		}
+	},
+	"health": {
+		"fileEntityStorageConnector": {
+			"healthDescription": "Checks if there is sufficient disk space for the file entity storage connector to operate properly",
+			"diskSpaceError": "Disk space critically low, {freeBytes} bytes free, threshold is {thresholdBytes} bytes",
+			"diskSpaceCheckFailed": "Failed to check disk space",
+			"diskSpaceWarning": "Disk space low, {freeBytes} bytes free, threshold is {thresholdBytes} bytes"
 		}
 	}
 }

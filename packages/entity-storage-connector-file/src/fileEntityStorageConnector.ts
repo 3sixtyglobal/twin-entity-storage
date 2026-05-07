@@ -1,9 +1,19 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, statfs, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
-import { BaseError, Coerce, ComponentFactory, Guards, Is, ObjectHelper } from "@twin.org/core";
+import {
+	BaseError,
+	Coerce,
+	ComponentFactory,
+	GeneralError,
+	Guards,
+	HealthStatus,
+	type IHealth,
+	Is,
+	ObjectHelper
+} from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntityConditions,
@@ -43,6 +53,18 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	private static readonly _PARTITION_KEY: string = "partitionId";
 
 	/**
+	 * Default disk space warning threshold: 500 MB.
+	 * @internal
+	 */
+	private static readonly _DEFAULT_DISK_WARNING_THRESHOLD_BYTES: number = 500 * 1024 * 1024;
+
+	/**
+	 * Default disk space error threshold: 100 MB.
+	 * @internal
+	 */
+	private static readonly _DEFAULT_DISK_ERROR_THRESHOLD_BYTES: number = 100 * 1024 * 1024;
+
+	/**
 	 * The schema for the entity.
 	 * @internal
 	 */
@@ -67,6 +89,18 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	private readonly _directory: string;
 
 	/**
+	 * Free bytes below which health reports an error.
+	 * @internal
+	 */
+	private readonly _diskErrorThresholdBytes: number;
+
+	/**
+	 * Free bytes below which health reports a warning.
+	 * @internal
+	 */
+	private readonly _diskWarningThresholdBytes: number;
+
+	/**
 	 * Create a new instance of FileEntityStorageConnector.
 	 * @param options The options for the connector.
 	 */
@@ -87,6 +121,12 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 		this._directory = path.resolve(options.config.directory);
+		this._diskErrorThresholdBytes =
+			options.config.diskErrorThresholdBytes ??
+			FileEntityStorageConnector._DEFAULT_DISK_ERROR_THRESHOLD_BYTES;
+		this._diskWarningThresholdBytes =
+			options.config.diskWarningThresholdBytes ??
+			FileEntityStorageConnector._DEFAULT_DISK_WARNING_THRESHOLD_BYTES;
 	}
 
 	/**
@@ -180,6 +220,55 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	}
 
 	/**
+	 * Returns the health status of the component.
+	 * @returns The health status of the component, can return multiple entries for elements within the component.
+	 */
+	public async health(): Promise<IHealth[]> {
+		try {
+			const stats = await statfs(this._directory);
+			const freeBytes = stats.bavail * stats.bsize;
+
+			if (freeBytes < this._diskErrorThresholdBytes) {
+				return [
+					{
+						source: FileEntityStorageConnector.CLASS_NAME,
+						status: HealthStatus.Error,
+						description: "healthDescription",
+						message: "diskSpaceError",
+						data: { freeBytes, thresholdBytes: this._diskErrorThresholdBytes }
+					}
+				];
+			} else if (freeBytes < this._diskWarningThresholdBytes) {
+				return [
+					{
+						source: FileEntityStorageConnector.CLASS_NAME,
+						status: HealthStatus.Warning,
+						description: "healthDescription",
+						message: "diskSpaceWarning",
+						data: { freeBytes, thresholdBytes: this._diskWarningThresholdBytes }
+					}
+				];
+			}
+			return [
+				{
+					source: FileEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Ok,
+					description: "healthDescription"
+				}
+			];
+		} catch {
+			return [
+				{
+					source: FileEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Error,
+					description: "healthDescription",
+					message: "diskSpaceCheckFailed"
+				}
+			];
+		}
+	}
+
+	/**
 	 * Get the schema for the entities.
 	 * @returns The schema for the entities.
 	 */
@@ -268,6 +357,154 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		}
 
 		await this.writeStore(store);
+	}
+
+	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(FileEntityStorageConnector.CLASS_NAME, nameof(entities), entities);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const store = await this.readStore();
+
+		for (const entity of entities) {
+			Guards.object<T>(FileEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
+			EntitySchemaHelper.validateEntity(entity, this.getSchema());
+
+			const finalEntity = ObjectHelper.clone(entity);
+
+			if (Is.stringValue(partitionKey)) {
+				ObjectHelper.propertySet(
+					finalEntity,
+					FileEntityStorageConnector._PARTITION_KEY,
+					partitionKey
+				);
+			}
+
+			const existingIndex = this.findItem(
+				store,
+				finalEntity[this._primaryKey.property] as string,
+				undefined,
+				Is.stringValue(partitionKey)
+					? [
+							{
+								property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
+								value: partitionKey
+							}
+						]
+					: []
+			);
+			if (existingIndex >= 0) {
+				store[existingIndex] = finalEntity;
+			} else {
+				store.push(finalEntity);
+			}
+		}
+
+		await this.writeStore(store);
+	}
+
+	/**
+	 * Remove all entities from the storage.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const store = await this.readStore();
+			const remaining = Is.stringValue(partitionKey)
+				? store.filter(
+						item =>
+							ObjectHelper.propertyGet(
+								item as object,
+								FileEntityStorageConnector._PARTITION_KEY
+							) !== partitionKey
+					)
+				: [];
+			await this.writeStore(remaining);
+		} catch (err) {
+			throw new GeneralError(FileEntityStorageConnector.CLASS_NAME, "emptyFailed", undefined, err);
+		}
+	}
+
+	/**
+	 * Remove multiple entities by id.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(FileEntityStorageConnector.CLASS_NAME, nameof(ids), ids);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const store = await this.readStore();
+			const idSet = new Set(ids);
+			const remaining = store.filter(item => {
+				if (
+					Is.stringValue(partitionKey) &&
+					ObjectHelper.propertyGet(item as object, FileEntityStorageConnector._PARTITION_KEY) !==
+						partitionKey
+				) {
+					return true;
+				}
+				return !idSet.has(item[this._primaryKey.property] as string);
+			});
+			await this.writeStore(remaining);
+		} catch (err) {
+			throw new GeneralError(
+				FileEntityStorageConnector.CLASS_NAME,
+				"removeBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Teardown the storage by deleting the underlying store file.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: FileEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "storeTearingDown"
+		});
+
+		try {
+			const filename = path.join(this._directory, "store.json");
+			await unlink(filename);
+
+			await nodeLogging?.log({
+				level: "info",
+				source: FileEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "storeTornDown"
+			});
+
+			return true;
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: FileEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "teardownFailed",
+				error: BaseError.fromError(err)
+			});
+			return false;
+		}
 	}
 
 	/**
@@ -391,6 +628,27 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 			entities,
 			cursor: nextCursor
 		};
+	}
+
+	/**
+	 * Count all the entities which match the conditions.
+	 * @returns The total count of entities in the storage.
+	 */
+	public async count(): Promise<number> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const store = await this.readStore();
+
+		if (!Is.stringValue(partitionKey)) {
+			return store.length;
+		}
+
+		return store.filter(
+			item =>
+				ObjectHelper.propertyGet(item as object, FileEntityStorageConnector._PARTITION_KEY) ===
+				partitionKey
+		).length;
 	}
 
 	/**

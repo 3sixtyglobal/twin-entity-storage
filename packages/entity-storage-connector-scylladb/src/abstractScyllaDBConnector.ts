@@ -423,6 +423,30 @@ export abstract class AbstractScyllaDBConnector<T> {
 	}
 
 	/**
+	 * Count all the entities which match the conditions.
+	 * @returns The total count of entities in the storage.
+	 */
+	public async count(): Promise<number> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		let connection;
+		try {
+			connection = await this.openConnection();
+			const result = await this.queryDB(
+				connection,
+				`SELECT COUNT(*) FROM "${this._fullTableName}" WHERE "${AbstractScyllaDBConnector.PARTITION_KEY}" = ? ALLOW FILTERING`,
+				[partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE]
+			);
+			return Number(result.rows[0]?.get("count") ?? 0);
+		} catch (err) {
+			throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "countFailed", undefined, err);
+		} finally {
+			await this.closeConnection(connection);
+		}
+	}
+
+	/**
 	 * Open a new database connection.
 	 * @param config The config for the connection.
 	 * @param skipKeySpace Don't include the keyspace in the connection.

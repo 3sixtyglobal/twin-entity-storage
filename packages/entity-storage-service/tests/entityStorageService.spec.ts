@@ -63,6 +63,56 @@ describe("EntityStorageService", () => {
 		expect(storage.getStore()).toEqual([{ id: "1", value1: "value1", value2: 42 }]);
 	});
 
+	test("can set batch of entities", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
+		});
+		await service.setBatch([
+			{ id: "1", value1: "value1", value2: 42 },
+			{ id: "2", value1: "value2", value2: 43 },
+			{ id: "3", value1: "value3", value2: 44 }
+		]);
+
+		expect(storage.getStore()).toHaveLength(3);
+		expect(storage.getStore()[0]).toEqual({ id: "1", value1: "value1", value2: 42 });
+		expect(storage.getStore()[2]).toEqual({ id: "3", value1: "value3", value2: 44 });
+	});
+
+	test("can fail to set batch with no entities", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
+		});
+		await expect(service.setBatch(undefined as unknown as TestType[])).rejects.toMatchObject({
+			name: "GuardError",
+			message: "guard.array",
+			properties: { property: "entities", value: "undefined" }
+		});
+	});
+
+	test("can get an entity", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
+		});
+
+		await service.set({ id: "1", value1: "value1", value2: 42 });
+
+		const result = await service.get("1");
+
+		expect(result).toEqual({ id: "1", value1: "value1", value2: 42 });
+	});
+
+	test("can get an entity using a secondary index", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
+		});
+
+		await service.set({ id: "1", value1: "secondary-value", value2: 42 });
+
+		const result = await service.get("secondary-value", "value1");
+
+		expect(result).toEqual({ id: "1", value1: "secondary-value", value2: 42 });
+	});
+
 	test("can remove an entity", async () => {
 		const service = new EntityStorageService({
 			entityStorageType: "test-type"
@@ -92,5 +142,47 @@ describe("EntityStorageService", () => {
 			value1: "value1",
 			value2: 42
 		});
+	});
+
+	test("can empty with no items", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
+		});
+		await service.empty();
+		expect(await service.count()).toEqual(0);
+	});
+
+	test("can empty the store", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
+		});
+		await service.set({ id: "1", value1: "value1", value2: 42 });
+		await service.set({ id: "2", value1: "value2", value2: 43 });
+		await service.set({ id: "3", value1: "value3", value2: 44 });
+		await service.empty();
+		expect(await service.count()).toEqual(0);
+	});
+
+	test("can fail to remove batch with no ids", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
+		});
+		await expect(service.removeBatch(undefined as unknown as string[])).rejects.toMatchObject({
+			name: "GuardError",
+			message: "guard.array",
+			properties: { property: "ids", value: "undefined" }
+		});
+	});
+
+	test("can remove batch of items", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
+		});
+		await service.set({ id: "1", value1: "value1", value2: 42 });
+		await service.set({ id: "2", value1: "value2", value2: 43 });
+		await service.set({ id: "3", value1: "value3", value2: 44 });
+		await service.removeBatch(["1", "2"]);
+		expect(await service.count()).toEqual(1);
+		expect(await service.get("3")).toBeDefined();
 	});
 });

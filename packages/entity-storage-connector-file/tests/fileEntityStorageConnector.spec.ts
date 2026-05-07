@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0.
 import { readFile, rm } from "node:fs/promises";
 import { ContextIdStore } from "@twin.org/context";
-import { ComponentFactory, Converter, RandomHelper } from "@twin.org/core";
+import { ComponentFactory, Converter, HealthStatus, RandomHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -104,6 +104,14 @@ let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
 const TEST_DIRECTORY_ROOT = "./.tmp/";
 const TEST_DIRECTORY = `${TEST_DIRECTORY_ROOT}test-data-${Converter.bytesToHex(RandomHelper.generate(8))}`;
 const TEST_STORE_NAME = `${TEST_DIRECTORY}/store.json`;
+
+const { mockStatfs } = vi.hoisted(() => ({ mockStatfs: vi.fn() }));
+
+vi.mock("node:fs/promises", async importOriginal => {
+	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+	const actual = await importOriginal<typeof import("node:fs/promises")>();
+	return { ...actual, statfs: mockStatfs };
+});
 
 describe("FileEntityStorageConnector", () => {
 	beforeAll(async () => {
@@ -348,6 +356,43 @@ describe("FileEntityStorageConnector", () => {
 		expect(store[0].id).toEqual("1");
 		expect(store[0].value1).toEqual("ccc");
 		expect(store[0].value2).toEqual("ddd");
+	});
+
+	test("can set batch of items", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.setBatch([
+			{ id: "1", value1: "aaa", value2: "bbb" },
+			{ id: "2", value1: "ccc", value2: "ddd" },
+			{ id: "3", value1: "eee", value2: "fff" }
+		]);
+		const file = await readFile(TEST_STORE_NAME, "utf8");
+		const store = JSON.parse(file);
+		expect(store.length).toEqual(3);
+		expect(store[0].id).toEqual("1");
+		expect(store[1].id).toEqual("2");
+		expect(store[2].id).toEqual("3");
+	});
+
+	test("can set batch updating existing items", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap("logging");
+		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
+		await entityStorage.setBatch([
+			{ id: "1", value1: "aaa-updated", value2: "bbb-updated" },
+			{ id: "2", value1: "ccc", value2: "ddd" }
+		]);
+		const file = await readFile(TEST_STORE_NAME, "utf8");
+		const store = JSON.parse(file);
+		expect(store.length).toEqual(2);
+		expect(store[0].value1).toEqual("aaa-updated");
+		expect(store[1].id).toEqual("2");
 	});
 
 	test("can fail to get an item with no id", async () => {
@@ -926,6 +971,84 @@ describe("FileEntityStorageConnector", () => {
 		expect(result.entities.map(e => (e as ExpiryTestType).id)).toEqual(["2"]);
 	});
 
+	describe("health", () => {
+		afterEach(() => {
+			mockStatfs.mockReset();
+		});
+
+		test("can get health as ok when disk space is above both thresholds", async () => {
+			const entityStorage = new FileEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: { directory: TEST_DIRECTORY }
+			});
+			// 1 GB free — well above the 500 MB warning default
+			mockStatfs.mockResolvedValueOnce({ bsize: 4096, bavail: 262144 });
+			const result = await entityStorage.health();
+			expect(result).toHaveLength(1);
+			expect(result[0].status).toEqual(HealthStatus.Ok);
+			expect(result[0].message).toBeUndefined();
+		});
+
+		test("can get health as warning when disk space is below warning threshold", async () => {
+			const entityStorage = new FileEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: { directory: TEST_DIRECTORY }
+			});
+			// 300 MB free — below 500 MB warning default, above 100 MB error default
+			mockStatfs.mockResolvedValueOnce({ bsize: 4096, bavail: 76800 });
+			const result = await entityStorage.health();
+			expect(result).toHaveLength(1);
+			expect(result[0].status).toEqual(HealthStatus.Warning);
+			expect(result[0].message).toEqual("diskSpaceWarning");
+			expect(result[0].data?.freeBytes).toEqual(300 * 1024 * 1024);
+			expect(result[0].data?.thresholdBytes).toEqual(500 * 1024 * 1024);
+		});
+
+		test("can get health as error when disk space is below error threshold", async () => {
+			const entityStorage = new FileEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: { directory: TEST_DIRECTORY }
+			});
+			// 50 MB free — below 100 MB error default
+			mockStatfs.mockResolvedValueOnce({ bsize: 4096, bavail: 12800 });
+			const result = await entityStorage.health();
+			expect(result).toHaveLength(1);
+			expect(result[0].status).toEqual(HealthStatus.Error);
+			expect(result[0].message).toEqual("diskSpaceError");
+			expect(result[0].data?.freeBytes).toEqual(50 * 1024 * 1024);
+			expect(result[0].data?.thresholdBytes).toEqual(100 * 1024 * 1024);
+		});
+
+		test("can get health as error when statfs throws", async () => {
+			const entityStorage = new FileEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: { directory: TEST_DIRECTORY }
+			});
+			mockStatfs.mockRejectedValueOnce(new Error("ENOENT: no such file or directory"));
+			const result = await entityStorage.health();
+			expect(result).toHaveLength(1);
+			expect(result[0].status).toEqual(HealthStatus.Error);
+			expect(result[0].message).toEqual("diskSpaceCheckFailed");
+		});
+
+		test("can get health with custom thresholds", async () => {
+			const entityStorage = new FileEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: {
+					directory: TEST_DIRECTORY,
+					diskErrorThresholdBytes: 200 * 1024 * 1024,
+					diskWarningThresholdBytes: 1024 * 1024 * 1024
+				}
+			});
+			// 500 MB free — below custom 1 GB warning, above custom 200 MB error
+			mockStatfs.mockResolvedValueOnce({ bsize: 4096, bavail: 128000 });
+			const result = await entityStorage.health();
+			expect(result).toHaveLength(1);
+			expect(result[0].status).toEqual(HealthStatus.Warning);
+			expect(result[0].data?.thresholdBytes).toEqual(1024 * 1024 * 1024);
+		});
+	});
+
 	test("can query with NotEquals and null on an optional number field", async () => {
 		const entityStorage = new FileEntityStorageConnector<ExpiryTestType>({
 			entitySchema: nameof<ExpiryTestType>(),
@@ -957,5 +1080,82 @@ describe("FileEntityStorageConnector", () => {
 			expect.arrayContaining(["1", "3"])
 		);
 		expect(result.entities.map(e => (e as ExpiryTestType).id)).not.toContain("2");
+	});
+
+	test("can empty with no items", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap();
+		await entityStorage.empty();
+		expect(await entityStorage.count()).toEqual(0);
+	});
+
+	test("can empty the store", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap();
+		await entityStorage.set({ id: "1", value1: "aaa", value2: "35" });
+		await entityStorage.set({ id: "2", value1: "bbb", value2: "36" });
+		await entityStorage.set({ id: "3", value1: "ccc", value2: "37" });
+		await entityStorage.empty();
+		expect(await entityStorage.count()).toEqual(0);
+	});
+
+	test("can fail to remove batch with no ids", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await expect(entityStorage.removeBatch(undefined as unknown as string[])).rejects.toMatchObject(
+			{
+				name: "GuardError",
+				message: "guard.array",
+				properties: { property: "ids", value: "undefined" }
+			}
+		);
+	});
+
+	test("can remove batch of items", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap();
+		await entityStorage.set({ id: "1", value1: "aaa", value2: "35" });
+		await entityStorage.set({ id: "2", value1: "bbb", value2: "36" });
+		await entityStorage.set({ id: "3", value1: "ccc", value2: "37" });
+		await entityStorage.removeBatch(["1", "2"]);
+		expect(await entityStorage.count()).toEqual(1);
+		expect(await entityStorage.get("3")).toBeDefined();
+	});
+
+	test("can teardown the store", async () => {
+		const entityStorage = new FileEntityStorageConnector<TestType>({
+			entitySchema: nameof<TestType>(),
+			config: { directory: TEST_DIRECTORY }
+		});
+		await entityStorage.bootstrap();
+		await entityStorage.set({ id: "1", value1: "aaa", value2: "35" });
+		await entityStorage.teardown();
+		expect(await entityStorage.count()).toEqual(0);
+	});
+
+	describe("count", () => {
+		test("can count items", async () => {
+			const entityStorage = new FileEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: { directory: TEST_DIRECTORY }
+			});
+			await entityStorage.bootstrap();
+			await entityStorage.set({ id: "1", value1: "aaa", value2: "35" });
+			await entityStorage.set({ id: "2", value1: "bbb", value2: "36" });
+			await entityStorage.set({ id: "3", value1: "ccc", value2: "37" });
+			const result = await entityStorage.count();
+			expect(result).toEqual(3);
+		});
 	});
 });

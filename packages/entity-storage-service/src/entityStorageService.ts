@@ -1,13 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { Guards, Is, NotFoundError } from "@twin.org/core";
-import {
-	ComparisonOperator,
-	type EntityCondition,
-	EntitySchemaHelper,
-	LogicalOperator,
-	SortDirection
-} from "@twin.org/entity";
+import { Guards, Is } from "@twin.org/core";
+import { type EntityCondition, SortDirection } from "@twin.org/entity";
 import {
 	EntityStorageConnectorFactory,
 	type IEntityStorageComponent,
@@ -67,6 +61,17 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 	}
 
 	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(EntityStorageService.CLASS_NAME, nameof(entities), entities);
+
+		return this._entityStorage.setBatch(entities);
+	}
+
+	/**
 	 * Get an entity.
 	 * @param id The id of the entity to get, or the index value if secondaryIndex is set.
 	 * @param secondaryIndex Get the item using a secondary index.
@@ -75,7 +80,7 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 	public async get(id: string, secondaryIndex?: keyof T): Promise<T | undefined> {
 		Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(id), id);
 
-		return this.internalGet(id, secondaryIndex);
+		return this._entityStorage.get(id, secondaryIndex);
 	}
 
 	/**
@@ -87,6 +92,33 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 		Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(id), id);
 
 		await this._entityStorage.remove(id);
+	}
+
+	/**
+	 * Remove multiple entities by id.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(EntityStorageService.CLASS_NAME, nameof(ids), ids);
+
+		return this._entityStorage.removeBatch(ids);
+	}
+
+	/**
+	 * Remove all entities from the storage.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		return this._entityStorage.empty();
+	}
+
+	/**
+	 * Count all the entities which match the conditions.
+	 * @returns The total count of entities in the storage.
+	 */
+	public async count(): Promise<number> {
+		return this._entityStorage.count();
 	}
 
 	/**
@@ -128,59 +160,5 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 		);
 
 		return result;
-	}
-
-	/**
-	 * Get an entity.
-	 * @param id The id of the entity to get, or the index value if secondaryIndex is set.
-	 * @param secondaryIndex Get the item using a secondary index.
-	 * @returns The object if it can be found or throws.
-	 * @internal
-	 */
-	private async internalGet(id: string, secondaryIndex?: keyof T): Promise<T> {
-		const conditions: EntityCondition<T>[] = [];
-
-		if (Is.stringValue(secondaryIndex)) {
-			conditions.push({
-				property: secondaryIndex,
-				comparison: ComparisonOperator.Equals,
-				value: id
-			});
-		}
-
-		let entity: T | undefined;
-		if (conditions.length === 0) {
-			entity = await this._entityStorage.get(id, secondaryIndex);
-		} else {
-			if (!Is.stringValue(secondaryIndex)) {
-				const schema = this._entityStorage.getSchema();
-				const primaryKey = EntitySchemaHelper.getPrimaryKey(schema);
-
-				conditions.unshift({
-					property: primaryKey.property,
-					comparison: ComparisonOperator.Equals,
-					value: id
-				});
-			}
-
-			const results = await this._entityStorage.query(
-				{
-					conditions,
-					logicalOperator: LogicalOperator.And
-				},
-				undefined,
-				undefined,
-				undefined,
-				1
-			);
-
-			entity = results.entities[0] as T;
-		}
-
-		if (Is.empty(entity)) {
-			throw new NotFoundError(EntityStorageService.CLASS_NAME, "entityNotFound", id);
-		}
-
-		return entity;
 	}
 }

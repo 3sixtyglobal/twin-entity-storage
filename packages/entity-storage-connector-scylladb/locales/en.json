@@ -6,7 +6,9 @@
 			"tableCreating": "Creating table \"{table}\"",
 			"tableExists": "Skipping create table \"{table}\" as it already exists",
 			"typeCreating": "Creating type \"{typeName}\"",
-			"sql": "SQL: \"{sql}\""
+			"sql": "SQL: \"{sql}\"",
+			"tableDropping": "Dropping table \"{table}\"",
+			"tableDropped": "Table \"{table}\" dropped"
 		},
 		"scyllaDBViewConnector": {
 			"viewCreating": "Creating view \"{view}\"",
@@ -20,10 +22,12 @@
 	"error": {
 		"scyllaDBTableConnector": {
 			"tableCreateFailed": "Creating table \"{table}\" failed",
-			"dropTableFailed": " \"{table}\" cannot be dropped",
-			"truncateTableFailed": " \"{table}\" cannot be dropped",
 			"removeFailed": "Removing item with \"{id}\" failed",
-			"setFailed": "Setting item with \"{id}\" failed"
+			"setFailed": "Setting item with \"{id}\" failed",
+			"setBatchFailed": "Setting batch of items failed",
+			"emptyFailed": "Emptying entity storage failed",
+			"removeBatchFailed": "Remove batch of entities failed",
+			"teardownFailed": "Teardown entity storage failed"
 		},
 		"scyllaDBViewConnector": {
 			"viewCreateFailed": "Creating view \"{view}\" failed",
@@ -33,7 +37,14 @@
 			"getFailed": "Getting item with \"{id}\" failed",
 			"findFailed": "Error while querying data on  \"{table}\"",
 			"parseJSONFailed": "Parsing JSON failed for field \"{name}\" with value \"{value}\"",
-			"comparisonNotSupported": "Dot-notation nested property path \"{property}\" is not supported in CQL queries"
+			"comparisonNotSupported": "Dot-notation nested property path \"{property}\" is not supported in CQL queries",
+			"countFailed": "Unable to count entities"
+		}
+	},
+	"health": {
+		"scyllaDBTableConnector": {
+			"healthDescription": "Checks if the ScyllaDB connection is available",
+			"connectionFailed": "Failed to connect to ScyllaDB"
 		}
 	}
 }

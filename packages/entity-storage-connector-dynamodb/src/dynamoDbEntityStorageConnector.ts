@@ -10,10 +10,12 @@ import {
 	waitUntilTableExists
 } from "@aws-sdk/client-dynamodb";
 import {
+	BatchWriteCommand,
 	DeleteCommand,
 	DynamoDBDocumentClient,
 	GetCommand,
-	PutCommand
+	PutCommand,
+	ScanCommand
 } from "@aws-sdk/lib-dynamodb";
 import { type NativeAttributeValue, unmarshall } from "@aws-sdk/util-dynamodb";
 import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
@@ -24,6 +26,8 @@ import {
 	Converter,
 	GeneralError,
 	Guards,
+	HealthStatus,
+	type IHealth,
 	Is,
 	ObjectHelper
 } from "@twin.org/core";
@@ -155,6 +159,33 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 */
 	public className(): string {
 		return DynamoDbEntityStorageConnector.CLASS_NAME;
+	}
+
+	/**
+	 * Returns the health status of the component.
+	 * @returns The health status of the component.
+	 */
+	public async health(): Promise<IHealth[]> {
+		try {
+			const dbConnection = this.createConnection();
+			await dbConnection.describeTable({ TableName: this._config.tableName });
+			return [
+				{
+					source: DynamoDbEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Ok,
+					description: "healthDescription"
+				}
+			];
+		} catch {
+			return [
+				{
+					source: DynamoDbEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Error,
+					description: "healthDescription",
+					message: "connectionFailed"
+				}
+			];
+		}
 	}
 
 	/**
@@ -476,6 +507,131 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	}
 
 	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(DynamoDbEntityStorageConnector.CLASS_NAME, nameof(entities), entities);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		for (const entity of entities) {
+			EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		}
+
+		try {
+			const docClient = this.createDocClient();
+			const chunkSize = 25;
+
+			for (let i = 0; i < entities.length; i += chunkSize) {
+				const chunk = entities.slice(i, i + chunkSize);
+				await docClient.send(
+					new BatchWriteCommand({
+						RequestItems: {
+							[this._config.tableName]: chunk.map(entity => ({
+								PutRequest: {
+									Item: {
+										[DynamoDbEntityStorageConnector._PARTITION_KEY]:
+											partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE,
+										...entity
+									} as { [id: string]: unknown }
+								}
+							}))
+						}
+					})
+				);
+			}
+		} catch (err) {
+			if (BaseError.isErrorCode(err, "ResourceNotFoundException")) {
+				throw new GeneralError(
+					DynamoDbEntityStorageConnector.CLASS_NAME,
+					"tableDoesNotExist",
+					{ tableName: this._config.tableName },
+					err
+				);
+			}
+			throw new GeneralError(
+				DynamoDbEntityStorageConnector.CLASS_NAME,
+				"setBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Empty the entity storage.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		try {
+			const contextIds = await ContextIdStore.getContextIds();
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				contextIds,
+				this._partitionContextIds
+			);
+
+			const pKey = partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE;
+
+			const docClient = this.createDocClient();
+			const chunkSize = 25;
+
+			let exclusiveStartKey: { [key: string]: NativeAttributeValue } | undefined;
+
+			do {
+				const scanResult = await docClient.send(
+					new ScanCommand({
+						TableName: this._config.tableName,
+						FilterExpression: "#partitionId = :partitionId",
+						ExpressionAttributeNames: {
+							"#partitionId": DynamoDbEntityStorageConnector._PARTITION_KEY
+						},
+						ExpressionAttributeValues: {
+							":partitionId": pKey
+						},
+						ExclusiveStartKey: exclusiveStartKey
+					})
+				);
+
+				const items = scanResult.Items ?? [];
+
+				for (let i = 0; i < items.length; i += chunkSize) {
+					const chunk = items.slice(i, i + chunkSize);
+					await docClient.send(
+						new BatchWriteCommand({
+							RequestItems: {
+								[this._config.tableName]: chunk.map(
+									(item: { [key: string]: NativeAttributeValue }) => ({
+										DeleteRequest: {
+											Key: {
+												[DynamoDbEntityStorageConnector._PARTITION_KEY]:
+													item[DynamoDbEntityStorageConnector._PARTITION_KEY],
+												[this._primaryKey.property as string]:
+													item[this._primaryKey.property as string]
+											}
+										}
+									})
+								)
+							}
+						})
+					);
+				}
+
+				exclusiveStartKey = scanResult.LastEvaluatedKey;
+			} while (exclusiveStartKey);
+		} catch (err) {
+			throw new GeneralError(
+				DynamoDbEntityStorageConnector.CLASS_NAME,
+				"emptyFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
 	 * Remove the entity.
 	 * @param id The id of the entity to remove.
 	 * @param conditions The optional conditions to match for the entities.
@@ -536,6 +692,91 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	}
 
 	/**
+	 * Remove multiple entities by their IDs in a batch.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(DynamoDbEntityStorageConnector.CLASS_NAME, nameof(ids), ids);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const docClient = this.createDocClient();
+			const chunkSize = 25;
+			const primaryKeyProperty = this._primaryKey.property as string;
+
+			for (let i = 0; i < ids.length; i += chunkSize) {
+				const chunk = ids.slice(i, i + chunkSize);
+				await docClient.send(
+					new BatchWriteCommand({
+						RequestItems: {
+							[this._config.tableName]: chunk.map(id => ({
+								DeleteRequest: {
+									Key: {
+										[primaryKeyProperty]: id,
+										[DynamoDbEntityStorageConnector._PARTITION_KEY]:
+											partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE
+									}
+								}
+							}))
+						}
+					})
+				);
+			}
+		} catch (err) {
+			throw new GeneralError(
+				DynamoDbEntityStorageConnector.CLASS_NAME,
+				"removeBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Teardown the entity storage by deleting the underlying table.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: DynamoDbEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "tableDeleting",
+			data: { tableName: this._config.tableName }
+		});
+
+		try {
+			const dbConnection = this.createConnection();
+			await dbConnection.deleteTable({ TableName: this._config.tableName });
+
+			await nodeLogging?.log({
+				level: "info",
+				source: DynamoDbEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "tableDeleted",
+				data: { tableName: this._config.tableName }
+			});
+
+			return true;
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: DynamoDbEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "teardownFailed",
+				error: BaseError.fromError(err)
+			});
+			return false;
+		}
+	}
+
+	/**
 	 * Find all the entities which match the conditions.
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
@@ -579,15 +820,51 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	}
 
 	/**
-	 * Delete the table.
-	 * @returns Nothing.
+	 * Count all the entities which match the conditions.
+	 * @returns The total count of entities in the storage.
 	 */
-	public async tableDelete(): Promise<void> {
+	public async count(): Promise<number> {
 		try {
-			const dbConnection = this.createConnection();
+			const contextIds = await ContextIdStore.getContextIds();
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				contextIds,
+				this._partitionContextIds
+			);
 
-			await dbConnection.deleteTable({ TableName: this._config.tableName });
-		} catch {}
+			const dbConnection = this.createConnection();
+			let total = 0;
+			let exclusiveStartKey: { [key: string]: AttributeValue } | undefined;
+
+			do {
+				const result = await dbConnection.send(
+					new QueryCommand({
+						TableName: this._config.tableName,
+						Select: "COUNT",
+						KeyConditionExpression: "#partitionId = :partitionId",
+						ExpressionAttributeNames: {
+							"#partitionId": DynamoDbEntityStorageConnector._PARTITION_KEY
+						},
+						ExpressionAttributeValues: {
+							":partitionId": {
+								S: partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE
+							}
+						},
+						ExclusiveStartKey: exclusiveStartKey
+					})
+				);
+				total += result.Count ?? 0;
+				exclusiveStartKey = result.LastEvaluatedKey;
+			} while (exclusiveStartKey);
+
+			return total;
+		} catch (err) {
+			throw new GeneralError(
+				DynamoDbEntityStorageConnector.CLASS_NAME,
+				"countFailed",
+				undefined,
+				err
+			);
+		}
 	}
 
 	/**

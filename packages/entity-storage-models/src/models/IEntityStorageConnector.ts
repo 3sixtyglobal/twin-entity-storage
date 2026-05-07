@@ -22,6 +22,13 @@ export interface IEntityStorageConnector<T = unknown> extends IComponent {
 	set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void>;
 
 	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	setBatch(entities: T[]): Promise<void>;
+
+	/**
 	 * Get an entity.
 	 * @param id The id of the entity to get, or the index value if secondaryIndex is set.
 	 * @param secondaryIndex Get the item using a secondary index.
@@ -41,6 +48,13 @@ export interface IEntityStorageConnector<T = unknown> extends IComponent {
 	 * @returns Nothing.
 	 */
 	remove(id: string, conditions?: { property: keyof T; value: unknown }[]): Promise<void>;
+
+	/**
+	 * Remove multiple entities by id.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	removeBatch(ids: string[]): Promise<void>;
 
 	/**
 	 * Query all the entities which match the conditions.
@@ -71,4 +85,16 @@ export interface IEntityStorageConnector<T = unknown> extends IComponent {
 		 */
 		cursor?: string;
 	}>;
+
+	/**
+	 * Remove all entities from the storage.
+	 * @returns Nothing.
+	 */
+	empty(): Promise<void>;
+
+	/**
+	 * Count all the entities which match the conditions.
+	 * @returns The total count of entities in the storage.
+	 */
+	count(): Promise<number>;
 }
