@@ -56,6 +56,28 @@ The id of the entity.
 
 ***
 
+### setBatch() {#setbatch}
+
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+***
+
 ### get() {#get}
 
 > **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
@@ -118,6 +140,28 @@ Nothing.
 
 ***
 
+### removeBatch() {#removebatch}
+
+> **removeBatch**(`ids`): `Promise`\<`void`\>
+
+Remove multiple entities by id.
+
+#### Parameters
+
+##### ids
+
+`string`[]
+
+The ids of the entities to remove.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+***
+
 ### query() {#query}
 
 > **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `limit?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
@@ -162,3 +206,31 @@ The suggested number of entities to return in each chunk, in some scenarios can 
 
 All the entities for the storage matching the conditions,
 and a cursor which can be used to request more entities.
+
+***
+
+### empty() {#empty}
+
+> **empty**(): `Promise`\<`void`\>
+
+Remove all entities from the storage.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+***
+
+### count() {#count}
+
+> **count**(): `Promise`\<`number`\>
+
+Count all the entities which match the conditions.
+
+#### Returns
+
+`Promise`\<`number`\>
+
+The total count of entities in the storage.

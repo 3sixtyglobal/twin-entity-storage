@@ -94,6 +94,32 @@ The id of the entity.
 
 ***
 
+### setBatch() {#setbatch}
+
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageComponent.setBatch`
+
+***
+
 ### get() {#get}
 
 > **get**(`id`, `secondaryIndex?`): `Promise`\<`T` \| `undefined`\>
@@ -149,6 +175,68 @@ Nothing.
 #### Implementation of
 
 `IEntityStorageComponent.remove`
+
+***
+
+### removeBatch() {#removebatch}
+
+> **removeBatch**(`ids`): `Promise`\<`void`\>
+
+Remove multiple entities by id.
+
+#### Parameters
+
+##### ids
+
+`string`[]
+
+The ids of the entities to remove.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageComponent.removeBatch`
+
+***
+
+### empty() {#empty}
+
+> **empty**(): `Promise`\<`void`\>
+
+Remove all entities from the storage.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageComponent.empty`
+
+***
+
+### count() {#count}
+
+> **count**(): `Promise`\<`number`\>
+
+Count all the entities which match the conditions.
+
+#### Returns
+
+`Promise`\<`number`\>
+
+The total count of entities in the storage.
+
+#### Implementation of
+
+`IEntityStorageComponent.count`
 
 ***
 

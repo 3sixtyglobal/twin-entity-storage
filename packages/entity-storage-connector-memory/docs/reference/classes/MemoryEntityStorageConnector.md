@@ -60,6 +60,24 @@ The class name of the component.
 
 ***
 
+### health() {#health}
+
+> **health**(): `Promise`\<`IHealth`[]\>
+
+Returns the health status of the component.
+
+#### Returns
+
+`Promise`\<`IHealth`[]\>
+
+The health status of the component.
+
+#### Implementation of
+
+`IEntityStorageConnector.health`
+
+***
+
 ### getSchema() {#getschema}
 
 > **getSchema**(): `IEntitySchema`
@@ -148,6 +166,32 @@ The id of the entity.
 
 ***
 
+### setBatch() {#setbatch}
+
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.setBatch`
+
+***
+
 ### remove() {#remove}
 
 > **remove**(`id`, `conditions?`): `Promise`\<`void`\>
@@ -228,6 +272,94 @@ and a cursor which can be used to request more entities.
 #### Implementation of
 
 `IEntityStorageConnector.query`
+
+***
+
+### empty() {#empty}
+
+> **empty**(): `Promise`\<`void`\>
+
+Remove all entities from the storage.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.empty`
+
+***
+
+### removeBatch() {#removebatch}
+
+> **removeBatch**(`ids`): `Promise`\<`void`\>
+
+Remove multiple entities by id.
+
+#### Parameters
+
+##### ids
+
+`string`[]
+
+The ids of the entities to remove.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.removeBatch`
+
+***
+
+### teardown() {#teardown}
+
+> **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+
+Teardown the storage by clearing the underlying store.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True if the teardown process was successful.
+
+#### Implementation of
+
+`IEntityStorageConnector.teardown`
+
+***
+
+### count() {#count}
+
+> **count**(): `Promise`\<`number`\>
+
+Count all the entities which match the conditions.
+
+#### Returns
+
+`Promise`\<`number`\>
+
+The total count of entities in the storage.
+
+#### Implementation of
+
+`IEntityStorageConnector.count`
 
 ***
 

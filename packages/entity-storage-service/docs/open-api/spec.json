@@ -115,6 +115,91 @@
 					}
 				}
 			},
+			"delete": {
+				"operationId": "entityStorageEmpty",
+				"summary": "Remove all entries from entity storage.",
+				"tags": [
+					"EntityStorage"
+				],
+				"security": [
+					{
+						"jwtBearerAuthScheme": []
+					}
+				],
+				"requestBody": {
+					"description": "Remove all entries from entity storage.",
+					"required": true,
+					"content": {
+						"text/plain": {
+							"schema": {
+								"$ref": "#/components/schemas/EntityStorageEmptyRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"204": {
+						"description": "The rest request ended in success with no data."
+					},
+					"400": {
+						"description": "The server cannot process the request, see the content for more details.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								},
+								"examples": {
+									"exampleResponse": {
+										"value": {
+											"name": "GeneralError",
+											"message": "errorMessage",
+											"properties": {
+												"foo": "bar"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "You are not authorized to use the API or no credentials were supplied, see the content for more details.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								},
+								"examples": {
+									"exampleResponse": {
+										"value": {
+											"name": "UnauthorizedError",
+											"message": "errorMessage"
+										}
+									}
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "The server has encountered a situation it does not know how to handle, see the content for more details.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								},
+								"examples": {
+									"exampleResponse": {
+										"value": {
+											"name": "InternalServerError",
+											"message": "errorMessage"
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			},
 			"get": {
 				"operationId": "entityStorageList",
 				"summary": "Query entries from entity storage.",
@@ -204,6 +289,200 @@
 								}
 							}
 						}
+					},
+					"400": {
+						"description": "The server cannot process the request, see the content for more details.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								},
+								"examples": {
+									"exampleResponse": {
+										"value": {
+											"name": "GeneralError",
+											"message": "errorMessage",
+											"properties": {
+												"foo": "bar"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "You are not authorized to use the API or no credentials were supplied, see the content for more details.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								},
+								"examples": {
+									"exampleResponse": {
+										"value": {
+											"name": "UnauthorizedError",
+											"message": "errorMessage"
+										}
+									}
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "The server has encountered a situation it does not know how to handle, see the content for more details.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								},
+								"examples": {
+									"exampleResponse": {
+										"value": {
+											"name": "InternalServerError",
+											"message": "errorMessage"
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/entity-storage/batch": {
+			"post": {
+				"operationId": "entityStorageSetBatch",
+				"summary": "Set multiple entries in entity storage.",
+				"tags": [
+					"EntityStorage"
+				],
+				"security": [
+					{
+						"jwtBearerAuthScheme": []
+					}
+				],
+				"requestBody": {
+					"description": "Set multiple entries in entity storage.",
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/EntityStorageSetBatchRequest"
+							},
+							"examples": {
+								"entityStorageSetBatchRequestExample": {
+									"value": [
+										{
+											"id": "12345",
+											"name": "My Item"
+										},
+										{
+											"id": "67890",
+											"name": "My Other Item"
+										}
+									]
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"204": {
+						"description": "The rest request ended in success with no data."
+					},
+					"400": {
+						"description": "The server cannot process the request, see the content for more details.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								},
+								"examples": {
+									"exampleResponse": {
+										"value": {
+											"name": "GeneralError",
+											"message": "errorMessage",
+											"properties": {
+												"foo": "bar"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "You are not authorized to use the API or no credentials were supplied, see the content for more details.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								},
+								"examples": {
+									"exampleResponse": {
+										"value": {
+											"name": "UnauthorizedError",
+											"message": "errorMessage"
+										}
+									}
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "The server has encountered a situation it does not know how to handle, see the content for more details.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								},
+								"examples": {
+									"exampleResponse": {
+										"value": {
+											"name": "InternalServerError",
+											"message": "errorMessage"
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			},
+			"delete": {
+				"operationId": "entityStorageRemoveBatch",
+				"summary": "Remove multiple entries from entity storage by id.",
+				"tags": [
+					"EntityStorage"
+				],
+				"security": [
+					{
+						"jwtBearerAuthScheme": []
+					}
+				],
+				"requestBody": {
+					"description": "Remove multiple entries from entity storage by id.",
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/EntityStorageRemoveBatchRequest"
+							},
+							"examples": {
+								"entityStorageRemoveBatchRequestExample": {
+									"value": [
+										"12345",
+										"67890"
+									]
+								}
+							}
+						}
+					}
+				},
+				"responses": {
+					"204": {
+						"description": "The rest request ended in success with no data."
 					},
 					"400": {
 						"description": "The server cannot process the request, see the content for more details.",
@@ -506,10 +785,132 @@
 					}
 				}
 			}
+		},
+		"/entity-storage/count": {
+			"get": {
+				"operationId": "entityStorageCount",
+				"summary": "Count entries in entity storage.",
+				"tags": [
+					"EntityStorage"
+				],
+				"security": [
+					{
+						"jwtBearerAuthScheme": []
+					}
+				],
+				"requestBody": {
+					"description": "Count the entries in entity storage.",
+					"required": true,
+					"content": {
+						"text/plain": {
+							"schema": {
+								"$ref": "#/components/schemas/EntityStorageCountRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "The response for counting entries in entity storage.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/EntityStorageCountResponse"
+								},
+								"examples": {
+									"entityStorageCountResponseExample": {
+										"value": {
+											"count": 1
+										}
+									}
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "The server cannot process the request, see the content for more details.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								},
+								"examples": {
+									"exampleResponse": {
+										"value": {
+											"name": "GeneralError",
+											"message": "errorMessage",
+											"properties": {
+												"foo": "bar"
+											}
+										}
+									}
+								}
+							}
+						}
+					},
+					"401": {
+						"description": "You are not authorized to use the API or no credentials were supplied, see the content for more details.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								},
+								"examples": {
+									"exampleResponse": {
+										"value": {
+											"name": "UnauthorizedError",
+											"message": "errorMessage"
+										}
+									}
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "The server has encountered a situation it does not know how to handle, see the content for more details.",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/Error"
+								},
+								"examples": {
+									"exampleResponse": {
+										"value": {
+											"name": "InternalServerError",
+											"message": "errorMessage"
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	},
 	"components": {
 		"schemas": {
+			"EntityStorageCountRequest": {
+				"description": "Count the entries in entity storage.",
+				"type": "object"
+			},
+			"EntityStorageCountResponse": {
+				"type": "object",
+				"properties": {
+					"count": {
+						"type": "number",
+						"description": "The total count of entities."
+					}
+				},
+				"required": [
+					"count"
+				],
+				"description": "The body of the response."
+			},
+			"EntityStorageEmptyRequest": {
+				"description": "Remove all entries from entity storage.",
+				"type": "object"
+			},
 			"EntityStorageGetResponse": {
 				"description": "The data for the requested entity."
 			},
@@ -531,6 +932,18 @@
 				],
 				"description": "The list of entries from the query."
 			},
+			"EntityStorageRemoveBatchRequest": {
+				"type": "array",
+				"items": {
+					"type": "string"
+				},
+				"description": "The ids of the entities to remove."
+			},
+			"EntityStorageSetBatchRequest": {
+				"type": "array",
+				"items": {},
+				"description": "The entities to set."
+			},
 			"EntityStorageSetRequest": {
 				"description": "The data to be used in the entity."
 			},
@@ -544,7 +957,7 @@
 					},
 					"message": {
 						"type": "string",
-						"description": "The message for the error."
+						"description": "The message for the error as an i18n key."
 					},
 					"source": {
 						"type": "string",

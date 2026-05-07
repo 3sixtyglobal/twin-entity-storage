@@ -57,3 +57,19 @@ Examples for the list route.
 #### responseExamples
 
 > **responseExamples**: `IRestRouteResponseExample`\<`IEntityStorageListResponse`\>[]
+
+***
+
+### count? {#count}
+
+> `optional` **count?**: `object`
+
+Examples for the count route.
+
+#### requestExamples
+
+> **requestExamples**: `IRestRouteRequestExample`\<`IEntityStorageCountRequest`\>[]
+
+#### responseExamples
+
+> **responseExamples**: `IRestRouteResponseExample`\<`IEntityStorageCountResponse`\>[]

@@ -173,6 +173,28 @@ and a cursor which can be used to request more entities.
 
 ***
 
+### count() {#count}
+
+> **count**(): `Promise`\<`number`\>
+
+Count all the entities which match the conditions.
+
+#### Returns
+
+`Promise`\<`number`\>
+
+The total count of entities in the storage.
+
+#### Implementation of
+
+`IEntityStorageConnector.count`
+
+#### Inherited from
+
+`AbstractScyllaDBConnector.count`
+
+***
+
 ### className() {#classname}
 
 > **className**(): `string`
@@ -245,6 +267,46 @@ The entity to set.
 
 ***
 
+### setBatch() {#setbatch}
+
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageConnector.setBatch`
+
+***
+
+### empty() {#empty}
+
+> **empty**(): `Promise`\<`void`\>
+
+Remove all entities from the storage.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageConnector.empty`
+
+***
+
 ### remove() {#remove}
 
 > **remove**(`id`): `Promise`\<`void`\>
@@ -266,3 +328,53 @@ The id of the entity to remove.
 #### Implementation of
 
 `IEntityStorageConnector.remove`
+
+***
+
+### removeBatch() {#removebatch}
+
+> **removeBatch**(`_ids`): `Promise`\<`void`\>
+
+Remove multiple entities.
+
+#### Parameters
+
+##### \_ids
+
+`string`[]
+
+The ids of the entities to remove.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageConnector.removeBatch`
+
+***
+
+### teardown() {#teardown}
+
+> **teardown**(`_nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+
+Teardown the entity storage (not supported for views).
+
+#### Parameters
+
+##### \_nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True if the teardown process was successful.
+
+#### Implementation of
+
+`IEntityStorageConnector.teardown`

@@ -68,6 +68,32 @@ A promise that resolves to a boolean indicating success.
 
 ***
 
+### stop()? {#stop}
+
+> `optional` **stop**(`nodeLoggingComponentType?`): `Promise`\<`void`\>
+
+The component needs to be stopped when the node is closed.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.stop`
+
+***
+
 ### className() {#classname}
 
 > **className**(): `string`
@@ -83,6 +109,24 @@ The class name of the component.
 #### Implementation of
 
 `IEntityStorageConnector.className`
+
+***
+
+### health() {#health}
+
+> **health**(): `Promise`\<`IHealth`[]\>
+
+Returns the health status of the component.
+
+#### Returns
+
+`Promise`\<`IHealth`[]\>
+
+The health status of the component.
+
+#### Implementation of
+
+`IEntityStorageConnector.health`
 
 ***
 
@@ -174,6 +218,50 @@ The id of the entity.
 
 ***
 
+### setBatch() {#setbatch}
+
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.setBatch`
+
+***
+
+### empty() {#empty}
+
+> **empty**(): `Promise`\<`void`\>
+
+Empty the entity storage.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.empty`
+
+***
+
 ### remove() {#remove}
 
 > **remove**(`id`, `conditions?`): `Promise`\<`void`\>
@@ -203,6 +291,58 @@ Nothing.
 #### Implementation of
 
 `IEntityStorageConnector.remove`
+
+***
+
+### removeBatch() {#removebatch}
+
+> **removeBatch**(`ids`): `Promise`\<`void`\>
+
+Remove multiple entities by id.
+
+#### Parameters
+
+##### ids
+
+`string`[]
+
+The ids of the entities to remove.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.removeBatch`
+
+***
+
+### teardown() {#teardown}
+
+> **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+
+Teardown the entity storage by dropping the collection.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True if the teardown process was successful.
+
+#### Implementation of
+
+`IEntityStorageConnector.teardown`
 
 ***
 
@@ -257,14 +397,18 @@ and a cursor which can be used to request more entities.
 
 ***
 
-### collectionDrop() {#collectiondrop}
+### count() {#count}
 
-> **collectionDrop**(): `Promise`\<`void`\>
+> **count**(): `Promise`\<`number`\>
 
-Drop the collection.
+Count all the entities which match the conditions.
 
 #### Returns
 
-`Promise`\<`void`\>
+`Promise`\<`number`\>
 
-Nothing.
+The total count of entities in the storage.
+
+#### Implementation of
+
+`IEntityStorageConnector.count`

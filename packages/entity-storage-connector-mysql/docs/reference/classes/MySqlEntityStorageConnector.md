@@ -60,6 +60,24 @@ The class name of the component.
 
 ***
 
+### health() {#health}
+
+> **health**(): `Promise`\<`IHealth`[]\>
+
+Get the health of the component.
+
+#### Returns
+
+`Promise`\<`IHealth`[]\>
+
+The health of the component.
+
+#### Implementation of
+
+`IEntityStorageConnector.health`
+
+***
+
 ### getSchema() {#getschema}
 
 > **getSchema**(): `IEntitySchema`
@@ -200,6 +218,50 @@ The id of the entity.
 
 ***
 
+### setBatch() {#setbatch}
+
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.setBatch`
+
+***
+
+### empty() {#empty}
+
+> **empty**(): `Promise`\<`void`\>
+
+Empty the entity storage.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.empty`
+
+***
+
 ### remove() {#remove}
 
 > **remove**(`id`, `conditions?`): `Promise`\<`void`\>
@@ -229,6 +291,58 @@ Nothing.
 #### Implementation of
 
 `IEntityStorageConnector.remove`
+
+***
+
+### teardown() {#teardown}
+
+> **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+
+Teardown the entity storage by dropping the table.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True if the teardown process was successful.
+
+#### Implementation of
+
+`IEntityStorageConnector.teardown`
+
+***
+
+### removeBatch() {#removebatch}
+
+> **removeBatch**(`ids`): `Promise`\<`void`\>
+
+Remove multiple entities by their primary key IDs.
+
+#### Parameters
+
+##### ids
+
+`string`[]
+
+The ids of the entities to remove.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.removeBatch`
 
 ***
 
@@ -283,31 +397,21 @@ and a cursor which can be used to request more entities.
 
 ***
 
-### tableDrop() {#tabledrop}
+### count() {#count}
 
-> **tableDrop**(): `Promise`\<`void`\>
+> **count**(): `Promise`\<`number`\>
 
-Drop the table.
-
-#### Returns
-
-`Promise`\<`void`\>
-
-Nothing.
-
-***
-
-### tableEmpty() {#tableempty}
-
-> **tableEmpty**(): `Promise`\<`void`\>
-
-Empty the table.
+Count all the entities which match the conditions.
 
 #### Returns
 
-`Promise`\<`void`\>
+`Promise`\<`number`\>
 
-Nothing.
+The total count of entities in the storage.
+
+#### Implementation of
+
+`IEntityStorageConnector.count`
 
 ***
 
@@ -322,18 +426,3 @@ Check if the database exists.
 `Promise`\<`boolean`\>
 
 True if the database exists, false otherwise.
-
-***
-
-### close() {#close}
-
-> **close**(): `Promise`\<`void`\>
-
-Close the connection pool and release all connections.
-Should be called when the connector is no longer needed.
-
-#### Returns
-
-`Promise`\<`void`\>
-
-Nothing.

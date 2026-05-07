@@ -19,6 +19,10 @@
 
 - [generateRestRoutesEntityStorage](functions/generateRestRoutesEntityStorage.md)
 - [entityStorageSet](functions/entityStorageSet.md)
+- [entityStorageSetBatch](functions/entityStorageSetBatch.md)
+- [entityStorageEmpty](functions/entityStorageEmpty.md)
 - [entityStorageGet](functions/entityStorageGet.md)
 - [entityStorageRemove](functions/entityStorageRemove.md)
 - [entityStorageList](functions/entityStorageList.md)
+- [entityStorageCount](functions/entityStorageCount.md)
+- [entityStorageRemoveBatch](functions/entityStorageRemoveBatch.md)

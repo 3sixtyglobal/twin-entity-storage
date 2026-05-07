@@ -173,6 +173,28 @@ and a cursor which can be used to request more entities.
 
 ***
 
+### count() {#count}
+
+> **count**(): `Promise`\<`number`\>
+
+Count all the entities which match the conditions.
+
+#### Returns
+
+`Promise`\<`number`\>
+
+The total count of entities in the storage.
+
+#### Implementation of
+
+`IEntityStorageConnector.count`
+
+#### Inherited from
+
+`AbstractScyllaDBConnector.count`
+
+***
+
 ### className() {#classname}
 
 > **className**(): `string`
@@ -192,6 +214,24 @@ The class name of the component.
 #### Overrides
 
 `AbstractScyllaDBConnector.className`
+
+***
+
+### health() {#health}
+
+> **health**(): `Promise`\<`IHealth`[]\>
+
+Get the health of the component.
+
+#### Returns
+
+`Promise`\<`IHealth`[]\>
+
+The health of the component.
+
+#### Implementation of
+
+`IEntityStorageConnector.health`
 
 ***
 
@@ -251,6 +291,56 @@ The optional conditions to match for the entities.
 
 ***
 
+### setBatch() {#setbatch}
+
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.setBatch`
+
+***
+
+### empty() {#empty}
+
+> **empty**(`partitionKey?`): `Promise`\<`void`\>
+
+Remove all entities from the storage.
+
+#### Parameters
+
+##### partitionKey?
+
+`string`
+
+The optional partition key.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageConnector.empty`
+
+***
+
 ### remove() {#remove}
 
 > **remove**(`id`, `conditions?`): `Promise`\<`void`\>
@@ -281,24 +371,50 @@ The optional conditions to match for the entities.
 
 ***
 
-### dropTable() {#droptable}
+### removeBatch() {#removebatch}
 
-> **dropTable**(): `Promise`\<`void`\>
+> **removeBatch**(`ids`): `Promise`\<`void`\>
 
-Drops table.
+Remove multiple entities.
+
+#### Parameters
+
+##### ids
+
+`string`[]
+
+The ids of the entities to remove.
 
 #### Returns
 
 `Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageConnector.removeBatch`
 
 ***
 
-### truncateTable() {#truncatetable}
+### teardown() {#teardown}
 
-> **truncateTable**(): `Promise`\<`void`\>
+> **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
 
-Truncates (clear) table.
+Teardown the entity storage by dropping the table.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
 
 #### Returns
 
-`Promise`\<`void`\>
+`Promise`\<`boolean`\>
+
+True if the teardown process was successful.
+
+#### Implementation of
+
+`IEntityStorageConnector.teardown`
