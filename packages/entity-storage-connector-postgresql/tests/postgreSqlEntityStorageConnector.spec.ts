@@ -1965,10 +1965,11 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				entitySchema: nameof<TestType>(),
 				config: TEST_POSTGRESQL_CONFIG
 			});
-			vi.spyOn(
-				entityStorage as unknown as { createConnection: () => unknown },
-				"createConnection"
-			).mockRejectedValueOnce(new Error("Connection failed"));
+			const entityStorageInternal: { createConnection: () => Promise<unknown> } =
+				entityStorage as unknown as { createConnection: () => Promise<unknown> };
+			vi.spyOn(entityStorageInternal, "createConnection").mockRejectedValueOnce(
+				new Error("Connection failed")
+			);
 			const health = await entityStorage.health();
 			await entityStorage.stop();
 			expect(health[0].status).toEqual(HealthStatus.Error);

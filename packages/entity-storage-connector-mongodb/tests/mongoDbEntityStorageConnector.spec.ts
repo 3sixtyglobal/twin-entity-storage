@@ -1693,7 +1693,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			vi.spyOn(
 				(entityStorage as unknown as { _client: { db: () => unknown } })._client,
 				"db"
-			).mockReturnValue(mockDb as unknown as ReturnType<() => typeof mockDb>);
+			).mockReturnValue(mockDb);
 			const result = await entityStorage.health();
 			expect(result).toHaveLength(1);
 			expect(result[0].status).toEqual(HealthStatus.Error);

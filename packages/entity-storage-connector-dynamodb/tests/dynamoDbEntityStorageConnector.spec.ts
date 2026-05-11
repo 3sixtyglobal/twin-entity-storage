@@ -1442,10 +1442,9 @@ describe("DynamoDbEntityStorageConnector", () => {
 				entitySchema: nameof<TestType>(),
 				config: TEST_DYNAMODB_CONFIG
 			});
-			vi.spyOn(
-				entityStorage as unknown as { createConnection: () => unknown },
-				"createConnection"
-			).mockReturnValue({
+			const entityStorageInternal: { createConnection: () => unknown } =
+				entityStorage as unknown as { createConnection: () => unknown };
+			vi.spyOn(entityStorageInternal, "createConnection").mockReturnValue({
 				describeTable: vi.fn().mockRejectedValueOnce(new Error("Connection refused"))
 			});
 			const result = await entityStorage.health();

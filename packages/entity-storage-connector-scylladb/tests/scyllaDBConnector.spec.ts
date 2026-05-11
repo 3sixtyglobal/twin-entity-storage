@@ -1297,10 +1297,11 @@ describe("ScyllaDBTableConnector", () => {
 				entitySchema: nameof<TestType>(),
 				config: TEST_SCYLLA_CONFIG
 			});
-			vi.spyOn(
-				entityStorage as unknown as { openConnection: () => unknown },
-				"openConnection"
-			).mockRejectedValueOnce(new Error("Connection failed"));
+			const entityStorageInternal: { openConnection: () => Promise<unknown> } =
+				entityStorage as unknown as { openConnection: () => Promise<unknown> };
+			vi.spyOn(entityStorageInternal, "openConnection").mockRejectedValueOnce(
+				new Error("Connection failed")
+			);
 			const health = await entityStorage.health();
 			expect(health[0].status).toEqual(HealthStatus.Error);
 		});

@@ -74,7 +74,7 @@ export class EntityStorageRestClient<T>
 		Guards.arrayValue(EntityStorageRestClient.CLASS_NAME, nameof(entities), entities);
 
 		await this.fetch<IEntityStorageSetBatchRequest, INoContentResponse>("/batch", "POST", {
-			body: entities as unknown[]
+			body: entities
 		});
 	}
 

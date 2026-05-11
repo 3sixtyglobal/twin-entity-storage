@@ -1344,7 +1344,7 @@ describe("CosmosDbEntityStorageConnector", () => {
 			vi.spyOn(
 				(entityStorage as unknown as { _client: { database: () => unknown } })._client,
 				"database"
-			).mockReturnValue(mockDatabase as unknown as ReturnType<() => typeof mockDatabase>);
+			).mockReturnValue(mockDatabase);
 			const result = await entityStorage.health();
 			expect(result).toHaveLength(1);
 			expect(result[0].status).toEqual(HealthStatus.Error);

@@ -538,7 +538,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 										[DynamoDbEntityStorageConnector._PARTITION_KEY]:
 											partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE,
 										...entity
-									} as { [id: string]: unknown }
+									}
 								}
 							}))
 						}

@@ -2054,7 +2054,10 @@ describe("MySqlEntityStorageConnector", () => {
 				entitySchema: nameof<TestType>(),
 				config
 			});
-			vi.spyOn(entityStorage as unknown as { getPool: () => unknown }, "getPool").mockReturnValue({
+			const entityStorageInternal: { getPool: () => unknown } = entityStorage as unknown as {
+				getPool: () => unknown;
+			};
+			vi.spyOn(entityStorageInternal, "getPool").mockReturnValue({
 				query: vi.fn().mockRejectedValueOnce(new Error("Connection failed"))
 			});
 			const health = await entityStorage.health();

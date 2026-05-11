@@ -460,8 +460,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 			const remaining = store.filter(item => {
 				if (
 					Is.stringValue(partitionKey) &&
-					ObjectHelper.propertyGet(item as object, FileEntityStorageConnector._PARTITION_KEY) !==
-						partitionKey
+					ObjectHelper.propertyGet(item, FileEntityStorageConnector._PARTITION_KEY) !== partitionKey
 				) {
 					return true;
 				}

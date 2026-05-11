@@ -244,7 +244,7 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		for (let i = 0; i < this._store.length; i++) {
 			const stored = this._store[i];
 			const storedPartition = ObjectHelper.propertyGet(
-				stored as object,
+				stored,
 				MemoryEntityStorageConnector._PARTITION_KEY
 			);
 			if (!Is.stringValue(partitionKey) || storedPartition === partitionKey) {
@@ -403,10 +403,8 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		if (Is.stringValue(partitionKey)) {
 			for (let i = this._store.length - 1; i >= 0; i--) {
 				if (
-					ObjectHelper.propertyGet(
-						this._store[i] as object,
-						MemoryEntityStorageConnector._PARTITION_KEY
-					) === partitionKey
+					ObjectHelper.propertyGet(this._store[i], MemoryEntityStorageConnector._PARTITION_KEY) ===
+					partitionKey
 				) {
 					this._store.splice(i, 1);
 				}
