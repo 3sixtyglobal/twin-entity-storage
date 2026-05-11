@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.12](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-dynamodb-v0.0.3-next.11...entity-storage-connector-dynamodb-v0.0.3-next.12) (2026-05-11)
+
+
+### Features
+
+* typescript 6 update ([995a0c6](https://github.com/iotaledger/twin-entity-storage/commit/995a0c6fa9a6813bfdc7200779ce3664236e59e9))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.11 to 0.0.3-next.12
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.11 to 0.0.3-next.12
+
 ## [0.0.3-next.11](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-dynamodb-v0.0.3-next.10...entity-storage-connector-dynamodb-v0.0.3-next.11) (2026-05-07)
 
 
