@@ -364,6 +364,7 @@ const tsRules = {
 	'@typescript-eslint/no-unnecessary-type-arguments': 'error',
 	'@typescript-eslint/no-unnecessary-type-assertion': 'error',
 	'@typescript-eslint/no-unused-expressions': 'error',
+	'@typescript-eslint/no-unused-private-class-members': 'error',
 	'@typescript-eslint/no-unused-vars': ['error', { args: 'none' }],
 	'@typescript-eslint/no-unsafe-argument': 'off',
 	'@typescript-eslint/no-unsafe-assignment': 'off',
