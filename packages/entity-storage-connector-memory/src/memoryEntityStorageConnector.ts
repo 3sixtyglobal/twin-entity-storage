@@ -373,7 +373,11 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 					EntityConditions.check(allEntities[i], finalConditions) &&
 					entities.length < finalLimit
 				) {
-					const entity = ObjectHelper.clone(ObjectHelper.pick(allEntities[i], properties));
+					const entity = ObjectHelper.clone(
+						Is.arrayValue(properties)
+							? ObjectHelper.pick(allEntities[i], properties)
+							: allEntities[i]
+					);
 					ObjectHelper.propertyDelete(entity, MemoryEntityStorageConnector._PARTITION_KEY);
 					entities.push(entity);
 					if (entities.length >= finalLimit) {

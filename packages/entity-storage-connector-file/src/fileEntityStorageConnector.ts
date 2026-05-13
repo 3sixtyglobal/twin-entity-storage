@@ -620,7 +620,9 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 					EntityConditions.check(allEntities[i], finalConditions) &&
 					entities.length < finalLimit
 				) {
-					const entity = ObjectHelper.pick(allEntities[i], properties);
+					const entity = Is.arrayValue(properties)
+						? ObjectHelper.pick(allEntities[i], properties)
+						: allEntities[i];
 					ObjectHelper.propertyDelete(entity, FileEntityStorageConnector._PARTITION_KEY);
 					entities.push(entity);
 					if (entities.length >= finalLimit) {
