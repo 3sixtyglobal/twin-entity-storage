@@ -24,7 +24,9 @@ jobs:
   # This job extracts all workspace packages from package.json
   # and prepares them for the matrix strategy in the publish job
   process-workspaces:
-    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+    runs-on:
+      labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+      group: ${{ github.event.repository.private && 'twin' || 'default' }}
     permissions:
       contents: read
     outputs:
@@ -81,7 +83,9 @@ jobs:
   # This job publishes each package to NPM
   # It runs once per package pattern from the read-workspaces job
   publish-packages:
-    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+    runs-on:
+      labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+      group: ${{ github.event.repository.private && 'twin' || 'default' }}
     permissions:
       contents: read
       id-token: write # Needed for npm provenance
@@ -224,7 +228,9 @@ jobs:
   # No need to use a patched version of please-release here as the version
   # numbers were already incremented in the prepare-release action
   publish-gh-releases:
-    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+    runs-on:
+      labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+      group: ${{ github.event.repository.private && 'twin' || 'default' }}
     permissions:
       contents: read
     needs: [process-workspaces, publish-packages]
@@ -254,7 +260,9 @@ jobs:
 
   # Trigger workspace notification workflow after a successful release publish
   trigger-notify-workspace:
-    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+    runs-on:
+      labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+      group: ${{ github.event.repository.private && 'twin' || 'default' }}
     permissions:
       actions: write
       contents: read

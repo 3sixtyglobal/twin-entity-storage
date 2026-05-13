@@ -23,7 +23,9 @@ on:
 jobs:
   # Prepare all the packages for update by creating a PR with version bumps and changelog updates
   prepare:
-    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+    runs-on:
+      labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+      group: ${{ github.event.repository.private && 'twin' || 'default' }}
     permissions:
       actions: write # Needed to dispatch and monitor docs-update workflow runs
       checks: read # Needed when querying workflow/check run state

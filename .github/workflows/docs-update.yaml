@@ -31,7 +31,9 @@ permissions:
 
 jobs:
   update-docs:
-    runs-on: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+    runs-on:
+      labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+      group: ${{ github.event.repository.private && 'twin' || 'default' }}
 
     steps:
       # Checkout the branch that triggered the workflow dispatch.
