@@ -21,7 +21,8 @@ concurrency:
 
 jobs:
   dist-all-packages:
-    if: "${{ github.event_name != 'push' || (!startsWith(github.event.head_commit.message, 'Merge pull request') && github.event.head_commit.message != 'chore: release next') }}"
+    # No need to trigger on merging pull request or 'chore: release next' as they have already performed a build
+    if: "${{ github.event_name != 'push' || (!startsWith(github.event.head_commit.message, 'Merge pull request') && !startsWith(github.event.head_commit.message, 'chore: release next')) }}"
     runs-on:
       labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
       group: ${{ github.event.repository.private && 'twin' || 'default' }}
