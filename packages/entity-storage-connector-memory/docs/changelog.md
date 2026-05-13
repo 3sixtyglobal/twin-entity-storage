@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.3-next.13](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-memory-v0.0.3-next.12...entity-storage-connector-memory-v0.0.3-next.13) (2026-05-13)
+
+
+### Bug Fixes
+
+* correct handling of pick with no properties ([b18dae6](https://github.com/iotaledger/twin-entity-storage/commit/b18dae64ba635cd72705d735934c13ca1481bd8f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.12 to 0.0.3-next.13
+
 ## [0.0.3-next.12](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-memory-v0.0.3-next.11...entity-storage-connector-memory-v0.0.3-next.12) (2026-05-11)
 
 

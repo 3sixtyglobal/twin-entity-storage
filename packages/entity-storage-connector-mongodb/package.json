@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-mongodb",
-	"version": "0.0.3-next.12",
+	"version": "0.0.3-next.13",
 	"description": "MongoDB connector for flexible document-oriented persistence.",
 	"repository": {
 		"type": "git",
@@ -31,13 +31,13 @@
 		"@twin.org/context": "next",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.0.3-next.12",
+		"@twin.org/entity-storage-models": "0.0.3-next.13",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next",
 		"mongodb": "7.2.0"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.0.3-next.12",
+		"@twin.org/entity-storage-connector-memory": "0.0.3-next.13",
 		"@twin.org/logging-connector-entity-storage": "next",
 		"@twin.org/logging-service": "next",
 		"@twin.org/nameof-transformer": "next",

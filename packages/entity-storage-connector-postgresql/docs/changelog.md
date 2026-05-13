@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.13](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-postgresql-v0.0.3-next.12...entity-storage-connector-postgresql-v0.0.3-next.13) (2026-05-13)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-connector-postgresql:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.12 to 0.0.3-next.13
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.12 to 0.0.3-next.13
+
 ## [0.0.3-next.12](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-postgresql-v0.0.3-next.11...entity-storage-connector-postgresql-v0.0.3-next.12) (2026-05-11)
 
 
