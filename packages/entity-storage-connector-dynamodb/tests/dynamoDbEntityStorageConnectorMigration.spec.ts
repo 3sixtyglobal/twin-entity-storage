@@ -1,4 +1,4 @@
-// Copyright 2024 IOTA Stiftung.
+// Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore, type IContextIds } from "@twin.org/context";
 import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
