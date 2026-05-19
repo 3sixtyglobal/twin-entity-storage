@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-models",
-	"version": "0.0.3-next.13",
+	"version": "0.0.3-next.14",
 	"description": "Shared models for storage contracts, requests, responses and connector capabilities.",
 	"repository": {
 		"type": "git",

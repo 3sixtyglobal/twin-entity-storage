@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.3-next.14](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-memory-v0.0.3-next.13...entity-storage-connector-memory-v0.0.3-next.14) (2026-05-19)
+
+
+### Features
+
+* adding schema migration functionality to all the connectors ([#85](https://github.com/iotaledger/twin-entity-storage/issues/85)) ([fd1555a](https://github.com/iotaledger/twin-entity-storage/commit/fd1555a34380158214a577586dafae821e72a578))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.13 to 0.0.3-next.14
+
 ## [0.0.3-next.13](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-memory-v0.0.3-next.12...entity-storage-connector-memory-v0.0.3-next.13) (2026-05-13)
 
 
