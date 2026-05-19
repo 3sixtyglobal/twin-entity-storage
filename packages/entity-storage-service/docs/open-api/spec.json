@@ -28,6 +28,17 @@
 				"tags": [
 					"EntityStorage"
 				],
+				"parameters": [
+					{
+						"name": "conditions",
+						"description": "The optional conditions to match for the entity, JSON encoded array of property/value pairs.",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
 				"security": [
 					{
 						"jwtBearerAuthScheme": []
@@ -571,6 +582,15 @@
 						"schema": {
 							"type": "string"
 						}
+					},
+					{
+						"name": "conditions",
+						"description": "The optional conditions to match for the entity, JSON encoded array of property/value pairs.",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string"
+						}
 					}
 				],
 				"security": [
@@ -694,6 +714,15 @@
 						},
 						"style": "simple",
 						"example": "12345"
+					},
+					{
+						"name": "conditions",
+						"description": "The optional conditions to match for the entity, JSON encoded array of property/value pairs.",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string"
+						}
 					}
 				],
 				"security": [
@@ -793,22 +822,22 @@
 				"tags": [
 					"EntityStorage"
 				],
+				"parameters": [
+					{
+						"name": "conditions",
+						"description": "The optional conditions to filter the count, JSON encoded EntityCondition.",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
 				"security": [
 					{
 						"jwtBearerAuthScheme": []
 					}
 				],
-				"requestBody": {
-					"description": "Count the entries in entity storage.",
-					"required": true,
-					"content": {
-						"text/plain": {
-							"schema": {
-								"$ref": "#/components/schemas/EntityStorageCountRequest"
-							}
-						}
-					}
-				},
 				"responses": {
 					"200": {
 						"description": "The response for counting entries in entity storage.",
@@ -890,10 +919,6 @@
 	},
 	"components": {
 		"schemas": {
-			"EntityStorageCountRequest": {
-				"description": "Count the entries in entity storage.",
-				"type": "object"
-			},
 			"EntityStorageCountResponse": {
 				"type": "object",
 				"properties": {

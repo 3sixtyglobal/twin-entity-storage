@@ -6,6 +6,10 @@ Interface describing an entity storage connector.
 
 - `IComponent`
 
+## Extended by
+
+- [`IEntityStorageMigrationConnector`](IEntityStorageMigrationConnector.md)
+
 ## Type Parameters
 
 ### T
@@ -225,67 +229,20 @@ Nothing.
 
 ### count() {#count}
 
-> **count**(): `Promise`\<`number`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
 
 Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
 
 #### Returns
 
 `Promise`\<`number`\>
 
 The total count of entities in the storage.
-
-***
-
-### migrate() {#migrate}
-
-> **migrate**(`newSchema`, `options?`): `Promise`\<[`IMigrationResult`](IMigrationResult.md)\>
-
-Migrate the storage to a new schema version FOR THE CURRENT PARTITION.
-
-**Partition scope:** this operation applies only to the partition derived
-from the current `ContextIdStore`. Data in other partitions is NOT
-migrated. Callers that need to migrate all partitions must invoke
-`migrate()` once per partition, setting the appropriate context before
-each call.
-
-**Safe-swap connectors** (MySQL, PostgreSQL, File, Memory, ScyllaDB,
-Firestore): data is first written into a `_migration` container. Only on
-full success is the original container atomically replaced (or
-equivalent). A failure leaves the live container untouched.
-
-**MongoDB:** uses a `{collection}_migration` temp collection and
-`migrateEntities`, then **replaces only the current partition** in the live
-collection (delete those documents, insert migrated copies). It does **not**
-use `renameCollection` on the whole live collection, because that would
-wipe other partitions that share the same collection. The final merge is
-not one atomic rename; see the MongoDB connector's `migrate()` JSDoc.
-
-**In-place connectors** (CosmosDB, DynamoDB): data is upserted directly
-into the live container because the platform offers no atomic rename. A
-failure may leave the live container in a half-migrated state. Back up
-data before calling `migrate()` on these connectors.
-
-If the schema diff contains type changes and no `transformEntity` is
-provided the method throws a `GeneralError` listing the affected fields.
-
-#### Parameters
-
-##### newSchema
-
-`IEntitySchema`
-
-The target schema to migrate toward.
-
-##### options?
-
-[`IMigrationOptions`](IMigrationOptions.md)
-
-Optional configuration controlling batch size, transform
-and progress callback.
-
-#### Returns
-
-`Promise`\<[`IMigrationResult`](IMigrationResult.md)\>
-
-A result describing how many entities were migrated.

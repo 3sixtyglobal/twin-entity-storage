@@ -16,7 +16,7 @@ Interface describing an entity storage component.
 
 ### set() {#set}
 
-> **set**(`entity`): `Promise`\<`void`\>
+> **set**(`entity`, `conditions?`): `Promise`\<`void`\>
 
 Set an entity.
 
@@ -27,6 +27,12 @@ Set an entity.
 `T`
 
 The entity to set.
+
+##### conditions?
+
+`object`[]
+
+The optional conditions to match for the entities.
 
 #### Returns
 
@@ -60,7 +66,7 @@ Nothing.
 
 ### get() {#get}
 
-> **get**(`id`, `secondaryIndex?`): `Promise`\<`T` \| `undefined`\>
+> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
 
 Get an entity.
 
@@ -78,6 +84,12 @@ keyof `T`
 
 Get the item using a secondary index.
 
+##### conditions?
+
+`object`[]
+
+The optional conditions to match for the entities.
+
 #### Returns
 
 `Promise`\<`T` \| `undefined`\>
@@ -88,7 +100,7 @@ The object if it can be found or undefined.
 
 ### remove() {#remove}
 
-> **remove**(`id`): `Promise`\<`void`\>
+> **remove**(`id`, `conditions?`): `Promise`\<`void`\>
 
 Remove the entity.
 
@@ -99,6 +111,12 @@ Remove the entity.
 `string`
 
 The id of the entity to remove.
+
+##### conditions?
+
+`object`[]
+
+The optional conditions to match for the entities.
 
 #### Returns
 
@@ -199,9 +217,17 @@ Nothing.
 
 ### count() {#count}
 
-> **count**(): `Promise`\<`number`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
 
 Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
 
 #### Returns
 

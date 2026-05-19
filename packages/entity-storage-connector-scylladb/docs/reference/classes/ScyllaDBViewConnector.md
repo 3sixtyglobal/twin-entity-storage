@@ -175,9 +175,17 @@ and a cursor which can be used to request more entities.
 
 ### count() {#count}
 
-> **count**(): `Promise`\<`number`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
 
 Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
 
 #### Returns
 
@@ -192,6 +200,32 @@ The total count of entities in the storage.
 #### Inherited from
 
 `AbstractScyllaDBConnector.count`
+
+***
+
+### safeTableName() {#safetablename}
+
+> `protected` **safeTableName**(`name`): `string`
+
+Get a safe table name by replacing any non-alphanumeric characters.
+
+#### Parameters
+
+##### name
+
+`string`
+
+The name to sanitize.
+
+#### Returns
+
+`string`
+
+The safe table name.
+
+#### Inherited from
+
+`AbstractScyllaDBConnector.safeTableName`
 
 ***
 
@@ -378,34 +412,3 @@ True if the teardown process was successful.
 #### Implementation of
 
 `IEntityStorageConnector.teardown`
-
-***
-
-### migrate() {#migrate}
-
-> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
-
-Migrate is not supported on views — the owning ScyllaDBTableConnector handles
-migration, including dropping and recreating any dependent views.
-
-#### Parameters
-
-##### newSchema
-
-`IEntitySchema`
-
-Ignored.
-
-##### options?
-
-`IMigrationOptions`
-
-Ignored.
-
-#### Returns
-
-`Promise`\<`IMigrationResult`\>
-
-#### Implementation of
-
-`IEntityStorageConnector.migrate`

@@ -28,16 +28,6 @@ The name of the collection for the storage.
 
 ***
 
-### verbatimCollectionId? {#verbatimcollectionid}
-
-> `optional` **verbatimCollectionId?**: `string`
-
-When set, all partition operations use this exact Firestore collection ID
-instead of `${collectionName}_${partitionKey}`. Used internally for
-migration temp collections whose IDs are `${partitionCollectionId}_new`.
-
-***
-
 ### credentials? {#credentials}
 
 > `optional` **credentials?**: `string`

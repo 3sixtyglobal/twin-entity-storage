@@ -10,7 +10,7 @@ Class for performing entity storage operations using MongoDb.
 
 ## Implements
 
-- `IEntityStorageConnector`\<`T`\>
+- `IEntityStorageMigrationConnector`\<`T`\>
 
 ## Constructors
 
@@ -64,7 +64,7 @@ A promise that resolves to a boolean indicating success.
 
 #### Implementation of
 
-`IEntityStorageConnector.bootstrap`
+`IEntityStorageMigrationConnector.bootstrap`
 
 ***
 
@@ -90,7 +90,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.stop`
+`IEntityStorageMigrationConnector.stop`
 
 ***
 
@@ -108,7 +108,7 @@ The class name of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.className`
+`IEntityStorageMigrationConnector.className`
 
 ***
 
@@ -126,7 +126,7 @@ The health status of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.health`
+`IEntityStorageMigrationConnector.health`
 
 ***
 
@@ -144,7 +144,7 @@ The schema for the entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.getSchema`
+`IEntityStorageMigrationConnector.getSchema`
 
 ***
 
@@ -182,7 +182,7 @@ The object if it can be found or undefined.
 
 #### Implementation of
 
-`IEntityStorageConnector.get`
+`IEntityStorageMigrationConnector.get`
 
 ***
 
@@ -214,7 +214,7 @@ The id of the entity.
 
 #### Implementation of
 
-`IEntityStorageConnector.set`
+`IEntityStorageMigrationConnector.set`
 
 ***
 
@@ -240,7 +240,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.setBatch`
+`IEntityStorageMigrationConnector.setBatch`
 
 ***
 
@@ -258,7 +258,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.empty`
+`IEntityStorageMigrationConnector.empty`
 
 ***
 
@@ -290,7 +290,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.remove`
+`IEntityStorageMigrationConnector.remove`
 
 ***
 
@@ -316,7 +316,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.removeBatch`
+`IEntityStorageMigrationConnector.removeBatch`
 
 ***
 
@@ -342,7 +342,7 @@ True if the teardown process was successful.
 
 #### Implementation of
 
-`IEntityStorageConnector.teardown`
+`IEntityStorageMigrationConnector.teardown`
 
 ***
 
@@ -393,15 +393,23 @@ and a cursor which can be used to request more entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.query`
+`IEntityStorageMigrationConnector.query`
 
 ***
 
 ### count() {#count}
 
-> **count**(): `Promise`\<`number`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
 
 Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
 
 #### Returns
 
@@ -411,53 +419,142 @@ The total count of entities in the storage.
 
 #### Implementation of
 
-`IEntityStorageConnector.count`
+`IEntityStorageMigrationConnector.count`
 
 ***
 
-### migrate() {#migrate}
+### getPartitionContextIds() {#getpartitioncontextids}
 
-> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
 
-Migrate entities for the **current partition only**, consistent with `query()` /
-`setBatch()`: data is read via `migrateEntities`, which pages with this
-connector's partition filter.
-
-**Why not `renameCollection` on the whole live collection?** A migration temp
-collection only holds rows for the active partition. Renaming it to the live
-name would replace the entire collection and **destroy every other
-partition** stored in the same MongoDB collection. Instead we copy migrated
-documents from `{collection}_migration` into the live collection by:
-deleting only the current partition's documents, then inserting the migrated
-set. Other partitions remain unchanged. That is not an atomic swap; a failure
-mid-swap can leave the partition in a bad state (callers should treat
-`migrate()` like other non-atomic backends and plan retries/backups).
-
-**Product note:** A future option could be to migrate **all** partitions in
-one call (e.g. loop contexts or a full-collection strategy similar to SQL
-connectors). Until then, callers that need every tenant migrated must invoke
-`migrate()` once per partition.
-
-#### Parameters
-
-##### newSchema
-
-`IEntitySchema`
-
-The target entity schema.
-
-##### options?
-
-`IMigrationOptions`
-
-Options controlling migration behaviour.
+Get all unique partition context ids present in the collection.
 
 #### Returns
 
-`Promise`\<`IMigrationResult`\>
+`Promise`\<`IContextIds`[]\>
 
-The migration result.
+An array of context id objects, one per unique partition.
 
 #### Implementation of
 
-`IEntityStorageConnector.migrate`
+`IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### createTargetConnector() {#createtargetconnector}
+
+> **createTargetConnector**\<`U`\>(`newEntitySchema`): `Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Create the target connector for performing the migration using a temporary collection.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### newEntitySchema
+
+`string`
+
+The name of the new entity schema to create the connector for.
+
+#### Returns
+
+`Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Connector for performing the migration.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.createTargetConnector`
+
+***
+
+### finalizeMigration() {#finalizemigration}
+
+> **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`MongoDbEntityStorageConnector`\<`U`\>\>
+
+Finalize the migration by dropping the source collection and renaming the migration collection to the original name.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`MongoDbEntityStorageConnector`\<`U`\>
+
+The connector holding the migrated data in a temporary collection.
+
+##### options?
+
+`IMigrationOptions`\<`T`, `U`\>
+
+The options to control how the migration is finalized.
+
+##### loggingComponentType?
+
+`string`
+
+The logging component type to use during finalization.
+
+#### Returns
+
+`Promise`\<`MongoDbEntityStorageConnector`\<`U`\>\>
+
+The final connector using the original collection name with the new schema.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.finalizeMigration`
+
+***
+
+### cleanupMigration() {#cleanupmigration}
+
+> **cleanupMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`void`\>
+
+Cleanup a failed or aborted migration by dropping the temporary migration collection.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`IEntityStorageConnector`\<`U`\> \| `undefined`
+
+The target connector to cleanup.
+
+##### options?
+
+`IMigrationOptions`\<`T`, `U`\>
+
+The options to control how the migration is cleaned up.
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+A promise that resolves when the cleanup is complete.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.cleanupMigration`

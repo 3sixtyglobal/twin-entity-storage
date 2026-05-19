@@ -1,6 +1,6 @@
 # Interface: IScyllaDBViewConfig
 
-Definition of MySQL DB configuration.
+Definition of ScyllaDB view configuration.
 
 ## Extends
 
@@ -62,9 +62,9 @@ The port to connect to.
 
 ***
 
-### tableName? {#tablename}
+### tableName {#tablename}
 
-> `optional` **tableName?**: `string`
+> **tableName**: `string`
 
 The name of the table for the storage.
 
@@ -80,9 +80,9 @@ To the camel case of the entity name.
 
 ***
 
-### viewName? {#viewname}
+### viewName {#viewname}
 
-> `optional` **viewName?**: `string`
+> **viewName**: `string`
 
 The name of view.
 

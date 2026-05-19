@@ -10,7 +10,7 @@ Class for performing entity storage operations using Firestore.
 
 ## Implements
 
-- `IEntityStorageConnector`\<`T`\>
+- `IEntityStorageMigrationConnector`\<`T`\>
 
 ## Constructors
 
@@ -56,7 +56,7 @@ The class name of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.className`
+`IEntityStorageMigrationConnector.className`
 
 ***
 
@@ -74,7 +74,7 @@ The health status of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.health`
+`IEntityStorageMigrationConnector.health`
 
 ***
 
@@ -92,7 +92,7 @@ The schema for the entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.getSchema`
+`IEntityStorageMigrationConnector.getSchema`
 
 ***
 
@@ -118,7 +118,7 @@ True if the bootstrapping process was successful.
 
 #### Implementation of
 
-`IEntityStorageConnector.bootstrap`
+`IEntityStorageMigrationConnector.bootstrap`
 
 ***
 
@@ -156,7 +156,7 @@ The object if it can be found or undefined.
 
 #### Implementation of
 
-`IEntityStorageConnector.get`
+`IEntityStorageMigrationConnector.get`
 
 ***
 
@@ -188,7 +188,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.set`
+`IEntityStorageMigrationConnector.set`
 
 ***
 
@@ -214,7 +214,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.setBatch`
+`IEntityStorageMigrationConnector.setBatch`
 
 ***
 
@@ -232,7 +232,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.empty`
+`IEntityStorageMigrationConnector.empty`
 
 ***
 
@@ -264,7 +264,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.remove`
+`IEntityStorageMigrationConnector.remove`
 
 ***
 
@@ -290,7 +290,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.removeBatch`
+`IEntityStorageMigrationConnector.removeBatch`
 
 ***
 
@@ -298,7 +298,7 @@ Nothing.
 
 > **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
 
-Teardown the storage by deleting all documents in the partition collection.
+Teardown the storage by deleting all documents across all partition collections.
 
 #### Parameters
 
@@ -316,7 +316,143 @@ True if the teardown process was successful.
 
 #### Implementation of
 
-`IEntityStorageConnector.teardown`
+`IEntityStorageMigrationConnector.teardown`
+
+***
+
+### getPartitionContextIds() {#getpartitioncontextids}
+
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+
+Get a unique list of all the context ids from the storage.
+
+#### Returns
+
+`Promise`\<`IContextIds`[]\>
+
+The list of unique context ids.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### createTargetConnector() {#createtargetconnector}
+
+> **createTargetConnector**\<`U`\>(`newEntitySchema`): `Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Create the target connector for performing the migration using a temporary collection name.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### newEntitySchema
+
+`string`
+
+The name of the new entity schema to create the connector for.
+
+#### Returns
+
+`Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Connector for performing the migration.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.createTargetConnector`
+
+***
+
+### finalizeMigration() {#finalizemigration}
+
+> **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`FirestoreEntityStorageConnector`\<`U`\>\>
+
+Finalize the migration by tearing down the old collections and replacing them with the target collections.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`FirestoreEntityStorageConnector`\<`U`\>
+
+The target connector to finalize the migration with.
+
+##### options?
+
+`IMigrationOptions`\<`T`, `U`\>
+
+The options to control how the migration is finalized.
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging.
+
+#### Returns
+
+`Promise`\<`FirestoreEntityStorageConnector`\<`U`\>\>
+
+The final connector pointing at the original collection name.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.finalizeMigration`
+
+***
+
+### cleanupMigration() {#cleanupmigration}
+
+> **cleanupMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`void`\>
+
+Cleanup the migration if a migration fails or needs to be aborted.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`IEntityStorageConnector`\<`U`\> \| `undefined`
+
+The target connector to cleanup.
+
+##### options?
+
+`IMigrationOptions`\<`T`, `U`\>
+
+The options to control how the migration is cleaned up.
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.cleanupMigration`
 
 ***
 
@@ -366,15 +502,23 @@ The matching entities and a cursor for the next page.
 
 #### Implementation of
 
-`IEntityStorageConnector.query`
+`IEntityStorageMigrationConnector.query`
 
 ***
 
 ### count() {#count}
 
-> **count**(): `Promise`\<`number`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
 
 Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
 
 #### Returns
 
@@ -384,42 +528,4 @@ The total count of entities in the storage.
 
 #### Implementation of
 
-`IEntityStorageConnector.count`
-
-***
-
-### migrate() {#migrate}
-
-> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
-
-Migrate the storage to a new schema version for the current partition.
-
-**Strategy B:** `migrateEntities` copies from this connector into a temp
-Firestore collection whose ID is `${partitionCollectionId}_new`, then
-batch-deletes the live partition documents and copies migrated data back.
-Failures before the swap complete leave the live collection unchanged when
-possible; the temp collection is torn down in the error path.
-
-#### Parameters
-
-##### newSchema
-
-`IEntitySchema`
-
-The target entity schema.
-
-##### options?
-
-`IMigrationOptions`
-
-Options controlling migration behaviour.
-
-#### Returns
-
-`Promise`\<`IMigrationResult`\>
-
-The migration result.
-
-#### Implementation of
-
-`IEntityStorageConnector.migrate`
+`IEntityStorageMigrationConnector.count`

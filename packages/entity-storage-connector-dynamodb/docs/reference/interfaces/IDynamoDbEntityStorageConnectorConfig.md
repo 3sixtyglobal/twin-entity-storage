@@ -65,3 +65,12 @@ AWS endpoint, not usually required but could be used for local DynamoDB instance
 > `optional` **connectionTimeoutMs?**: `number`
 
 The connection timeout in milliseconds.
+
+***
+
+### maxAttempts? {#maxattempts}
+
+> `optional` **maxAttempts?**: `number`
+
+Maximum number of attempts for each SDK request (1 = no retries).
+Defaults to the AWS SDK default (3).

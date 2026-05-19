@@ -10,7 +10,7 @@ Class for performing entity storage operations using Cosmos DB.
 
 ## Implements
 
-- `IEntityStorageConnector`\<`T`\>
+- `IEntityStorageMigrationConnector`\<`T`\>
 
 ## Constructors
 
@@ -64,7 +64,7 @@ A promise that resolves to a boolean indicating success.
 
 #### Implementation of
 
-`IEntityStorageConnector.bootstrap`
+`IEntityStorageMigrationConnector.bootstrap`
 
 ***
 
@@ -82,7 +82,7 @@ The class name of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.className`
+`IEntityStorageMigrationConnector.className`
 
 ***
 
@@ -100,7 +100,7 @@ The health status of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.health`
+`IEntityStorageMigrationConnector.health`
 
 ***
 
@@ -118,7 +118,7 @@ The schema for the entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.getSchema`
+`IEntityStorageMigrationConnector.getSchema`
 
 ***
 
@@ -156,7 +156,7 @@ The object if it can be found or undefined.
 
 #### Implementation of
 
-`IEntityStorageConnector.get`
+`IEntityStorageMigrationConnector.get`
 
 ***
 
@@ -188,7 +188,7 @@ The id of the entity.
 
 #### Implementation of
 
-`IEntityStorageConnector.set`
+`IEntityStorageMigrationConnector.set`
 
 ***
 
@@ -214,7 +214,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.setBatch`
+`IEntityStorageMigrationConnector.setBatch`
 
 ***
 
@@ -232,7 +232,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.empty`
+`IEntityStorageMigrationConnector.empty`
 
 ***
 
@@ -264,7 +264,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.remove`
+`IEntityStorageMigrationConnector.remove`
 
 ***
 
@@ -290,7 +290,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.removeBatch`
+`IEntityStorageMigrationConnector.removeBatch`
 
 ***
 
@@ -316,7 +316,7 @@ True if the teardown process was successful.
 
 #### Implementation of
 
-`IEntityStorageConnector.teardown`
+`IEntityStorageMigrationConnector.teardown`
 
 ***
 
@@ -367,15 +367,23 @@ and a cursor which can be used to request more entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.query`
+`IEntityStorageMigrationConnector.query`
 
 ***
 
 ### count() {#count}
 
-> **count**(): `Promise`\<`number`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
 
 Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
 
 #### Returns
 
@@ -385,43 +393,140 @@ The total count of entities in the storage.
 
 #### Implementation of
 
-`IEntityStorageConnector.count`
+`IEntityStorageMigrationConnector.count`
 
 ***
 
-### migrate() {#migrate}
+### getPartitionContextIds() {#getpartitioncontextids}
 
-> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
 
-Migrate entities in-place to a new schema for the **current partition**.
-
-**Strategy C:** Cosmos DB has no atomic container rename suitable for
-emulation in CI. This uses `migrateEntities` with a **second connector
-instance** that shares the same container but registers the **target
-schema** so `setBatch` validates transformed documents. Writes are
-partition-scoped bulk upserts into the live container. A partial failure
-may leave some documents on the old shape — back up before migrating.
-
-#### Parameters
-
-##### newSchema
-
-`IEntitySchema`
-
-The target entity schema.
-
-##### options?
-
-`IMigrationOptions`
-
-Options controlling migration behaviour.
+Get a unique list of all the context ids from the storage.
 
 #### Returns
 
-`Promise`\<`IMigrationResult`\>
+`Promise`\<`IContextIds`[]\>
 
-The migration result.
+The list of unique context ids.
 
 #### Implementation of
 
-`IEntityStorageConnector.migrate`
+`IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### createTargetConnector() {#createtargetconnector}
+
+> **createTargetConnector**\<`U`\>(`newEntitySchema`): `Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Create the target connector for performing the migration using a temporary container.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### newEntitySchema
+
+`string`
+
+The name of the new entity schema to create the connector for.
+
+#### Returns
+
+`Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Connector for performing the migration.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.createTargetConnector`
+
+***
+
+### finalizeMigration() {#finalizemigration}
+
+> **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`CosmosDbEntityStorageConnector`\<`U`\>\>
+
+Finalize the migration by tearing down the old container and replacing it with the target container.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`CosmosDbEntityStorageConnector`\<`U`\>
+
+The target connector to finalize the migration with.
+
+##### options?
+
+`IMigrationOptions`\<`T`, `U`\>
+
+The options to control how the migration is finalized.
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging.
+
+#### Returns
+
+`Promise`\<`CosmosDbEntityStorageConnector`\<`U`\>\>
+
+The final connector pointing at the original container id.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.finalizeMigration`
+
+***
+
+### cleanupMigration() {#cleanupmigration}
+
+> **cleanupMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`void`\>
+
+Cleanup the migration if a migration fails or needs to be aborted.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`IEntityStorageConnector`\<`U`\> \| `undefined`
+
+The target connector to cleanup.
+
+##### options?
+
+`IMigrationOptions`\<`T`, `U`\>
+
+The options to control how the migration is cleaned up.
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.cleanupMigration`

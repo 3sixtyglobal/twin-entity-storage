@@ -1,6 +1,16 @@
-# Interface: IMigrationOptions
+# Interface: IMigrationOptions\<T, U\>
 
 Options controlling how a schema migration is executed.
+
+## Type Parameters
+
+### T
+
+`T`
+
+### U
+
+`U`
 
 ## Properties
 
@@ -18,45 +28,91 @@ Number of entities to read and write per batch.
 
 ***
 
-### transformEntity? {#transformentity}
+### transformEntityProperty? {#transformentityproperty}
 
-> `optional` **transformEntity?**: (`entity`) => `unknown`
+> `optional` **transformEntityProperty?**: (`schema1Property`, `schemaProperty2`, `value`) => `unknown`
 
-Optional transformation applied to each entity before it is written
-to the new schema. Required when the schema diff includes type changes
-or field renames. Receives the raw entity in its old shape and must
-return an object conforming to the new schema.
+Optional transformation for properties, usually only called for object and array types.
 
 #### Parameters
 
-##### entity
+##### schema1Property
+
+`IEntitySchemaProperty`\<`T`\>
+
+The property schema in the old schema.
+
+##### schemaProperty2
+
+`IEntitySchemaProperty`\<`U`\>
+
+The property schema in the new schema.
+
+##### value
 
 `unknown`
 
-The entity in its current (old) shape.
+The value of the property in the old schema.
 
 #### Returns
 
 `unknown`
 
-The entity transformed to match the new schema.
+The transformed value to match the new schema.
 
 ***
 
-### onProgress? {#onprogress}
+### onPartitionProgress? {#onpartitionprogress}
 
-> `optional` **onProgress?**: (`migrated`) => `Promise`\<`void`\>
+> `optional` **onPartitionProgress?**: (`rowTotal`, `rowIndex`) => `Promise`\<`void`\>
 
-Called after each batch is successfully written.
-Receives the running total of migrated entities.
+Called for each partition for progress tracking.
 
 #### Parameters
 
-##### migrated
+##### rowTotal
 
 `number`
 
-Running total of entities successfully migrated so far.
+The total number of rows to migrate.
+
+##### rowIndex
+
+`number`
+
+The number of rows migrated so far.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+***
+
+### onStepProgress? {#onstepprogress}
+
+> `optional` **onStepProgress?**: (`stepKey`, `itemTotal`, `itemIndex`) => `Promise`\<`void`\>
+
+Called for overall progress tracking.
+
+#### Parameters
+
+##### stepKey
+
+`string`
+
+The key representing the current step in the migration.
+
+##### itemTotal
+
+`number`
+
+The total number of items in this progress.
+
+##### itemIndex
+
+`number`
+
+The number of items processed so far.
 
 #### Returns
 

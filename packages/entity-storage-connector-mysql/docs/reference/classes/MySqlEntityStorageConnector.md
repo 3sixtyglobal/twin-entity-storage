@@ -10,7 +10,7 @@ Class for performing entity storage operations using MySql.
 
 ## Implements
 
-- `IEntityStorageConnector`\<`T`\>
+- `IEntityStorageMigrationConnector`\<`T`\>
 
 ## Constructors
 
@@ -56,7 +56,7 @@ The class name of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.className`
+`IEntityStorageMigrationConnector.className`
 
 ***
 
@@ -74,7 +74,7 @@ The health of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.health`
+`IEntityStorageMigrationConnector.health`
 
 ***
 
@@ -92,7 +92,7 @@ The schema for the entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.getSchema`
+`IEntityStorageMigrationConnector.getSchema`
 
 ***
 
@@ -118,7 +118,7 @@ A promise that resolves to a boolean indicating success.
 
 #### Implementation of
 
-`IEntityStorageConnector.bootstrap`
+`IEntityStorageMigrationConnector.bootstrap`
 
 ***
 
@@ -144,7 +144,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.stop`
+`IEntityStorageMigrationConnector.stop`
 
 ***
 
@@ -182,7 +182,7 @@ The object if it can be found or undefined.
 
 #### Implementation of
 
-`IEntityStorageConnector.get`
+`IEntityStorageMigrationConnector.get`
 
 ***
 
@@ -214,7 +214,7 @@ The id of the entity.
 
 #### Implementation of
 
-`IEntityStorageConnector.set`
+`IEntityStorageMigrationConnector.set`
 
 ***
 
@@ -240,7 +240,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.setBatch`
+`IEntityStorageMigrationConnector.setBatch`
 
 ***
 
@@ -258,7 +258,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.empty`
+`IEntityStorageMigrationConnector.empty`
 
 ***
 
@@ -290,7 +290,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.remove`
+`IEntityStorageMigrationConnector.remove`
 
 ***
 
@@ -316,7 +316,7 @@ True if the teardown process was successful.
 
 #### Implementation of
 
-`IEntityStorageConnector.teardown`
+`IEntityStorageMigrationConnector.teardown`
 
 ***
 
@@ -342,7 +342,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.removeBatch`
+`IEntityStorageMigrationConnector.removeBatch`
 
 ***
 
@@ -393,15 +393,23 @@ and a cursor which can be used to request more entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.query`
+`IEntityStorageMigrationConnector.query`
 
 ***
 
 ### count() {#count}
 
-> **count**(): `Promise`\<`number`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
 
 Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
 
 #### Returns
 
@@ -411,7 +419,145 @@ The total count of entities in the storage.
 
 #### Implementation of
 
-`IEntityStorageConnector.count`
+`IEntityStorageMigrationConnector.count`
+
+***
+
+### getPartitionContextIds() {#getpartitioncontextids}
+
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+
+Get all unique partition context ids present in the table.
+
+#### Returns
+
+`Promise`\<`IContextIds`[]\>
+
+An array of context id objects, one per unique partition.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### createTargetConnector() {#createtargetconnector}
+
+> **createTargetConnector**\<`U`\>(`newEntitySchema`): `Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Create the target connector for performing the migration using a temporary table.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### newEntitySchema
+
+`string`
+
+The name of the new entity schema to create the connector for.
+
+#### Returns
+
+`Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Connector for performing the migration.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.createTargetConnector`
+
+***
+
+### finalizeMigration() {#finalizemigration}
+
+> **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`MySqlEntityStorageConnector`\<`U`\>\>
+
+Finalize the migration by dropping the source table and renaming the migration table to the original name.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`MySqlEntityStorageConnector`\<`U`\>
+
+The connector holding the migrated data in a temporary table.
+
+##### options?
+
+`IMigrationOptions`\<`T`, `U`\>
+
+The options to control how the migration is finalized.
+
+##### loggingComponentType?
+
+`string`
+
+The logging component type to use during finalization.
+
+#### Returns
+
+`Promise`\<`MySqlEntityStorageConnector`\<`U`\>\>
+
+The final connector using the original table name with the new schema.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.finalizeMigration`
+
+***
+
+### cleanupMigration() {#cleanupmigration}
+
+> **cleanupMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`void`\>
+
+Cleanup a failed or aborted migration by dropping the temporary migration table.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`IEntityStorageConnector`\<`U`\> \| `undefined`
+
+The target connector to cleanup.
+
+##### options?
+
+`IMigrationOptions`\<`T`, `U`\>
+
+The options to control how the migration is cleaned up.
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+A promise that resolves when the cleanup is complete.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.cleanupMigration`
 
 ***
 
@@ -441,46 +587,3 @@ Should be called when the connector is no longer needed.
 `Promise`\<`void`\>
 
 Nothing.
-
-***
-
-### migrate() {#migrate}
-
-> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
-
-Migrate the MySQL table to a new schema version.
-
-**Full-table scope:** Unlike schemaless connectors, this migration always
-operates on ALL rows in the table regardless of partition. MySQL's
-`RENAME TABLE` is a full-table atomic operation, so it is not possible
-to migrate a single partition in isolation. Callers must ensure no other
-writes occur during migration.
-
-**Safe-swap:** data is first written into a `_migration` table with the new
-schema. Only on full success are the tables atomically swapped via a single
-`RENAME TABLE` statement. A failure leaves the live table untouched.
-
-#### Parameters
-
-##### newSchema
-
-`IEntitySchema`
-
-The target schema to migrate toward.
-
-##### options?
-
-`IMigrationOptions`
-
-Optional configuration controlling batch size, transform
-and progress callback.
-
-#### Returns
-
-`Promise`\<`IMigrationResult`\>
-
-A result describing how many entities were migrated.
-
-#### Implementation of
-
-`IEntityStorageConnector.migrate`

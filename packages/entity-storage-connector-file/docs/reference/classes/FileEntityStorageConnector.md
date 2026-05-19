@@ -373,9 +373,17 @@ and a cursor which can be used to request more entities.
 
 ### count() {#count}
 
-> **count**(): `Promise`\<`number`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
 
 Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
 
 #### Returns
 
@@ -389,32 +397,122 @@ The total count of entities in the storage.
 
 ***
 
-### migrate() {#migrate}
+### getPartitionContextIds() {#getpartitioncontextids}
 
-> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
 
-Migrate entities to a new schema using in-place patching.
-
-#### Parameters
-
-##### newSchema
-
-`IEntitySchema`
-
-The target entity schema.
-
-##### options?
-
-`IMigrationOptions`
-
-Options controlling migration behaviour.
+Get a unique list of all the context ids from the storage.
 
 #### Returns
 
-`Promise`\<`IMigrationResult`\>
+`Promise`\<`IContextIds`[]\>
 
-The migration result.
+The list of unique context ids.
 
-#### Implementation of
+***
 
-`IEntityStorageConnector.migrate`
+### createTargetConnector() {#createtargetconnector}
+
+> **createTargetConnector**\<`U`\>(`newEntitySchema`): `Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Create the target connector for performing the migration it will use a temporary storage location.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### newEntitySchema
+
+`string`
+
+The name of the new entity schema to create the connector for.
+
+#### Returns
+
+`Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Connector for performing the migration.
+
+***
+
+### finalizeMigration() {#finalizemigration}
+
+> **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Finalize the migration by tearing down the old connector and replacing it with the target connector.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`FileEntityStorageConnector`\<`U`\>
+
+The target connector to finalize the migration with.
+
+##### options?
+
+`IMigrationOptions`\<`T`, `U`\>
+
+The options to control how the migration is finalized.
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging the migration progress.
+
+#### Returns
+
+`Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+A promise that resolves when the migration is finalized.
+
+***
+
+### cleanupMigration() {#cleanupmigration}
+
+> **cleanupMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`void`\>
+
+Cleanup the migration if a migration fails or needs to be aborted.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`IEntityStorageConnector`\<`U`\> \| `undefined`
+
+The target connector to cleanup the migration with.
+
+##### options?
+
+`IMigrationOptions`\<`T`, `U`\>
+
+The options to control how the migration is cleaned up.
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging the migration progress.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+A promise that resolves when the migration is cleaned up.

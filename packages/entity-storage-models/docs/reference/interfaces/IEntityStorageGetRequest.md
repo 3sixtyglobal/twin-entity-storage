@@ -29,3 +29,9 @@ The query parameters.
 > `optional` **secondaryIndex?**: `string`
 
 The secondary index to query with the id.
+
+#### conditions?
+
+> `optional` **conditions?**: `string`
+
+The optional conditions to match for the entity, JSON encoded array of property/value pairs.

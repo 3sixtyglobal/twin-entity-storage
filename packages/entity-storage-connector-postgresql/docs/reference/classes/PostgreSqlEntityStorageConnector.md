@@ -10,7 +10,7 @@ Class for performing entity storage operations using ql.
 
 ## Implements
 
-- `IEntityStorageConnector`\<`T`\>
+- `IEntityStorageMigrationConnector`\<`T`\>
 
 ## Constructors
 
@@ -64,7 +64,7 @@ A promise that resolves to a boolean indicating success.
 
 #### Implementation of
 
-`IEntityStorageConnector.bootstrap`
+`IEntityStorageMigrationConnector.bootstrap`
 
 ***
 
@@ -82,7 +82,7 @@ The class name of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.className`
+`IEntityStorageMigrationConnector.className`
 
 ***
 
@@ -100,7 +100,7 @@ The health of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.health`
+`IEntityStorageMigrationConnector.health`
 
 ***
 
@@ -118,7 +118,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.stop`
+`IEntityStorageMigrationConnector.stop`
 
 ***
 
@@ -136,7 +136,7 @@ The schema for the entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.getSchema`
+`IEntityStorageMigrationConnector.getSchema`
 
 ***
 
@@ -174,7 +174,7 @@ The object if it can be found or undefined.
 
 #### Implementation of
 
-`IEntityStorageConnector.get`
+`IEntityStorageMigrationConnector.get`
 
 ***
 
@@ -206,7 +206,7 @@ The id of the entity.
 
 #### Implementation of
 
-`IEntityStorageConnector.set`
+`IEntityStorageMigrationConnector.set`
 
 ***
 
@@ -232,7 +232,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.setBatch`
+`IEntityStorageMigrationConnector.setBatch`
 
 ***
 
@@ -250,7 +250,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.empty`
+`IEntityStorageMigrationConnector.empty`
 
 ***
 
@@ -282,7 +282,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.remove`
+`IEntityStorageMigrationConnector.remove`
 
 ***
 
@@ -308,7 +308,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.removeBatch`
+`IEntityStorageMigrationConnector.removeBatch`
 
 ***
 
@@ -334,7 +334,143 @@ True if the teardown process was successful.
 
 #### Implementation of
 
-`IEntityStorageConnector.teardown`
+`IEntityStorageMigrationConnector.teardown`
+
+***
+
+### getPartitionContextIds() {#getpartitioncontextids}
+
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+
+Get all the distinct partition context ids from the storage.
+
+#### Returns
+
+`Promise`\<`IContextIds`[]\>
+
+An array of context id objects, one per unique partition.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### createTargetConnector() {#createtargetconnector}
+
+> **createTargetConnector**\<`U`\>(`entitySchemaName`): `Promise`\<`PostgreSqlEntityStorageConnector`\<`U`\>\>
+
+Create a new target connector for the migration.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### entitySchemaName
+
+`string`
+
+The entity schema name to use for the target connector.
+
+#### Returns
+
+`Promise`\<`PostgreSqlEntityStorageConnector`\<`U`\>\>
+
+A new connector configured with a migration table name.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.createTargetConnector`
+
+***
+
+### finalizeMigration() {#finalizemigration}
+
+> **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`PostgreSqlEntityStorageConnector`\<`U`\>\>
+
+Finalize the migration by renaming the migration table to the original table name.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`PostgreSqlEntityStorageConnector`\<`U`\>
+
+The connector pointing to the migration table.
+
+##### options?
+
+`IMigrationOptions`\<`T`, `U`\>
+
+The optional migration options.
+
+##### loggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`PostgreSqlEntityStorageConnector`\<`U`\>\>
+
+A connector pointing to the final (renamed) table.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.finalizeMigration`
+
+***
+
+### cleanupMigration() {#cleanupmigration}
+
+> **cleanupMigration**\<`U`\>(`targetConnector?`, `options?`, `loggingComponentType?`): `Promise`\<`void`\>
+
+Clean up the migration by tearing down the migration table.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector?
+
+`PostgreSqlEntityStorageConnector`\<`U`\>
+
+The connector pointing to the migration table.
+
+##### options?
+
+`IMigrationOptions`\<`T`, `U`\>
+
+The optional migration options.
+
+##### loggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.cleanupMigration`
 
 ***
 
@@ -385,15 +521,23 @@ and a cursor which can be used to request more entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.query`
+`IEntityStorageMigrationConnector.query`
 
 ***
 
 ### count() {#count}
 
-> **count**(): `Promise`\<`number`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
 
 Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
 
 #### Returns
 
@@ -403,49 +547,4 @@ The total count of entities in the storage.
 
 #### Implementation of
 
-`IEntityStorageConnector.count`
-
-***
-
-### migrate() {#migrate}
-
-> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
-
-Migrate the PostgreSQL table to a new schema version.
-
-**Full-table scope:** This migration reads and rewrites **all rows** in the
-physical table. PostgreSQL has no per-partition table rename; the final swap
-runs inside **`sql.begin()`** (postgres.js) so the renames and `DROP` commit
-atomically. All `partitionId` values in the table are preserved. Callers must ensure no concurrent writes during migration.
-
-**Safe-swap:** Rows are copied into `{tableName}_migration` with the new
-schema. Only on full success is the live table replaced via `ALTER TABLE …
-RENAME` and `DROP` inside **`dbConnection.begin()`** (do not use raw
-`BEGIN`/`COMMIT` with `unsafe()`; postgres.js rejects that). A failure during
-the copy phase leaves the live table unchanged (the migration table is dropped
-in `catch`).
-
-#### Parameters
-
-##### newSchema
-
-`IEntitySchema`
-
-The target schema to migrate toward.
-
-##### options?
-
-`IMigrationOptions`
-
-Optional configuration controlling batch size, transform
-and progress callback.
-
-#### Returns
-
-`Promise`\<`IMigrationResult`\>
-
-A result describing how many entities were migrated.
-
-#### Implementation of
-
-`IEntityStorageConnector.migrate`
+`IEntityStorageMigrationConnector.count`

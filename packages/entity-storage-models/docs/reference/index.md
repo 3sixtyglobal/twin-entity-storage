@@ -1,11 +1,16 @@
 # @twin.org/entity-storage-models
 
+## Classes
+
+- [EntityHelper](classes/EntityHelper.md)
+- [MigrationHelper](classes/MigrationHelper.md)
+
 ## Interfaces
 
 - [IEntityStorageComponent](interfaces/IEntityStorageComponent.md)
 - [IEntityStorageConnector](interfaces/IEntityStorageConnector.md)
+- [IEntityStorageMigrationConnector](interfaces/IEntityStorageMigrationConnector.md)
 - [IMigrationOptions](interfaces/IMigrationOptions.md)
-- [IMigrationResult](interfaces/IMigrationResult.md)
 - [IEntityStorageCountRequest](interfaces/IEntityStorageCountRequest.md)
 - [IEntityStorageCountResponse](interfaces/IEntityStorageCountResponse.md)
 - [IEntityStorageEmptyRequest](interfaces/IEntityStorageEmptyRequest.md)
@@ -21,7 +26,3 @@
 ## Variables
 
 - [EntityStorageConnectorFactory](variables/EntityStorageConnectorFactory.md)
-
-## Functions
-
-- [migrateEntities](functions/migrateEntities.md)

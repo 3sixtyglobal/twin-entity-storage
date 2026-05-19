@@ -66,9 +66,9 @@ The port to connect to.
 
 ***
 
-### tableName? {#tablename}
+### tableName {#tablename}
 
-> `optional` **tableName?**: `string`
+> **tableName**: `string`
 
 The name of the table for the storage.
 
