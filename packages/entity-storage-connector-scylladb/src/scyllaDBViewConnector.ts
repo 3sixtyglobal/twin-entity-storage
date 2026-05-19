@@ -83,7 +83,7 @@ export class ScyllaDBViewConnector<T>
 			source: ScyllaDBViewConnector.CLASS_NAME,
 			ts: Date.now(),
 			message: "viewCreating",
-			data: { view: this._fullTableName }
+			data: { view: super.safeTableName(this._fullTableName) }
 		});
 
 		try {
@@ -113,7 +113,7 @@ export class ScyllaDBViewConnector<T>
 				source: ScyllaDBViewConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "viewCreated",
-				data: { view: this._fullTableName }
+				data: { view: super.safeTableName(this._fullTableName) }
 			});
 		} catch (err) {
 			if (BaseError.isErrorCode(err, "ResourceInUseException")) {
@@ -122,7 +122,7 @@ export class ScyllaDBViewConnector<T>
 					source: ScyllaDBViewConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "viewExists",
-					data: { view: this._fullTableName }
+					data: { view: super.safeTableName(this._fullTableName) }
 				});
 			} else {
 				await nodeLogging?.log({

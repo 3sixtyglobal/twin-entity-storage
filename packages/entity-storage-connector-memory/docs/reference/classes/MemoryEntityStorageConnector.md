@@ -374,3 +374,35 @@ Get the memory store.
 `T`[]
 
 The store.
+
+***
+
+### migrate() {#migrate}
+
+> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+
+Migrate the entity storage to a new schema using in-place patching.
+
+#### Parameters
+
+##### newSchema
+
+`IEntitySchema`
+
+The target schema to migrate to.
+
+##### options?
+
+`IMigrationOptions`
+
+Options controlling migration behaviour.
+
+#### Returns
+
+`Promise`\<`IMigrationResult`\>
+
+The result of the migration.
+
+#### Implementation of
+
+`IEntityStorageConnector.migrate`

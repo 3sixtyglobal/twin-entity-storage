@@ -341,7 +341,10 @@ export async function entityStorageSet(
 	Guards.object<IEntityStorageSetRequest>(ROUTES_SOURCE, nameof(request), request);
 
 	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
-	await component.set(request.body);
+	await component.set(
+		request.body,
+		HttpParameterHelper.objectFromString(request.query?.conditions)
+	);
 	return {
 		statusCode: HttpStatusCode.noContent
 	};
@@ -409,7 +412,8 @@ export async function entityStorageGet(
 	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
 	const item = await component.get(
 		request.pathParams.id,
-		request.query?.secondaryIndex as keyof unknown
+		request.query?.secondaryIndex as keyof unknown,
+		HttpParameterHelper.objectFromString(request.query?.conditions)
 	);
 	return {
 		body: item
@@ -437,7 +441,10 @@ export async function entityStorageRemove(
 	Guards.stringValue(ROUTES_SOURCE, nameof(request.pathParams.id), request.pathParams.id);
 
 	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
-	await component.remove(request.pathParams.id);
+	await component.remove(
+		request.pathParams.id,
+		HttpParameterHelper.objectFromString(request.query?.conditions)
+	);
 	return {
 		statusCode: HttpStatusCode.noContent
 	};
@@ -484,7 +491,9 @@ export async function entityStorageCount(
 	request: IEntityStorageCountRequest
 ): Promise<IEntityStorageCountResponse> {
 	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
-	const count = await component.count();
+	const count = await component.count(
+		HttpParameterHelper.objectFromString(request.query?.conditions)
+	);
 	return {
 		body: { count }
 	};

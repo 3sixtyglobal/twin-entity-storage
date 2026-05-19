@@ -4,5 +4,14 @@
 /**
  * Count the entries in entity storage.
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-interface
-export interface IEntityStorageCountRequest {}
+export interface IEntityStorageCountRequest {
+	/**
+	 * The query parameters.
+	 */
+	query?: {
+		/**
+		 * The optional conditions to filter the count, JSON encoded EntityCondition.
+		 */
+		conditions?: string;
+	};
+}

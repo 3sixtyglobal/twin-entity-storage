@@ -1,8 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { readFile, rm } from "node:fs/promises";
 import { ContextIdStore } from "@twin.org/context";
-import { ComponentFactory, Converter, HealthStatus, RandomHelper } from "@twin.org/core";
+import { RandomHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -12,34 +11,65 @@ import {
 	entity,
 	property
 } from "@twin.org/entity";
-import { MemoryEntityStorageConnector } from "@twin.org/entity-storage-connector-memory";
-import { EntityStorageConnectorFactory } from "@twin.org/entity-storage-models";
-import {
-	EntityStorageLoggingConnector,
-	type LogEntry,
-	initSchema
-} from "@twin.org/logging-connector-entity-storage";
-import { LoggingConnectorFactory } from "@twin.org/logging-models";
-import { LoggingService } from "@twin.org/logging-service";
+import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
 import { FileEntityStorageConnector } from "../src/fileEntityStorageConnector.js";
-import type { IFileEntityStorageConnectorConfig } from "../src/models/IFileEntityStorageConnectorConfig.js";
 
-/**
- * Test SubType Definition.
- */
+// These tests are duplicated across all connectors. If you modify anything here make sure to
+// apply the same change to all other connectors to keep them in sync.
+// The createConnector factory is the only code that should differ between files.
+
+// Does the connector support dot-notation property paths.
+const SUPPORT_DOT_NOTATION = true;
+// Does the connector support null/undefined comparisons.
+const SUPPORT_NULL_UNDEFINED_COMPARISON = true;
+// Does the connector support OR logical operators in conditions.
+const SUPPORT_OR_CONDITIONS = true;
+// Does the connector support NotEquals (!=) comparisons.
+const SUPPORT_NOT_EQUALS = true;
+// Does the connector support NotIncludes (NOT LIKE) comparisons.
+const SUPPORT_NOT_INCLUDES = true;
+
 @entity()
 class SubType {
-	/**
-	 * Field1.
-	 */
 	@property({ type: "string", format: "date-time" })
 	public field1!: string;
 }
 
-/**
- * Test entity for optional number field (null/undefined comparison tests).
- */
+@entity()
+class TestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", isSecondary: true })
+	public value1!: string;
+
+	@property({ type: "number", format: "uint8" })
+	public value2!: number;
+
+	@property({ type: "object", itemTypeRef: "SubType", optional: true })
+	public value3?: SubType;
+
+	@property({ type: "object", optional: true })
+	public valueObject?: {
+		[id: string]: {
+			value: string;
+		};
+	};
+
+	@property({ type: "array", optional: true })
+	public valueArray?: {
+		field: string;
+		value: string;
+	}[];
+
+	@property({ type: "boolean", optional: true })
+	public isActive?: boolean;
+
+	@property({ type: "integer", format: "int32", optional: true })
+	public counter?: number;
+}
+
 @entity()
 class ExpiryTestType {
 	@property({ type: "string", isPrimary: true })
@@ -52,9 +82,6 @@ class ExpiryTestType {
 	public expires?: number;
 }
 
-/**
- * Nested search entity for dot-notation tests.
- */
 @entity()
 class NestedSearchType {
 	@property({ type: "string", isPrimary: true })
@@ -67,1095 +94,1074 @@ class NestedSearchType {
 	public items?: { label: string }[];
 }
 
-/**
- * Test Type Definition.
- */
-@entity()
-class TestType {
-	/**
-	 * Id.
-	 */
-	@property({ type: "string", isPrimary: true })
-	public id!: string;
-
-	/**
-	 * Value1.
-	 */
-	@property({ type: "string" })
-	public value1!: string;
-
-	/**
-	 * Value2.
-	 */
-	@property({ type: "string" })
-	public value2!: string;
-
-	/**
-	 * Value3.
-	 */
-	@property({ type: "object", itemTypeRef: "SubType", optional: true })
-	public value3?: SubType;
-}
-
 let currentUser = "user";
+let currentConnector: IEntityStorageConnector | undefined;
 
-let memoryEntityStorage: MemoryEntityStorageConnector<LogEntry>;
-
-const TEST_DIRECTORY_ROOT = "./.tmp/";
-const TEST_DIRECTORY = `${TEST_DIRECTORY_ROOT}test-data-${Converter.bytesToHex(RandomHelper.generate(8))}`;
-const TEST_STORE_NAME = `${TEST_DIRECTORY}/store.json`;
-
-const { mockStatfs } = vi.hoisted(() => ({ mockStatfs: vi.fn() }));
-
-vi.mock("node:fs/promises", async importOriginal => {
-	// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-	const actual = await importOriginal<typeof import("node:fs/promises")>();
-	return { ...actual, statfs: mockStatfs };
-});
+// Swap this factory to run these tests against a different connector implementation.
+// It receives the entity schema name and optional partition context ids and must return
+// a fresh, bootstrapped IEntityStorageConnector configured for those settings.
+let createConnector: <T>(
+	entitySchema: string,
+	partitionContextIds?: string[]
+) => Promise<IEntityStorageConnector<T>>;
 
 describe("FileEntityStorageConnector", () => {
 	beforeAll(async () => {
+		EntitySchemaFactory.register(nameof<SubType>(), () => EntitySchemaHelper.getSchema(SubType));
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
-		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
-			EntitySchemaHelper.getSchema(NestedSearchType)
-		);
 		EntitySchemaFactory.register(nameof<ExpiryTestType>(), () =>
 			EntitySchemaHelper.getSchema(ExpiryTestType)
 		);
-		initSchema();
+		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
+			EntitySchemaHelper.getSchema(NestedSearchType)
+		);
+
+		createConnector = async <T>(entitySchema: string, partitionContextIds?: string[]) => {
+			currentConnector = new FileEntityStorageConnector<T>({
+				entitySchema,
+				partitionContextIds,
+				config: { directory: `./.tmp/test-data-${RandomHelper.generateUuidV7()}` }
+			});
+			await currentConnector?.bootstrap?.();
+			return currentConnector as IEntityStorageConnector<T>;
+		};
 
 		ContextIdStore.getContextIds = vi
 			.fn()
 			.mockImplementation(() => ({ node: "node", tenant: "tenant", user: currentUser }));
 	});
 
-	beforeEach(() => {
-		memoryEntityStorage = new MemoryEntityStorageConnector<LogEntry>({
-			entitySchema: nameof<LogEntry>()
-		});
-		EntityStorageConnectorFactory.register("log-entry", () => memoryEntityStorage);
-
-		LoggingConnectorFactory.register("logging", () => new EntityStorageLoggingConnector());
-		ComponentFactory.register("logging", () => new LoggingService());
-	});
-
 	afterEach(async () => {
+		currentUser = "user";
 		try {
-			await rm(TEST_DIRECTORY_ROOT, { recursive: true });
+			await currentConnector?.teardown?.();
 		} catch {}
-	});
-
-	test("can fail to construct when there is no options", async () => {
-		expect(
-			() =>
-				new FileEntityStorageConnector(
-					undefined as unknown as {
-						loggingComponentType?: string;
-						entitySchema: string;
-						config: IFileEntityStorageConnectorConfig;
-					}
-				)
-		).toThrow(
-			expect.objectContaining({
-				name: "GuardError",
-				message: "guard.objectUndefined",
-				properties: {
-					property: "options",
-					value: "undefined"
-				}
-			})
-		);
-	});
-
-	test("can fail to construct when there is no schema", async () => {
-		expect(
-			() =>
-				new FileEntityStorageConnector(
-					{} as unknown as {
-						loggingComponentType?: string;
-						entitySchema: string;
-						config: IFileEntityStorageConnectorConfig;
-					}
-				)
-		).toThrow(
-			expect.objectContaining({
-				name: "GuardError",
-				message: "guard.string",
-				properties: {
-					property: "options.entitySchema",
-					value: "undefined"
-				}
-			})
-		);
-	});
-
-	test("can fail to construct when there is no config", async () => {
-		expect(
-			() =>
-				new FileEntityStorageConnector({ entitySchema: "test" } as unknown as {
-					loggingComponentType?: string;
-					entitySchema: string;
-					config: IFileEntityStorageConnectorConfig;
-				})
-		).toThrow(
-			expect.objectContaining({
-				name: "GuardError",
-				message: "guard.objectUndefined",
-				properties: {
-					property: "options.config",
-					value: "undefined"
-				}
-			})
-		);
-	});
-
-	test("can fail to construct when there is no config directory", async () => {
-		expect(
-			() =>
-				new FileEntityStorageConnector({ entitySchema: "test", config: {} } as unknown as {
-					loggingComponentType?: string;
-					entitySchema: string;
-					config: IFileEntityStorageConnectorConfig;
-				})
-		).toThrow(
-			expect.objectContaining({
-				name: "GuardError",
-				message: "guard.string",
-				properties: {
-					property: "options.config.directory",
-					value: "undefined"
-				}
-			})
-		);
-	});
-
-	test("can construct", async () => {
-		const entityStorage = new FileEntityStorageConnector({
-			entitySchema: nameof<TestType>(),
-			config: {
-				directory: TEST_DIRECTORY
-			}
-		});
-		expect(entityStorage).toBeDefined();
-	});
-
-	test("can fail to bootstrap with invalid directory", async () => {
-		const entityStorage = new FileEntityStorageConnector({
-			entitySchema: nameof<TestType>(),
-			config: {
-				directory: "|\0"
-			}
-		});
-		await entityStorage.bootstrap("logging");
-		const logs = memoryEntityStorage.getStore();
-		expect(logs).toBeDefined();
-		expect(logs?.length).toEqual(2);
-		expect(logs?.[0].message).toEqual("directoryCreating");
-		expect(logs?.[1].message).toEqual("directoryCreateFailed");
-	});
-
-	test("can bootstrap and create directory", async () => {
-		const entityStorage = new FileEntityStorageConnector({
-			entitySchema: nameof<TestType>(),
-			config: {
-				directory: TEST_DIRECTORY
-			}
-		});
-		await entityStorage.bootstrap("logging");
-		const logs = memoryEntityStorage.getStore();
-		expect(logs).toBeDefined();
-		expect(logs?.length).toEqual(2);
-		expect(logs?.[0].message).toEqual("directoryCreating");
-		expect(logs?.[1].message).toEqual("directoryCreated");
-	});
-
-	test("can bootstrap and skip existing directory", async () => {
-		const entityStorage = new FileEntityStorageConnector({
-			entitySchema: nameof<TestType>(),
-			config: {
-				directory: TEST_DIRECTORY
-			}
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.bootstrap("logging");
-		const logs = memoryEntityStorage.getStore();
-		expect(logs).toBeDefined();
-		expect(logs?.length).toEqual(3);
-		expect(logs?.[2].message).toEqual("directoryExists");
+		try {
+			await currentConnector?.stop?.();
+		} catch {}
+		currentConnector = undefined;
 	});
 
 	test("can fail to set an item with no entity", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await expect(entityStorage.set(undefined as unknown as TestType)).rejects.toMatchObject({
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await expect(connector.set(undefined as unknown as TestType)).rejects.toMatchObject({
 			name: "GuardError",
 			message: "guard.objectUndefined",
-			properties: {
-				property: "entity",
-				value: "undefined"
-			}
+			properties: { property: "entity", value: "undefined" }
 		});
 	});
 
 	test("can set an item", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
-
-		const file = await readFile(TEST_STORE_NAME, "utf8");
-		const store = JSON.parse(file);
-		expect(store).toBeDefined();
-		expect(store.length).toEqual(1);
-		expect(store[0]).toBeDefined();
-		expect(store[0].id).toEqual("1");
-		expect(store[0].value1).toEqual("aaa");
-		expect(store[0].value2).toEqual("bbb");
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 35 });
+		const item = await connector.get("1");
+		expect(item).toBeDefined();
+		expect(item?.id).toEqual("1");
+		expect(item?.value1).toEqual("aaa");
+		expect(item?.value2).toEqual(35);
 	});
 
 	test("can set an item with a condition", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" }, [
-			{ property: "value1", value: "aaa" }
-		]);
-
-		const file = await readFile(TEST_STORE_NAME, "utf8");
-		const store = JSON.parse(file);
-		expect(store).toBeDefined();
-		expect(store.length).toEqual(1);
-		expect(store[0]).toBeDefined();
-		expect(store[0].id).toEqual("1");
-		expect(store[0].value1).toEqual("aaa");
-		expect(store[0].value2).toEqual("bbb");
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set(
+			{ id: "1", value1: "aaa", value2: 35, value3: { field1: new Date().toISOString() } },
+			[{ property: "value1", value: "aaa" }]
+		);
+		const item = await connector.get("1");
+		expect(item?.id).toEqual("1");
+		expect(item?.value1).toEqual("aaa");
+		expect(item?.value2).toEqual(35);
 	});
 
 	test("can set an item to update it", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 35 });
+		await connector.set({ id: "1", value1: "aaa", value2: 99 });
+		const item = await connector.get("1");
+		expect(item?.value2).toEqual(99);
+	});
+
+	test("can set an item to update it with a matched condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 35 });
+		await connector.set({ id: "1", value1: "aaa", value2: 99 }, [
+			{ property: "value1", value: "aaa" }
+		]);
+		const item = await connector.get("1");
+		expect(item?.value2).toEqual(99);
+	});
+
+	test("can fail to set an item to update it with an unmatched condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 35 });
+		await connector.set({ id: "1", value1: "aaa", value2: 99 }, [
+			{ property: "value1", value: "bbb" }
+		]);
+		const item = await connector.get("1");
+		expect(item?.value2).toEqual(35);
+	});
+
+	test("can fail to set batch with no entities", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await expect(connector.setBatch(undefined as unknown as TestType[])).rejects.toMatchObject({
+			name: "GuardError",
+			message: "guard.array",
+			properties: { property: "entities", value: "undefined" }
 		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
-
-		await entityStorage.set({ id: "1", value1: "ccc", value2: "ddd" });
-
-		const file = await readFile(TEST_STORE_NAME, "utf8");
-		const store = JSON.parse(file);
-		expect(store).toBeDefined();
-		expect(store.length).toEqual(1);
-		expect(store[0]).toBeDefined();
-		expect(store[0].id).toEqual("1");
-		expect(store[0].value1).toEqual("ccc");
-		expect(store[0].value2).toEqual("ddd");
 	});
 
 	test("can set batch of items", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.setBatch([
-			{ id: "1", value1: "aaa", value2: "bbb" },
-			{ id: "2", value1: "ccc", value2: "ddd" },
-			{ id: "3", value1: "eee", value2: "fff" }
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.setBatch([
+			{ id: "1", value1: "aaa", value2: 10 },
+			{ id: "2", value1: "bbb", value2: 20 },
+			{ id: "3", value1: "ccc", value2: 30 }
 		]);
-		const file = await readFile(TEST_STORE_NAME, "utf8");
-		const store = JSON.parse(file);
-		expect(store.length).toEqual(3);
-		expect(store[0].id).toEqual("1");
-		expect(store[1].id).toEqual("2");
-		expect(store[2].id).toEqual("3");
+		const item1 = await connector.get("1");
+		expect(item1?.value1).toEqual("aaa");
+		const item3 = await connector.get("3");
+		expect(item3?.value2).toEqual(30);
+		expect(await connector.count()).toEqual(3);
 	});
 
 	test("can set batch updating existing items", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
-		await entityStorage.setBatch([
-			{ id: "1", value1: "aaa-updated", value2: "bbb-updated" },
-			{ id: "2", value1: "ccc", value2: "ddd" }
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 10 });
+		await connector.setBatch([
+			{ id: "1", value1: "aaa-updated", value2: 99 },
+			{ id: "2", value1: "bbb", value2: 20 }
 		]);
-		const file = await readFile(TEST_STORE_NAME, "utf8");
-		const store = JSON.parse(file);
-		expect(store.length).toEqual(2);
-		expect(store[0].value1).toEqual("aaa-updated");
-		expect(store[1].id).toEqual("2");
+		const item1 = await connector.get("1");
+		expect(item1?.value1).toEqual("aaa-updated");
+		expect(item1?.value2).toEqual(99);
+		expect(await connector.count()).toEqual(2);
 	});
 
 	test("can fail to get an item with no id", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await expect(
-			entityStorage.get(undefined as unknown as string, undefined)
-		).rejects.toMatchObject({
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await expect(connector.get(undefined as unknown as string)).rejects.toMatchObject({
 			name: "GuardError",
 			message: "guard.string",
-			properties: {
-				property: "id",
-				value: "undefined"
-			}
+			properties: { property: "id", value: "undefined" }
 		});
 	});
 
 	test("can not get an item", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
-		const item = await entityStorage.get("2");
-
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 35 });
+		const item = await connector.get("2");
 		expect(item).toBeUndefined();
 	});
 
 	test("can get an item", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
-		const item = await entityStorage.get("1");
-
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "2", value1: "vvv", value2: 35, value3: undefined });
+		const item = await connector.get("2");
 		expect(item).toBeDefined();
-		expect(item?.id).toEqual("1");
-		expect(item?.value1).toEqual("aaa");
-		expect(item?.value2).toEqual("bbb");
+		expect(item?.id).toEqual("2");
+		expect(item?.value1).toEqual("vvv");
+		expect(item?.value2).toEqual(35);
+		expect(item?.value3).toBeUndefined();
+	});
+
+	test("treats null and undefined optional property values the same", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 35, value3: null as unknown as SubType });
+		await connector.set({ id: "2", value1: "bbb", value2: 35, value3: undefined });
+		const item1 = await connector.get("1");
+		const item2 = await connector.get("2");
+		expect(item1?.value3).toBeUndefined();
+		expect(item2?.value3).toBeUndefined();
+	});
+
+	test("treats null and undefined optional property values the same in setBatch", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.setBatch([
+			{ id: "1", value1: "aaa", value2: 35, value3: null as unknown as SubType },
+			{ id: "2", value1: "bbb", value2: 35, value3: undefined }
+		]);
+		const item1 = await connector.get("1");
+		const item2 = await connector.get("2");
+		expect(item1?.value3).toBeUndefined();
+		expect(item2?.value3).toBeUndefined();
 	});
 
 	test("can get an item by secondary index", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
-		const item = await entityStorage.get("aaa", "value1");
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "300", value1: "zzz", value2: 55 });
+		const item = await connector.get("zzz", "value1");
+		expect(item).toBeDefined();
+		expect(item?.id).toEqual("300");
+		expect(item?.value1).toEqual("zzz");
+		expect(item?.value2).toEqual(55);
+	});
 
+	test("can get an item by secondary index with condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "300", value1: "zzz", value2: 55 });
+		const item = await connector.get("zzz", "value1", [{ property: "value2", value: 55 }]);
+		expect(item).toBeDefined();
+		expect(item?.id).toEqual("300");
+		expect(item?.value1).toEqual("zzz");
+		expect(item?.value2).toEqual(55);
+	});
+
+	test("can fail to get an item by secondary index with unmatched condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "300", value1: "zzz", value2: 55 });
+		const item = await connector.get("zzz", "value1", [{ property: "value2", value: 99 }]);
+		expect(item).toBeUndefined();
+	});
+
+	test("get does not return additional internal keys", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>(), [
+			"node",
+			"tenant",
+			"user"
+		]);
+		await connector.set({ id: "1", value1: "aaa", value2: 35 });
+		const item = await connector.get("1");
+		expect(item).toBeDefined();
+		const schema = EntitySchemaFactory.get(nameof<TestType>());
+		const allowedKeys = new Set<string>(schema.properties?.map(p => p.property) ?? []);
+		const unexpectedKeys = Object.keys(item ?? {}).filter(k => !allowedKeys.has(k));
+		expect(unexpectedKeys).toEqual([]);
+	});
+
+	test("can fail to get an item with unmatched condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 99 });
+		const item = await connector.get("1", undefined, [{ property: "value1", value: "bbb" }]);
+		expect(item).toBeUndefined();
+	});
+
+	test("can get an item with condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 99 });
+		const item = await connector.get("1", undefined, [{ property: "value1", value: "aaa" }]);
 		expect(item).toBeDefined();
 		expect(item?.id).toEqual("1");
 		expect(item?.value1).toEqual("aaa");
-		expect(item?.value2).toEqual("bbb");
+		expect(item?.value2).toEqual(99);
 	});
 
 	test("can fail to remove an item with no id", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await expect(entityStorage.remove(undefined as unknown as string)).rejects.toMatchObject({
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await expect(connector.remove(undefined as unknown as string)).rejects.toMatchObject({
 			name: "GuardError",
 			message: "guard.string",
-			properties: {
-				property: "id",
-				value: "undefined"
-			}
+			properties: { property: "id", value: "undefined" }
 		});
 	});
 
 	test("can not remove an item", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
-
-		await entityStorage.remove("2");
-
-		const file = await readFile(TEST_STORE_NAME, "utf8");
-		const store = JSON.parse(file);
-		expect(store).toBeDefined();
-		expect(store.length).toEqual(1);
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 5555 });
+		await connector.remove("99999");
+		expect(await connector.count()).toEqual(1);
 	});
 
 	test("can remove an item", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
-		await entityStorage.remove("1");
-
-		const file = await readFile(TEST_STORE_NAME, "utf8");
-		const store = JSON.parse(file);
-		expect(store).toBeDefined();
-		expect(store.length).toEqual(0);
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 99 });
+		await connector.remove("1");
+		expect(await connector.get("1")).toBeUndefined();
 	});
 
 	test("can fail to remove an item with condition", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
-		await entityStorage.remove("1", [{ property: "value1", value: "aaa1" }]);
-
-		const file = await readFile(TEST_STORE_NAME, "utf8");
-		const store = JSON.parse(file);
-		expect(store).toBeDefined();
-		expect(store.length).toEqual(1);
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 99 });
+		await connector.remove("1", [{ property: "value1", value: "aaa1" }]);
+		expect(await connector.get("1")).toBeDefined();
 	});
 
 	test("can remove an item with condition", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
-		await entityStorage.remove("1", [{ property: "value1", value: "aaa" }]);
-
-		const file = await readFile(TEST_STORE_NAME, "utf8");
-		const store = JSON.parse(file);
-		expect(store).toBeDefined();
-		expect(store.length).toEqual(0);
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 99 });
+		await connector.remove("1", [{ property: "value1", value: "aaa" }]);
+		expect(await connector.get("1")).toBeUndefined();
 	});
 
-	test("can query items with empty store", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
+	test("can fail to remove batch with no ids", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await expect(connector.removeBatch(undefined as unknown as string[])).rejects.toMatchObject({
+			name: "GuardError",
+			message: "guard.array",
+			properties: { property: "ids", value: "undefined" }
 		});
-		await entityStorage.bootstrap("logging");
-		const result = await entityStorage.query();
-		expect(result).toBeDefined();
+	});
+
+	test("can remove batch of items", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 35 });
+		await connector.set({ id: "2", value1: "bbb", value2: 36 });
+		await connector.set({ id: "3", value1: "ccc", value2: 37 });
+		await connector.removeBatch(["1", "2"]);
+		expect(await connector.count()).toEqual(1);
+		expect(await connector.get("3")).toBeDefined();
+	});
+
+	test("can query with empty store", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		const result = await connector.query();
 		expect(result.entities.length).toEqual(0);
 		expect(result.cursor).toBeUndefined();
 	});
 
-	test("can query items with single entry", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
-		const result = await entityStorage.query();
-		expect(result).toBeDefined();
+	test("can query with single entry", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 95 });
+		const result = await connector.query();
 		expect(result.entities.length).toEqual(1);
 		expect(result.cursor).toBeUndefined();
 	});
 
-	test("can find items with single entry and single page with no resulting cursor", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "bbb" });
-		const result = await entityStorage.query(undefined, undefined, undefined, undefined, 1);
-		expect(result).toBeDefined();
+	test("can query with single entry and explicit page limit", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 95 });
+		const result = await connector.query(undefined, undefined, undefined, undefined, 1);
 		expect(result.entities.length).toEqual(1);
 		expect(result.cursor).toBeUndefined();
 	});
 
-	test("can query items with multiple entries", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		for (let i = 0; i < 30; i++) {
-			await entityStorage.set({ id: (i + 1).toString(), value1: "aaa", value2: "bbb" });
-		}
-		const result = await entityStorage.query();
-		expect(result).toBeDefined();
-		expect(result.entities.length).toEqual(20);
-		expect(result.cursor).toEqual("20");
+	test("query does not return additional internal keys", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>(), [
+			"node",
+			"tenant",
+			"user"
+		]);
+		await connector.set({ id: "1", value1: "aaa", value2: 35 });
+		const result = await connector.query();
+		expect(result.entities.length).toEqual(1);
+		const schema = EntitySchemaFactory.get(nameof<TestType>());
+		const allowedKeys = new Set<string>(schema.properties?.map(p => p.property) ?? []);
+		const unexpectedKeys = Object.keys(result.entities[0]).filter(k => !allowedKeys.has(k));
+		expect(unexpectedKeys).toEqual([]);
 	});
 
-	test("can query items with multiple entries and cursor", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		for (let i = 0; i < 30; i++) {
-			await entityStorage.set({ id: (i + 1).toString(), value1: "aaa", value2: "bbb" });
+	test("can query with multiple entries returning first page", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 25; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i });
 		}
-		const result = await entityStorage.query();
-		const result2 = await entityStorage.query(undefined, undefined, undefined, result.cursor);
-		expect(result2).toBeDefined();
-		expect(result2.entities.length).toEqual(10);
+		const result = await connector.query(undefined, undefined, undefined, undefined, 10);
+		expect(result.entities.length).toEqual(10);
+		expect(result.cursor).toBeDefined();
+	});
+
+	test("can query with multiple entries and cursor", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 15; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i });
+		}
+		const result = await connector.query(undefined, undefined, undefined, undefined, 10);
+		const result2 = await connector.query(undefined, undefined, undefined, result.cursor, 10);
+		expect(result2.entities.length).toEqual(5);
 		expect(result2.cursor).toBeUndefined();
 	});
 
-	test("can query items with multiple entries and apply conditions", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		for (let i = 0; i < 100; i++) {
-			await entityStorage.set({
-				id: (i + 1).toString(),
-				value1: "aaa",
-				value2: i % 3 === 0 ? "ccc" : "bbb"
-			});
+	test("can query with Equals condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 20; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i });
 		}
-		const result = await entityStorage.query({
-			property: "value2",
-			value: "ccc",
+		const result = await connector.query({
+			property: "id",
+			value: "10",
 			comparison: ComparisonOperator.Equals
 		});
-		expect(result).toBeDefined();
-		expect(result.entities.length).toEqual(20);
-		expect(result.cursor).toEqual("58");
+		expect(result.entities.length).toEqual(1);
+		expect(result.cursor).toBeUndefined();
 	});
 
-	test("can query items with multiple entries and apply custom sort", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		for (let i = 0; i < 30; i++) {
-			await entityStorage.set({ id: (30 - i).toString(), value1: "aaa", value2: "bbb" });
+	test.skipIf(!SUPPORT_NOT_EQUALS)("can query with NotEquals condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({
+				id: (i + 1).toString(),
+				value1: i % 2 === 0 ? "even" : "odd",
+				value2: i
+			});
 		}
-		const result = await entityStorage.query(undefined, [
+		const result = await connector.query({
+			property: "value1",
+			value: "odd",
+			comparison: ComparisonOperator.NotEquals
+		});
+		expect(result.entities.length).toEqual(3);
+		expect(result.entities.every(e => (e as TestType).value1 === "even")).toBe(true);
+	});
+
+	test("can query with GreaterThan condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i * 10 });
+		}
+		const result = await connector.query({
+			property: "value2",
+			value: 20,
+			comparison: ComparisonOperator.GreaterThan
+		});
+		expect(result.entities.length).toEqual(2);
+		expect(result.entities.every(e => (e as TestType).value2 > 20)).toBe(true);
+	});
+
+	test("can query with LessThan condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i * 10 });
+		}
+		const result = await connector.query({
+			property: "value2",
+			value: 20,
+			comparison: ComparisonOperator.LessThan
+		});
+		expect(result.entities.length).toEqual(2);
+		expect(result.entities.every(e => (e as TestType).value2 < 20)).toBe(true);
+	});
+
+	test("can query with GreaterThanOrEqual condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i * 10 });
+		}
+		const result = await connector.query({
+			property: "value2",
+			value: 20,
+			comparison: ComparisonOperator.GreaterThanOrEqual
+		});
+		expect(result.entities.length).toEqual(3);
+		expect(result.entities.every(e => (e as TestType).value2 >= 20)).toBe(true);
+	});
+
+	test("can query with LessThanOrEqual condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i * 10 });
+		}
+		const result = await connector.query({
+			property: "value2",
+			value: 20,
+			comparison: ComparisonOperator.LessThanOrEqual
+		});
+		expect(result.entities.length).toEqual(3);
+		expect(result.entities.every(e => (e as TestType).value2 <= 20)).toBe(true);
+	});
+
+	test("can query with In operator", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 10; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: (i + 1).toString(), value2: i });
+		}
+		const result = await connector.query(
 			{
-				property: "id",
-				sortDirection: SortDirection.Ascending
-			}
-		]);
-		expect(result).toBeDefined();
-		expect(result.entities.length).toEqual(20);
-		expect(result.entities[0].id).toEqual("1");
-		expect(result.cursor).toEqual("20");
+				conditions: [
+					{
+						property: "value1",
+						value: ["3", "7"],
+						comparison: ComparisonOperator.In
+					}
+				]
+			},
+			[{ property: "id", sortDirection: SortDirection.Ascending }]
+		);
+		expect(result.entities.length).toEqual(2);
+		expect((result.entities[0] as TestType).value1).toEqual("3");
+		expect((result.entities[1] as TestType).value1).toEqual("7");
 	});
 
-	test("can query items and get a reduced data set", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		for (let i = 0; i < 30; i++) {
-			await entityStorage.set({ id: (i + 1).toString(), value1: "aaa", value2: "bbb" });
+	test("can query with multiple AND conditions", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({
+				id: (i + 1).toString(),
+				value1: i % 2 === 0 ? "even" : "odd",
+				value2: i * 10
+			});
 		}
-		const result = await entityStorage.query(undefined, undefined, ["id", "value1"]);
-		expect(result).toBeDefined();
-		expect(result.entities.length).toEqual(20);
-		expect(result.entities[0].id).toEqual("1");
-		expect(result.entities[0].value1).toEqual("aaa");
+		const result = await connector.query({
+			conditions: [
+				{ property: "value1", value: "even", comparison: ComparisonOperator.Equals },
+				{ property: "value2", value: 10, comparison: ComparisonOperator.GreaterThan }
+			],
+			logicalOperator: LogicalOperator.And
+		});
+		expect(result.entities.length).toEqual(2);
+		expect(result.entities.every((e: Partial<TestType>) => e.value1 === "even")).toBe(true);
+		expect(result.entities.every((e: Partial<TestType>) => (e.value2 ?? 0) > 10)).toBe(true);
+	});
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)("can query with multiple OR conditions", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: (i + 1).toString(), value2: i });
+		}
+		const result = await connector.query({
+			conditions: [
+				{ property: "id", value: "1", comparison: ComparisonOperator.Equals },
+				{ property: "id", value: "3", comparison: ComparisonOperator.Equals }
+			],
+			logicalOperator: LogicalOperator.Or
+		});
+		expect(result.entities.length).toEqual(2);
+		expect(result.entities.map((e: Partial<TestType>) => e.id)).toEqual(
+			expect.arrayContaining(["1", "3"])
+		);
+	});
+
+	test("can query with custom sort", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (5 - i).toString(), value1: (5 - i).toString(), value2: i });
+		}
+		const result = await connector.query(undefined, [
+			{ property: "id", sortDirection: SortDirection.Ascending }
+		]);
+		expect(result.entities.length).toEqual(5);
+		expect((result.entities[0] as TestType).id).toEqual("1");
+		expect((result.entities[4] as TestType).id).toEqual("5");
+	});
+
+	test("can query with descending sort", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: (i + 1).toString(), value2: i });
+		}
+		const result = await connector.query(undefined, [
+			{ property: "id", sortDirection: SortDirection.Descending }
+		]);
+		expect(result.entities.length).toEqual(5);
+		expect((result.entities[0] as TestType).id).toEqual("5");
+		expect((result.entities[4] as TestType).id).toEqual("1");
+	});
+
+	test("can query with property projection", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i });
+		}
+		const result = await connector.query(undefined, undefined, ["id", "value1"]);
+		expect(result.entities.length).toEqual(5);
+		expect(result.entities[0].id).toBeDefined();
+		expect(result.entities[0].value1).toBeDefined();
 		expect(result.entities[0].value2).toBeUndefined();
 	});
 
-	test("can set data with a partition key", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			partitionContextIds: ["node", "tenant", "user"],
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-
-		currentUser = "user";
-		await entityStorage.set(
-			{
-				id: "1",
-				value1: "aaa",
-				value2: "7777"
-			},
-			undefined
-		);
-
-		currentUser = "user2";
-		await entityStorage.set(
-			{
-				id: "1",
-				value1: "bbb",
-				value2: "8888"
-			},
-			undefined
-		);
-
-		const file = await readFile(TEST_STORE_NAME, "utf8");
-		const store = JSON.parse(file);
-		expect(store).toEqual([
-			{
-				partitionId: "node/tenant/user",
-				id: "1",
-				value1: "aaa",
-				value2: "7777"
-			},
-			{
-				partitionId: "node/tenant/user2",
-				id: "1",
-				value1: "bbb",
-				value2: "8888"
-			}
-		]);
-	});
-
-	test("can get data with a partition key", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			partitionContextIds: ["node", "tenant", "user"],
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-
-		currentUser = "user";
-		await entityStorage.set(
-			{
-				id: "1",
-				value1: "aaa",
-				value2: "7777"
-			},
-			undefined
-		);
-
-		currentUser = "user2";
-		await entityStorage.set(
-			{
-				id: "1",
-				value1: "bbb",
-				value2: "8888"
-			},
-			undefined
-		);
-
-		currentUser = "user";
-		const item = await entityStorage.get("1");
-		expect(item).toEqual({
-			id: "1",
-			value1: "aaa",
-			value2: "7777"
-		});
-	});
-
-	test("can remove data with a partition key", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			partitionContextIds: ["node", "tenant", "user"],
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-
-		currentUser = "user";
-		await entityStorage.set(
-			{
-				id: "1",
-				value1: "aaa",
-				value2: "7777"
-			},
-			undefined
-		);
-
-		currentUser = "user2";
-		await entityStorage.set(
-			{
-				id: "1",
-				value1: "bbb",
-				value2: "8888"
-			},
-			undefined
-		);
-
-		currentUser = "user";
-		await entityStorage.remove("1");
-
-		const file = await readFile(TEST_STORE_NAME, "utf8");
-		const store = JSON.parse(file);
-		expect(store).toEqual([
-			{
-				id: "1",
-				partitionId: "node/tenant/user2",
-				value1: "bbb",
-				value2: "8888"
-			}
-		]);
-	});
-
-	test("can query with a partition key", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			partitionContextIds: ["node", "tenant", "user"],
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-
-		currentUser = "user";
-		await entityStorage.set(
-			{
-				id: "1",
-				value1: "aaa",
-				value2: "7777"
-			},
-			undefined
-		);
-
-		currentUser = "user2";
-		await entityStorage.set(
-			{
-				id: "1",
-				value1: "bbbb",
-				value2: "8888"
-			},
-			undefined
-		);
-
-		currentUser = "user";
-		const result = await entityStorage.query(undefined, undefined, undefined, undefined, undefined);
-		expect(result.entities).toEqual([
-			{
-				id: "1",
-				value1: "aaa",
-				value2: "7777"
-			}
-		]);
-	});
-
-	test("can perform a query with an object condition", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-
-		await entityStorage.bootstrap("logging");
-
-		await entityStorage.set({
-			id: "1",
-			value1: "aaa",
-			value2: "7777",
-			value3: {
-				field1: "foo"
-			}
-		});
-
-		const result = await entityStorage.query({
+	test("can query with object condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 7777, value3: { field1: "foo" } });
+		const result = await connector.query({
 			conditions: [
 				{
 					property: "value3",
-					value: {
-						field1: "foo"
-					},
+					value: { field1: "foo" },
 					comparison: ComparisonOperator.Equals
 				}
 			]
 		});
-		expect(result.entities).toEqual([
-			{
-				id: "1",
-				value1: "aaa",
-				value2: "7777",
-				value3: {
-					field1: "foo"
-				}
-			}
-		]);
+		expect(result.entities.length).toEqual(1);
+		expect((result.entities[0] as TestType).value3).toEqual({ field1: "foo" });
 	});
 
-	// Test: Includes operator on string field
-	test("can query items with Includes operator on string field", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
+	test("can query with Includes on string field", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "hello world", value2: 1 });
+		await connector.set({ id: "2", value1: "worldwide", value2: 2 });
+		await connector.set({ id: "3", value1: "foo bar", value2: 3 });
+		const result = await connector.query({
+			conditions: [{ property: "value1", value: "world", comparison: ComparisonOperator.Includes }]
 		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", value1: "hello world", value2: "x" });
-		await entityStorage.set({ id: "2", value1: "worldwide", value2: "y" });
-		await entityStorage.set({ id: "3", value1: "foo bar", value2: "z" });
-		const result = await entityStorage.query({
-			conditions: [
-				{
-					property: "value1",
-					value: "world",
-					comparison: ComparisonOperator.Includes
-				}
-			]
-		});
-		expect(result).toBeDefined();
 		expect(result.entities.length).toEqual(2);
-		expect(result.entities.map(e => e.value1)).toEqual(
+		expect(result.entities.map(e => (e as TestType).value1)).toEqual(
 			expect.arrayContaining(["hello world", "worldwide"])
 		);
 	});
 
-	test("can query with ComparisonOperator.Includes on nested object property (dot-notation)", async () => {
-		const entityStorage = new FileEntityStorageConnector<NestedSearchType>({
-			entitySchema: nameof<NestedSearchType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", consignor: { name: "alice smith" } });
-		await entityStorage.set({ id: "2", consignor: { name: "bob jones" } });
-		await entityStorage.set({ id: "3", consignor: { name: "alice cooper" } });
-		const result = await entityStorage.query({
+	test.skipIf(!SUPPORT_NOT_INCLUDES)("can query with NotIncludes on string field", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "hello world", value2: 1 });
+		await connector.set({ id: "2", value1: "worldwide", value2: 2 });
+		await connector.set({ id: "3", value1: "foo bar", value2: 3 });
+		const result = await connector.query({
 			conditions: [
-				{ property: "consignor.name", value: "alice", comparison: ComparisonOperator.Includes }
+				{ property: "value1", value: "world", comparison: ComparisonOperator.NotIncludes }
 			]
 		});
-		expect(result.entities.map(e => e.id).sort()).toEqual(["1", "3"]);
+		expect(result.entities.length).toEqual(1);
+		expect((result.entities[0] as TestType).value1).toEqual("foo bar");
 	});
 
-	test("can query with ComparisonOperator.NotEquals on nested object property (dot-notation)", async () => {
-		const entityStorage = new FileEntityStorageConnector<NestedSearchType>({
-			entitySchema: nameof<NestedSearchType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", consignor: { name: "Alice" } });
-		await entityStorage.set({ id: "2", consignor: { name: "Bob" } });
-		await entityStorage.set({ id: "3", consignor: { name: "Charlie" } });
-		const result = await entityStorage.query({
+	test.skipIf(!SUPPORT_DOT_NOTATION)(
+		"can query with Includes on nested object property (dot-notation)",
+		async () => {
+			const connector = await createConnector<NestedSearchType>(nameof<NestedSearchType>());
+			await connector.set({ id: "1", consignor: { name: "alice smith" } });
+			await connector.set({ id: "2", consignor: { name: "bob jones" } });
+			await connector.set({ id: "3", consignor: { name: "alice cooper" } });
+			const result = await connector.query({
+				conditions: [
+					{ property: "consignor.name", value: "alice", comparison: ComparisonOperator.Includes }
+				]
+			});
+			expect(result.entities.map(e => (e as NestedSearchType).id).sort()).toEqual(["1", "3"]);
+		}
+	);
+
+	test.skipIf(!SUPPORT_DOT_NOTATION)(
+		"can query with NotEquals on nested object property (dot-notation)",
+		async () => {
+			const connector = await createConnector<NestedSearchType>(nameof<NestedSearchType>());
+			await connector.set({ id: "1", consignor: { name: "Alice" } });
+			await connector.set({ id: "2", consignor: { name: "Bob" } });
+			await connector.set({ id: "3", consignor: { name: "Charlie" } });
+			const result = await connector.query({
+				conditions: [
+					{
+						property: "consignor.name",
+						value: "Alice",
+						comparison: ComparisonOperator.NotEquals
+					}
+				]
+			});
+			expect(result.entities.map(e => (e as NestedSearchType).id).sort()).toEqual(["2", "3"]);
+		}
+	);
+
+	test("can query sub items in array", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({
+				id: (i + 1).toString(),
+				value1: "aaa",
+				value2: i,
+				valueArray: [{ field: "name", value: "bob" }]
+			});
+		}
+		for (let i = 0; i < 5; i++) {
+			await connector.set({
+				id: (i + 10).toString(),
+				value1: "aaa",
+				value2: i,
+				valueArray: [{ field: "name", value: "fred" }]
+			});
+		}
+		const result = await connector.query({
 			conditions: [
-				{ property: "consignor.name", value: "Alice", comparison: ComparisonOperator.NotEquals }
+				{
+					property: "valueArray",
+					value: { field: "name", value: "bob" },
+					comparison: ComparisonOperator.Includes
+				}
 			]
 		});
-		expect(result.entities.map(e => e.id).sort()).toEqual(["2", "3"]);
+		expect(result.entities.length).toEqual(5);
 	});
 
-	test("can query with ComparisonOperator.Includes on plain string field", async () => {
-		const entityStorage = new FileEntityStorageConnector<NestedSearchType>({
-			entitySchema: nameof<NestedSearchType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-		await entityStorage.set({ id: "1", consignor: { name: "hello world" } });
-		await entityStorage.set({ id: "2", consignor: { name: "hello world" } });
-		await entityStorage.set({ id: "3", consignor: { name: "goodbye" } });
-		const result = await entityStorage.query({
+	test.skipIf(!SUPPORT_DOT_NOTATION)("can query sub items in object", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({
+				id: (i + 1).toString(),
+				value1: "aaa",
+				value2: i,
+				valueObject: { name: { value: "bob" } }
+			});
+		}
+		for (let i = 0; i < 5; i++) {
+			await connector.set({
+				id: (i + 10).toString(),
+				value1: "aaa",
+				value2: i,
+				valueObject: { name: { value: "fred" } }
+			});
+		}
+		const result = await connector.query({
 			conditions: [
-				{ property: "consignor.name", value: "hello", comparison: ComparisonOperator.Includes }
+				{
+					property: "valueObject.name.value",
+					value: "bob",
+					comparison: ComparisonOperator.Equals
+				}
 			]
 		});
-		expect(result.entities.map(e => e.id).sort()).toEqual(["1", "2"]);
+		expect(result.entities.length).toEqual(5);
 	});
 
-	test("can query with NotEquals and undefined on an optional number field", async () => {
-		const entityStorage = new FileEntityStorageConnector<ExpiryTestType>({
-			entitySchema: nameof<ExpiryTestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap("logging");
-
-		await entityStorage.set({ id: "1", status: "pending" });
-		await entityStorage.set({ id: "2", status: "active", expires: 1_000 });
-
-		const result = await entityStorage.query({
-			conditions: [
-				{
-					property: "expires",
-					comparison: ComparisonOperator.LessThan,
-					value: 100_000
-				},
-				{
-					property: "expires",
-					comparison: ComparisonOperator.NotEquals,
-					value: undefined
-				}
-			],
-			logicalOperator: LogicalOperator.And
-		});
-
-		expect(result.entities.map(e => (e as ExpiryTestType).id)).toEqual(["2"]);
-	});
-
-	describe("health", () => {
-		afterEach(() => {
-			mockStatfs.mockReset();
-		});
-
-		test("can get health as ok when disk space is above both thresholds", async () => {
-			const entityStorage = new FileEntityStorageConnector<TestType>({
-				entitySchema: nameof<TestType>(),
-				config: { directory: TEST_DIRECTORY }
+	test.skipIf(!SUPPORT_NULL_UNDEFINED_COMPARISON)(
+		"can query with undefined value comparison",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({
+				id: "1",
+				value1: "aaa",
+				value2: 100,
+				value3: { field1: new Date().toISOString() }
 			});
-			// 1 GB free — well above the 500 MB warning default
-			mockStatfs.mockResolvedValueOnce({ bsize: 4096, bavail: 262144 });
-			const result = await entityStorage.health();
-			expect(result).toHaveLength(1);
-			expect(result[0].status).toEqual(HealthStatus.Ok);
-			expect(result[0].message).toBeUndefined();
-		});
-
-		test("can get health as warning when disk space is below warning threshold", async () => {
-			const entityStorage = new FileEntityStorageConnector<TestType>({
-				entitySchema: nameof<TestType>(),
-				config: { directory: TEST_DIRECTORY }
+			await connector.set({ id: "2", value1: "bbb", value2: 200 });
+			const result = await connector.query({
+				property: "value3",
+				value: undefined,
+				comparison: ComparisonOperator.Equals
 			});
-			// 300 MB free — below 500 MB warning default, above 100 MB error default
-			mockStatfs.mockResolvedValueOnce({ bsize: 4096, bavail: 76800 });
-			const result = await entityStorage.health();
-			expect(result).toHaveLength(1);
-			expect(result[0].status).toEqual(HealthStatus.Warning);
-			expect(result[0].message).toEqual("diskSpaceWarning");
-			expect(result[0].data?.freeBytes).toEqual(300 * 1024 * 1024);
-			expect(result[0].data?.thresholdBytes).toEqual(500 * 1024 * 1024);
-		});
+			expect(result.entities.length).toEqual(1);
+			expect((result.entities[0] as TestType).id).toEqual("2");
+		}
+	);
 
-		test("can get health as error when disk space is below error threshold", async () => {
-			const entityStorage = new FileEntityStorageConnector<TestType>({
-				entitySchema: nameof<TestType>(),
-				config: { directory: TEST_DIRECTORY }
+	test.skipIf(!SUPPORT_NULL_UNDEFINED_COMPARISON)(
+		"can query with null value comparison",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({
+				id: "1",
+				value1: "aaa",
+				value2: 100,
+				value3: { field1: new Date().toISOString() }
 			});
-			// 50 MB free — below 100 MB error default
-			mockStatfs.mockResolvedValueOnce({ bsize: 4096, bavail: 12800 });
-			const result = await entityStorage.health();
-			expect(result).toHaveLength(1);
-			expect(result[0].status).toEqual(HealthStatus.Error);
-			expect(result[0].message).toEqual("diskSpaceError");
-			expect(result[0].data?.freeBytes).toEqual(50 * 1024 * 1024);
-			expect(result[0].data?.thresholdBytes).toEqual(100 * 1024 * 1024);
-		});
-
-		test("can get health as error when statfs throws", async () => {
-			const entityStorage = new FileEntityStorageConnector<TestType>({
-				entitySchema: nameof<TestType>(),
-				config: { directory: TEST_DIRECTORY }
+			await connector.set({ id: "2", value1: "bbb", value2: 200 });
+			const result = await connector.query({
+				property: "value3",
+				value: null,
+				comparison: ComparisonOperator.NotEquals
 			});
-			mockStatfs.mockRejectedValueOnce(new Error("ENOENT: no such file or directory"));
-			const result = await entityStorage.health();
-			expect(result).toHaveLength(1);
-			expect(result[0].status).toEqual(HealthStatus.Error);
-			expect(result[0].message).toEqual("diskSpaceCheckFailed");
-		});
+			expect(result.entities.length).toEqual(1);
+			expect((result.entities[0] as TestType).id).toEqual("1");
+			expect((result.entities[0] as TestType).value3).toBeDefined();
+		}
+	);
 
-		test("can get health with custom thresholds", async () => {
-			const entityStorage = new FileEntityStorageConnector<TestType>({
-				entitySchema: nameof<TestType>(),
-				config: {
-					directory: TEST_DIRECTORY,
-					diskErrorThresholdBytes: 200 * 1024 * 1024,
-					diskWarningThresholdBytes: 1024 * 1024 * 1024
-				}
+	test.skipIf(!SUPPORT_NULL_UNDEFINED_COMPARISON)(
+		"can query with undefined value comparison using NotEquals",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({
+				id: "1",
+				value1: "aaa",
+				value2: 100,
+				value3: { field1: new Date().toISOString() }
 			});
-			// 500 MB free — below custom 1 GB warning, above custom 200 MB error
-			mockStatfs.mockResolvedValueOnce({ bsize: 4096, bavail: 128000 });
-			const result = await entityStorage.health();
-			expect(result).toHaveLength(1);
-			expect(result[0].status).toEqual(HealthStatus.Warning);
-			expect(result[0].data?.thresholdBytes).toEqual(1024 * 1024 * 1024);
-		});
+			await connector.set({ id: "2", value1: "bbb", value2: 200 });
+			const result = await connector.query({
+				property: "value3",
+				value: undefined,
+				comparison: ComparisonOperator.NotEquals
+			});
+			expect(result.entities.length).toEqual(1);
+			expect((result.entities[0] as TestType).id).toEqual("1");
+			expect((result.entities[0] as TestType).value3).toBeDefined();
+		}
+	);
+
+	test.skipIf(!SUPPORT_NULL_UNDEFINED_COMPARISON)(
+		"can query with null value comparison using Equals",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({
+				id: "1",
+				value1: "aaa",
+				value2: 100,
+				value3: { field1: new Date().toISOString() }
+			});
+			await connector.set({ id: "2", value1: "bbb", value2: 200 });
+			const result = await connector.query({
+				property: "value3",
+				value: null,
+				comparison: ComparisonOperator.Equals
+			});
+			expect(result.entities.length).toEqual(1);
+			expect((result.entities[0] as TestType).id).toEqual("2");
+		}
+	);
+
+	test.skipIf(!SUPPORT_NULL_UNDEFINED_COMPARISON)(
+		"can query with NotEquals and undefined on optional number field",
+		async () => {
+			const connector = await createConnector<ExpiryTestType>(nameof<ExpiryTestType>());
+			await connector.set({ id: "1", status: "pending" });
+			await connector.set({ id: "2", status: "active", expires: 1_000 });
+			const result = await connector.query({
+				conditions: [
+					{
+						property: "expires",
+						comparison: ComparisonOperator.LessThan,
+						value: 100_000
+					},
+					{
+						property: "expires",
+						comparison: ComparisonOperator.NotEquals,
+						value: undefined
+					}
+				],
+				logicalOperator: LogicalOperator.And
+			});
+			expect(result.entities.map(e => (e as ExpiryTestType).id)).toEqual(["2"]);
+		}
+	);
+
+	test.skipIf(!SUPPORT_NULL_UNDEFINED_COMPARISON)(
+		"can query with NotEquals and null on optional number field",
+		async () => {
+			const connector = await createConnector<ExpiryTestType>(nameof<ExpiryTestType>());
+			await connector.set({ id: "1", status: "active", expires: 0 });
+			await connector.set({ id: "2", status: "pending" });
+			await connector.set({ id: "3", status: "active", expires: 1_000 });
+			const result = await connector.query({
+				conditions: [
+					{
+						property: "expires",
+						comparison: ComparisonOperator.LessThan,
+						value: 100_000
+					},
+					{
+						property: "expires",
+						comparison: ComparisonOperator.NotEquals,
+						value: null as unknown as undefined
+					}
+				],
+				logicalOperator: LogicalOperator.And
+			});
+			expect(result.entities.map(e => (e as ExpiryTestType).id)).toEqual(
+				expect.arrayContaining(["1", "3"])
+			);
+			expect(result.entities.map(e => (e as ExpiryTestType).id)).not.toContain("2");
+		}
+	);
+
+	test("can set and get item with boolean property", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 10, isActive: true });
+		await connector.set({ id: "2", value1: "bbb", value2: 20, isActive: false });
+		const item1 = await connector.get("1");
+		const item2 = await connector.get("2");
+		expect(item1?.isActive).toBe(true);
+		expect(item2?.isActive).toBe(false);
 	});
 
-	test("can query with NotEquals and null on an optional number field", async () => {
-		const entityStorage = new FileEntityStorageConnector<ExpiryTestType>({
-			entitySchema: nameof<ExpiryTestType>(),
-			config: { directory: TEST_DIRECTORY }
+	test("can query by boolean property", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 10, isActive: true });
+		await connector.set({ id: "2", value1: "bbb", value2: 20, isActive: false });
+		await connector.set({ id: "3", value1: "ccc", value2: 30, isActive: true });
+		const result = await connector.query({
+			property: "isActive",
+			value: true,
+			comparison: ComparisonOperator.Equals
 		});
-		await entityStorage.bootstrap("logging");
-
-		await entityStorage.set({ id: "1", status: "active", expires: 0 });
-		await entityStorage.set({ id: "2", status: "pending" });
-		await entityStorage.set({ id: "3", status: "active", expires: 1_000 });
-
-		const result = await entityStorage.query({
-			conditions: [
-				{
-					property: "expires",
-					comparison: ComparisonOperator.LessThan,
-					value: 100_000
-				},
-				{
-					property: "expires",
-					comparison: ComparisonOperator.NotEquals,
-					value: null as unknown as undefined
-				}
-			],
-			logicalOperator: LogicalOperator.And
-		});
-
-		expect(result.entities.map(e => (e as ExpiryTestType).id)).toEqual(
-			expect.arrayContaining(["1", "3"])
-		);
-		expect(result.entities.map(e => (e as ExpiryTestType).id)).not.toContain("2");
+		expect(result.entities.length).toEqual(2);
+		expect(result.entities.every((e: Partial<TestType>) => e.isActive === true)).toBe(true);
 	});
 
-	test("can empty with no items", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap();
-		await entityStorage.empty();
-		expect(await entityStorage.count()).toEqual(0);
+	test("can set and get item with integer property", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 10, counter: 42 });
+		const item = await connector.get("1");
+		expect(item?.counter).toEqual(42);
 	});
 
-	test("can empty the store", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
+	test("can query by integer property", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i, counter: i * 100 });
+		}
+		const result = await connector.query({
+			property: "counter",
+			value: 200,
+			comparison: ComparisonOperator.GreaterThan
 		});
-		await entityStorage.bootstrap();
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "35" });
-		await entityStorage.set({ id: "2", value1: "bbb", value2: "36" });
-		await entityStorage.set({ id: "3", value1: "ccc", value2: "37" });
-		await entityStorage.empty();
-		expect(await entityStorage.count()).toEqual(0);
+		expect(result.entities.length).toEqual(2);
+		expect(result.entities.every((e: Partial<TestType>) => (e.counter ?? 0) > 200)).toBe(true);
 	});
 
-	test("can fail to remove batch with no ids", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await expect(entityStorage.removeBatch(undefined as unknown as string[])).rejects.toMatchObject(
-			{
-				name: "GuardError",
-				message: "guard.array",
-				properties: { property: "ids", value: "undefined" }
-			}
-		);
+	test("can set data with a partition key", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>(), [
+			"node",
+			"tenant",
+			"user"
+		]);
+		currentUser = "user1";
+		await connector.set({ id: "1", value1: "aaa", value2: 7777 }, undefined);
+		currentUser = "user2";
+		await connector.set({ id: "1", value1: "bbb", value2: 8888 }, undefined);
+		currentUser = "user1";
+		const item = await connector.get("1");
+		expect(item).toMatchObject({ id: "1", value1: "aaa", value2: 7777 });
 	});
 
-	test("can remove batch of items", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap();
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "35" });
-		await entityStorage.set({ id: "2", value1: "bbb", value2: "36" });
-		await entityStorage.set({ id: "3", value1: "ccc", value2: "37" });
-		await entityStorage.removeBatch(["1", "2"]);
-		expect(await entityStorage.count()).toEqual(1);
-		expect(await entityStorage.get("3")).toBeDefined();
+	test("can get data with a partition key", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>(), [
+			"node",
+			"tenant",
+			"user"
+		]);
+		currentUser = "user1";
+		await connector.set({ id: "1", value1: "aaa", value2: 7777 }, undefined);
+		currentUser = "user2";
+		await connector.set({ id: "1", value1: "bbb", value2: 8888 }, undefined);
+		currentUser = "user1";
+		const item1 = await connector.get("1");
+		expect(item1).toMatchObject({ id: "1", value1: "aaa", value2: 7777 });
+		currentUser = "user2";
+		const item2 = await connector.get("1");
+		expect(item2).toMatchObject({ id: "1", value1: "bbb", value2: 8888 });
 	});
 
-	test("can teardown the store", async () => {
-		const entityStorage = new FileEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>(),
-			config: { directory: TEST_DIRECTORY }
-		});
-		await entityStorage.bootstrap();
-		await entityStorage.set({ id: "1", value1: "aaa", value2: "35" });
-		await entityStorage.teardown();
-		expect(await entityStorage.count()).toEqual(0);
+	test("can remove data with a partition key", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>(), [
+			"node",
+			"tenant",
+			"user"
+		]);
+		currentUser = "user1";
+		await connector.set({ id: "1", value1: "aaa", value2: 7777 }, undefined);
+		currentUser = "user2";
+		await connector.set({ id: "1", value1: "bbb", value2: 8888 }, undefined);
+		currentUser = "user1";
+		await connector.remove("1");
+		expect((await connector.query()).entities).toEqual([]);
+		currentUser = "user2";
+		const result = await connector.query();
+		expect(result.entities.length).toEqual(1);
+		expect((result.entities[0] as TestType).value1).toEqual("bbb");
+	});
+
+	test("can query with a partition key", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>(), [
+			"node",
+			"tenant",
+			"user"
+		]);
+		currentUser = "user1";
+		await connector.set({ id: "1", value1: "aaa", value2: 7777 }, undefined);
+		currentUser = "user2";
+		await connector.set({ id: "1", value1: "bbb", value2: 8888 }, undefined);
+		currentUser = "user1";
+		const result = await connector.query();
+		expect(result.entities.length).toEqual(1);
+		expect((result.entities[0] as TestType).value1).toEqual("aaa");
 	});
 
 	describe("count", () => {
 		test("can count items", async () => {
-			const entityStorage = new FileEntityStorageConnector<TestType>({
-				entitySchema: nameof<TestType>(),
-				config: { directory: TEST_DIRECTORY }
-			});
-			await entityStorage.bootstrap();
-			await entityStorage.set({ id: "1", value1: "aaa", value2: "35" });
-			await entityStorage.set({ id: "2", value1: "bbb", value2: "36" });
-			await entityStorage.set({ id: "3", value1: "ccc", value2: "37" });
-			const result = await entityStorage.count();
-			expect(result).toEqual(3);
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "aaa", value2: 35 });
+			await connector.set({ id: "2", value1: "bbb", value2: 36 });
+			await connector.set({ id: "3", value1: "ccc", value2: 37 });
+			expect(await connector.count()).toEqual(3);
 		});
+
+		test("can count items with a partition key", async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>(), [
+				"node",
+				"tenant",
+				"user"
+			]);
+			currentUser = "user1";
+			await connector.set({ id: "1", value1: "aaa", value2: 35 });
+			await connector.set({ id: "2", value1: "bbb", value2: 36 });
+			currentUser = "user2";
+			await connector.set({ id: "3", value1: "ccc", value2: 37 });
+			currentUser = "user1";
+			expect(await connector.count()).toEqual(2);
+		});
+
+		test("can count items with a condition and a partition key", async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>(), [
+				"node",
+				"tenant",
+				"user"
+			]);
+			currentUser = "user1";
+			await connector.set({ id: "1", value1: "aaa", value2: 35 });
+			await connector.set({ id: "2", value1: "bbb", value2: 36 });
+			await connector.set({ id: "3", value1: "aaa", value2: 37 });
+			currentUser = "user2";
+			await connector.set({ id: "4", value1: "aaa", value2: 38 });
+			currentUser = "user1";
+			expect(
+				await connector.count({
+					conditions: [{ property: "value1", comparison: ComparisonOperator.Equals, value: "aaa" }],
+					logicalOperator: LogicalOperator.And
+				})
+			).toEqual(2);
+		});
+
+		test("can count items with a condition", async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "aaa", value2: 35 });
+			await connector.set({ id: "2", value1: "bbb", value2: 36 });
+			await connector.set({ id: "3", value1: "ccc", value2: 37 });
+			expect(
+				await connector.count({
+					conditions: [{ property: "value1", comparison: ComparisonOperator.Equals, value: "aaa" }],
+					logicalOperator: LogicalOperator.And
+				})
+			).toEqual(1);
+		});
+
+		test("can count items with an unmatched condition", async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "aaa", value2: 35 });
+			await connector.set({ id: "2", value1: "bbb", value2: 36 });
+			await connector.set({ id: "3", value1: "ccc", value2: 37 });
+			expect(
+				await connector.count({
+					conditions: [{ property: "value1", comparison: ComparisonOperator.Equals, value: "zzz" }],
+					logicalOperator: LogicalOperator.And
+				})
+			).toEqual(0);
+		});
+
+		test("can count more items than the default page limit", async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.setBatch(
+				Array.from({ length: 45 }, (_, i) => ({
+					id: String(i + 1),
+					value1: i < 20 ? "aaa" : "bbb",
+					value2: i + 1
+				}))
+			);
+			expect(await connector.count()).toEqual(45);
+		});
+
+		test("can count more items than the default page limit with a condition", async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.setBatch(
+				Array.from({ length: 45 }, (_, i) => ({
+					id: String(i + 1),
+					value1: i < 20 ? "aaa" : "bbb",
+					value2: i + 1
+				}))
+			);
+			expect(
+				await connector.count({
+					conditions: [{ property: "value1", comparison: ComparisonOperator.Equals, value: "aaa" }],
+					logicalOperator: LogicalOperator.And
+				})
+			).toEqual(20);
+		});
+	});
+
+	test("can empty with no items", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.empty();
+		expect(await connector.count()).toEqual(0);
+	});
+
+	test("can empty the store", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 35 });
+		await connector.set({ id: "2", value1: "bbb", value2: 36 });
+		await connector.set({ id: "3", value1: "ccc", value2: 37 });
+		await connector.empty();
+		expect(await connector.count()).toEqual(0);
+	});
+
+	test("can teardown the store", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 35 });
+		await connector.set({ id: "2", value1: "bbb", value2: 36 });
+		await connector?.teardown?.();
+		await connector?.bootstrap?.();
+		expect(await connector.count()).toEqual(0);
 	});
 });

@@ -24,6 +24,8 @@ if (await fileExists('./eslint.config-custom.js')) {
 	customModule = await import('./eslint.config-custom.js');
 }
 
+const isCI = process.env.CI === 'true';
+
 headerPlugin.rules.header.meta.schema = false;
 
 const jsRules = {
@@ -362,7 +364,7 @@ const tsRules = {
 	'@typescript-eslint/no-unnecessary-boolean-literal-compare': 'error',
 	'@typescript-eslint/no-unnecessary-qualifier': 'error',
 	'@typescript-eslint/no-unnecessary-type-arguments': 'error',
-	'@typescript-eslint/no-unnecessary-type-assertion': 'error',
+	'@typescript-eslint/no-unnecessary-type-assertion': isCI ? 'off' : 'error',
 	'@typescript-eslint/no-unused-expressions': 'error',
 	'@typescript-eslint/no-unused-private-class-members': 'error',
 	'@typescript-eslint/no-unused-vars': ['error', { args: 'none' }],

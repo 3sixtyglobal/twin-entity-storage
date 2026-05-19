@@ -412,3 +412,52 @@ The total count of entities in the storage.
 #### Implementation of
 
 `IEntityStorageConnector.count`
+
+***
+
+### migrate() {#migrate}
+
+> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+
+Migrate entities for the **current partition only**, consistent with `query()` /
+`setBatch()`: data is read via `migrateEntities`, which pages with this
+connector's partition filter.
+
+**Why not `renameCollection` on the whole live collection?** A migration temp
+collection only holds rows for the active partition. Renaming it to the live
+name would replace the entire collection and **destroy every other
+partition** stored in the same MongoDB collection. Instead we copy migrated
+documents from `{collection}_migration` into the live collection by:
+deleting only the current partition's documents, then inserting the migrated
+set. Other partitions remain unchanged. That is not an atomic swap; a failure
+mid-swap can leave the partition in a bad state (callers should treat
+`migrate()` like other non-atomic backends and plan retries/backups).
+
+**Product note:** A future option could be to migrate **all** partitions in
+one call (e.g. loop contexts or a full-collection strategy similar to SQL
+connectors). Until then, callers that need every tenant migrated must invoke
+`migrate()` once per partition.
+
+#### Parameters
+
+##### newSchema
+
+`IEntitySchema`
+
+The target entity schema.
+
+##### options?
+
+`IMigrationOptions`
+
+Options controlling migration behaviour.
+
+#### Returns
+
+`Promise`\<`IMigrationResult`\>
+
+The migration result.
+
+#### Implementation of
+
+`IEntityStorageConnector.migrate`

@@ -1,6 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	Coerce,
 	ComponentFactory,
@@ -12,17 +12,22 @@ import {
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
+	type EntityCondition,
 	EntityConditions,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
 	EntitySorter,
-	LogicalOperator,
-	type EntityCondition,
 	type IEntitySchema,
 	type IEntitySchemaProperty,
+	LogicalOperator,
 	type SortDirection
 } from "@twin.org/entity";
-import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
+import {
+	EntityHelper,
+	type IEntityStorageConnector,
+	type IEntityStorageMigrationConnector,
+	type IMigrationOptions
+} from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import type { IMemoryEntityStorageConnectorConstructorOptions } from "./models/IMemoryEntityStorageConnectorConstructorOptions.js";
@@ -30,7 +35,9 @@ import type { IMemoryEntityStorageConnectorConstructorOptions } from "./models/I
 /**
  * Class for performing entity storage operations in-memory.
  */
-export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
+export class MemoryEntityStorageConnector<T = unknown>
+	implements IEntityStorageConnector<T>, IEntityStorageMigrationConnector
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -70,7 +77,7 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 	 * The storage for the in-memory items.
 	 * @internal
 	 */
-	private readonly _store: T[];
+	private _store: T[];
 
 	/**
 	 * Create a new instance of MemoryEntityStorageConnector.
@@ -87,35 +94,6 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 		this._store = [];
-	}
-
-	/**
-	 * Deep-clone condition tree and map `null` to `undefined` on Equals/NotEquals leaves
-	 * so in-memory evaluation matches SQL-style "IS NULL" / "IS NOT NULL" semantics.
-	 * @param condition The user-supplied condition (not mutated).
-	 * @returns A clone safe to pass to {@link EntityConditions.check}.
-	 * @internal
-	 */
-	private static normalizeNullToUndefined<T>(condition: EntityCondition<T>): EntityCondition<T> {
-		if ("conditions" in condition) {
-			return {
-				...condition,
-				conditions: condition.conditions.map(c =>
-					MemoryEntityStorageConnector.normalizeNullToUndefined(c)
-				)
-			};
-		}
-
-		// In the non-group branch, `condition` is the leaf comparator.
-		const leaf = condition;
-		if (
-			(leaf.comparison === ComparisonOperator.Equals ||
-				leaf.comparison === ComparisonOperator.NotEquals) &&
-			leaf.value === null
-		) {
-			return { ...leaf, value: undefined };
-		}
-		return { ...leaf };
 	}
 
 	/**
@@ -175,13 +153,13 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		}
 
 		const index = this.findItem(id, secondaryIndex, finalConditions);
-		const item = index >= 0 ? ObjectHelper.clone(this._store[index]) : undefined;
+		const item = index >= 0 ? this._store[index] : undefined;
 
 		if (Is.objectValue(item)) {
-			ObjectHelper.propertyDelete(item, MemoryEntityStorageConnector._PARTITION_KEY);
+			return EntityHelper.unPrepareEntity<T>(item, [MemoryEntityStorageConnector._PARTITION_KEY]);
 		}
 
-		return item;
+		return undefined;
 	}
 
 	/**
@@ -196,32 +174,32 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		EntitySchemaHelper.validateEntity(entity, this.getSchema());
-
 		const finalConditions = conditions ?? [];
-		const finalEntity = ObjectHelper.clone(entity);
+
+		const prepared = EntityHelper.prepareEntity(
+			entity,
+			this._entitySchema,
+			Is.stringValue(partitionKey)
+				? [{ property: MemoryEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
+				: undefined
+		);
 
 		if (Is.stringValue(partitionKey)) {
 			finalConditions.push({
 				property: MemoryEntityStorageConnector._PARTITION_KEY as keyof T,
 				value: partitionKey
 			});
-			ObjectHelper.propertySet(
-				finalEntity,
-				MemoryEntityStorageConnector._PARTITION_KEY,
-				partitionKey
-			);
 		}
 
 		const existingIndex = this.findItem(
-			finalEntity[this._primaryKey.property] as string,
+			prepared[this._primaryKey.property] as string,
 			undefined,
 			finalConditions
 		);
 		if (existingIndex >= 0) {
-			this._store[existingIndex] = finalEntity;
+			this._store[existingIndex] = prepared;
 		} else {
-			this._store.push(finalEntity);
+			this._store.push(prepared);
 		}
 	}
 
@@ -236,10 +214,6 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		for (const entity of entities) {
-			EntitySchemaHelper.validateEntity(entity, this.getSchema());
-		}
-
 		const indexMap = new Map<string, number>();
 		for (let i = 0; i < this._store.length; i++) {
 			const stored = this._store[i];
@@ -253,20 +227,19 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		}
 
 		for (const entity of entities) {
-			const finalEntity = ObjectHelper.clone(entity);
-			if (Is.stringValue(partitionKey)) {
-				ObjectHelper.propertySet(
-					finalEntity,
-					MemoryEntityStorageConnector._PARTITION_KEY,
-					partitionKey
-				);
-			}
-			const id = finalEntity[this._primaryKey.property] as string;
+			const prepared = EntityHelper.prepareEntity(
+				entity,
+				this._entitySchema,
+				Is.stringValue(partitionKey)
+					? [{ property: MemoryEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
+					: undefined
+			);
+			const id = prepared[this._primaryKey.property] as string;
 			const existingIndex = indexMap.get(id);
 			if (existingIndex !== undefined) {
-				this._store[existingIndex] = finalEntity;
+				this._store[existingIndex] = prepared;
 			} else {
-				const newIndex = this._store.push(finalEntity) - 1;
+				const newIndex = this._store.push(prepared) - 1;
 				indexMap.set(id, newIndex);
 			}
 		}
@@ -350,9 +323,7 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 		}
 
 		if (!Is.empty(conditions)) {
-			finalConditions.conditions.push(
-				MemoryEntityStorageConnector.normalizeNullToUndefined(conditions)
-			);
+			finalConditions.conditions.push(EntityHelper.normalizeConditionValues(conditions));
 		}
 
 		const entities = [];
@@ -373,13 +344,12 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 					EntityConditions.check(allEntities[i], finalConditions) &&
 					entities.length < finalLimit
 				) {
-					const entity = ObjectHelper.clone(
-						Is.arrayValue(properties)
-							? ObjectHelper.pick(allEntities[i], properties)
-							: allEntities[i]
+					const entity = Is.arrayValue(properties)
+						? ObjectHelper.pick(allEntities[i], properties)
+						: allEntities[i];
+					entities.push(
+						EntityHelper.unPrepareEntity<T>(entity, [MemoryEntityStorageConnector._PARTITION_KEY])
 					);
-					ObjectHelper.propertyDelete(entity, MemoryEntityStorageConnector._PARTITION_KEY);
-					entities.push(entity);
 					if (entities.length >= finalLimit) {
 						if (i < allEntities.length - 1) {
 							nextCursor = (i + 1).toString();
@@ -474,21 +444,35 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 
 	/**
 	 * Count all the entities which match the conditions.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
 	 */
-	public async count(): Promise<number> {
+	public async count(conditions?: EntityCondition<T>): Promise<number> {
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		if (!Is.stringValue(partitionKey)) {
+		const finalConditions: EntityCondition<T> = {
+			conditions: [],
+			logicalOperator: LogicalOperator.And
+		};
+
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.conditions.push({
+				property: MemoryEntityStorageConnector._PARTITION_KEY,
+				comparison: ComparisonOperator.Equals,
+				value: partitionKey
+			});
+		}
+
+		if (!Is.empty(conditions)) {
+			finalConditions.conditions.push(EntityHelper.normalizeConditionValues(conditions));
+		}
+
+		if (finalConditions.conditions.length === 0) {
 			return this._store.length;
 		}
 
-		return this._store.filter(
-			item =>
-				ObjectHelper.propertyGet(item as object, MemoryEntityStorageConnector._PARTITION_KEY) ===
-				partitionKey
-		).length;
+		return this._store.filter(item => EntityConditions.check(item, finalConditions)).length;
 	}
 
 	/**
@@ -496,7 +480,80 @@ export class MemoryEntityStorageConnector<T = unknown> implements IEntityStorage
 	 * @returns The store.
 	 */
 	public getStore(): T[] {
-		return this._store;
+		return this._store.map(item =>
+			EntityHelper.unPrepareEntity<T>(item, [MemoryEntityStorageConnector._PARTITION_KEY])
+		);
+	}
+
+	/**
+	 * Get a unique list of all the context ids from the storage.
+	 * @returns The list of unique context ids.
+	 */
+	public async getPartitionContextIds(): Promise<IContextIds[]> {
+		const contextIds: { [id: string]: IContextIds } = {};
+
+		for (const entity of this._store) {
+			const partitionId = ObjectHelper.propertyGet(
+				entity,
+				MemoryEntityStorageConnector._PARTITION_KEY
+			);
+			if (Is.stringValue(partitionId)) {
+				contextIds[partitionId] = ContextIdHelper.shortSplit(
+					this._partitionContextIds ?? [],
+					partitionId
+				);
+			}
+		}
+
+		return Object.values(contextIds);
+	}
+
+	/**
+	 * Create the target connector for performing the migration it will use a temporary storage location.
+	 * @param newEntitySchema The name of the new entity schema to create the connector for.
+	 * @returns Connector for performing the migration.
+	 */
+	public async createTargetConnector<U>(
+		newEntitySchema: string
+	): Promise<IEntityStorageConnector<U>> {
+		// No resources to manipulate for in-memory, just return a new connector with the new store and the new schema.
+		return new MemoryEntityStorageConnector<U>({
+			entitySchema: newEntitySchema,
+			partitionContextIds: this._partitionContextIds
+		});
+	}
+
+	/**
+	 * Finalize the migration by tearing down the old connector and replacing it with the target connector.
+	 * @param targetConnector The target connector to finalize the migration with.
+	 * @param options The options to control how the migration is finalized.
+	 * @param loggingComponentType The optional component type to use for logging the migration progress.
+	 * @returns A promise that resolves when the migration is finalized.
+	 */
+	public async finalizeMigration<U>(
+		targetConnector: IEntityStorageConnector<U>,
+		options?: IMigrationOptions<T, U>,
+		loggingComponentType?: string
+	): Promise<IEntityStorageConnector<U>> {
+		// Nothing to do for in-memory as the new connector is already using the correct store and schema.
+		// And there is nothing to teardown for the old connector as it is in-memory and will be garbage
+		// collected when there are no references to it.
+		return targetConnector;
+	}
+
+	/**
+	 * Cleanup the migration if a migration fails or needs to be aborted.
+	 * @param targetConnector The target connector to cleanup the migration with.
+	 * @param options The options to control how the migration is cleaned up.
+	 * @param loggingComponentType The optional component type to use for logging the migration progress.
+	 * @returns A promise that resolves when the migration is cleaned up.
+	 */
+	public async cleanupMigration<U>(
+		targetConnector: IEntityStorageConnector<U> | undefined,
+		options?: IMigrationOptions<T, U>,
+		loggingComponentType?: string
+	): Promise<void> {
+		// Nothing to do for in-memory as there are no resources to cleanup.
 	}
 
 	/**

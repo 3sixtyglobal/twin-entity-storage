@@ -42,4 +42,10 @@ export interface IDynamoDbEntityStorageConnectorConfig {
 	 * The connection timeout in milliseconds.
 	 */
 	connectionTimeoutMs?: number;
+
+	/**
+	 * Maximum number of attempts for each SDK request (1 = no retries).
+	 * Defaults to the AWS SDK default (3).
+	 */
+	maxAttempts?: number;
 }

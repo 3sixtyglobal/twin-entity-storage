@@ -404,3 +404,48 @@ The total count of entities in the storage.
 #### Implementation of
 
 `IEntityStorageConnector.count`
+
+***
+
+### migrate() {#migrate}
+
+> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+
+Migrate the PostgreSQL table to a new schema version.
+
+**Full-table scope:** This migration reads and rewrites **all rows** in the
+physical table. PostgreSQL has no per-partition table rename; the final swap
+runs inside **`sql.begin()`** (postgres.js) so the renames and `DROP` commit
+atomically. All `partitionId` values in the table are preserved. Callers must ensure no concurrent writes during migration.
+
+**Safe-swap:** Rows are copied into `{tableName}_migration` with the new
+schema. Only on full success is the live table replaced via `ALTER TABLE …
+RENAME` and `DROP` inside **`dbConnection.begin()`** (do not use raw
+`BEGIN`/`COMMIT` with `unsafe()`; postgres.js rejects that). A failure during
+the copy phase leaves the live table unchanged (the migration table is dropped
+in `catch`).
+
+#### Parameters
+
+##### newSchema
+
+`IEntitySchema`
+
+The target schema to migrate toward.
+
+##### options?
+
+`IMigrationOptions`
+
+Optional configuration controlling batch size, transform
+and progress callback.
+
+#### Returns
+
+`Promise`\<`IMigrationResult`\>
+
+A result describing how many entities were migrated.
+
+#### Implementation of
+
+`IEntityStorageConnector.migrate`

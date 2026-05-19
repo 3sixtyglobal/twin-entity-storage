@@ -23,5 +23,10 @@ export interface IEntityStorageGetRequest {
 		 * The secondary index to query with the id.
 		 */
 		secondaryIndex?: string;
+
+		/**
+		 * The optional conditions to match for the entity, JSON encoded array of property/value pairs.
+		 */
+		conditions?: string;
 	};
 }

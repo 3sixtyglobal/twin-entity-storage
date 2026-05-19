@@ -19,8 +19,6 @@ Guards.stringValue("TestEnv", "TEST_MYSQL_PASSWORD", process.env.TEST_MYSQL_PASS
 Guards.stringValue("TestEnv", "TEST_MYSQL_DATABASE", process.env.TEST_MYSQL_DATABASE);
 Guards.stringValue("TestEnv", "TEST_MYSQL_TABLE", process.env.TEST_MYSQL_TABLE);
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 export const TEST_MYSQL_CONFIG: IMySqlEntityStorageConnectorConfig = {
 	host: process.env.TEST_MYSQL_HOST,
 	port: Number.parseInt(process.env.TEST_MYSQL_PORT, 10),

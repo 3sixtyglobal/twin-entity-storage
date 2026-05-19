@@ -22,11 +22,13 @@
 			"containerCreateFailed": "The container couldn't be created \"{containerId}\"",
 			"databaseCreateFailed": "Unable to create database \"{databaseId}\"",
 			"containerDoesNotExist": "Container \"{containerId}\" does not exist",
+			"getPartitionContextIdsFailed": "Unable to get partition context ids",
 			"setBatchFailed": "Unable to set batch of entities",
 			"countFailed": "Unable to count entities",
 			"emptyFailed": "Unable to empty entity storage",
 			"removeBatchFailed": "Unable to remove batch of entities",
-			"teardownFailed": "Unable to teardown entity storage"
+			"teardownFailed": "Unable to teardown entity storage",
+			"finalizeMigrationFailedBootstrap": "Finalizing migration failed during bootstrap phase"
 		}
 	},
 	"health": {

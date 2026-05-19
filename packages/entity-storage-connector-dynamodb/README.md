@@ -13,8 +13,7 @@ npm install @twin.org/entity-storage-connector-dynamodb
 To perform testing of this component it may be necessary to launch a local instance to communicate with.
 
 ```shell
-docker pull amazon/dynamodb-local:latest
-docker run -d --name twin-entity-storage-dynamodb -p 10000:8000 amazon/dynamodb-local:latest
+docker run -d --name twin-entity-storage-dynamodb -p 8000:8000 amazon/dynamodb-local
 ```
 
 ## Examples

@@ -386,3 +386,42 @@ The total count of entities in the storage.
 #### Implementation of
 
 `IEntityStorageConnector.count`
+
+***
+
+### migrate() {#migrate}
+
+> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+
+Migrate entities in-place to a new schema for the **current partition**.
+
+**Strategy C:** Cosmos DB has no atomic container rename suitable for
+emulation in CI. This uses `migrateEntities` with a **second connector
+instance** that shares the same container but registers the **target
+schema** so `setBatch` validates transformed documents. Writes are
+partition-scoped bulk upserts into the live container. A partial failure
+may leave some documents on the old shape — back up before migrating.
+
+#### Parameters
+
+##### newSchema
+
+`IEntitySchema`
+
+The target entity schema.
+
+##### options?
+
+`IMigrationOptions`
+
+Options controlling migration behaviour.
+
+#### Returns
+
+`Promise`\<`IMigrationResult`\>
+
+The migration result.
+
+#### Implementation of
+
+`IEntityStorageConnector.migrate`

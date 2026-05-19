@@ -23,7 +23,9 @@
 			"countFailed": "Unable to count entities",
 			"emptyFailed": "Unable to empty entity storage",
 			"removeBatchFailed": "Unable to remove batch of entities",
-			"teardownFailed": "Unable to teardown entity storage"
+			"teardownFailed": "Unable to teardown entity storage",
+			"getPartitionContextIdsFailed": "Unable to get partition context ids",
+			"finalizeMigrationFailedBootstrap": "Finalizing migration failed during bootstrap phase"
 		}
 	},
 	"health": {

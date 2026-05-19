@@ -10,9 +10,10 @@ export interface IEntityStorageComponent<T = unknown> extends IComponent {
 	/**
 	 * Set an entity.
 	 * @param entity The entity to set.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The id of the entity.
 	 */
-	set(entity: T): Promise<void>;
+	set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void>;
 
 	/**
 	 * Set multiple entities in a batch.
@@ -25,16 +26,22 @@ export interface IEntityStorageComponent<T = unknown> extends IComponent {
 	 * Get an entity.
 	 * @param id The id of the entity to get, or the index value if secondaryIndex is set.
 	 * @param secondaryIndex Get the item using a secondary index.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The object if it can be found or undefined.
 	 */
-	get(id: string, secondaryIndex?: keyof T): Promise<T | undefined>;
+	get(
+		id: string,
+		secondaryIndex?: keyof T,
+		conditions?: { property: keyof T; value: unknown }[]
+	): Promise<T | undefined>;
 
 	/**
 	 * Remove the entity.
 	 * @param id The id of the entity to remove.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns Nothing.
 	 */
-	remove(id: string): Promise<void>;
+	remove(id: string, conditions?: { property: keyof T; value: unknown }[]): Promise<void>;
 
 	/**
 	 * Remove multiple entities by id.
@@ -80,7 +87,8 @@ export interface IEntityStorageComponent<T = unknown> extends IComponent {
 
 	/**
 	 * Count all the entities which match the conditions.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
 	 */
-	count(): Promise<number>;
+	count(conditions?: EntityCondition<T>): Promise<number>;
 }

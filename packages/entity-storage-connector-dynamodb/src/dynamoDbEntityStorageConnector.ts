@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0.
 import {
 	type AttributeValue,
+	BatchWriteItemCommand,
 	type CreateTableCommandInput,
 	DynamoDB,
 	type DynamoDBClientConfig,
 	type GlobalSecondaryIndex,
 	QueryCommand,
-	waitUntilTableExists
+	waitUntilTableExists,
+	waitUntilTableNotExists
 } from "@aws-sdk/client-dynamodb";
 import {
 	BatchWriteCommand,
@@ -18,7 +20,7 @@ import {
 	ScanCommand
 } from "@aws-sdk/lib-dynamodb";
 import { type NativeAttributeValue, unmarshall } from "@aws-sdk/util-dynamodb";
-import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
 	Coerce,
@@ -43,7 +45,12 @@ import {
 	LogicalOperator,
 	SortDirection
 } from "@twin.org/entity";
-import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
+import {
+	EntityHelper,
+	type IEntityStorageConnector,
+	type IEntityStorageMigrationConnector,
+	type IMigrationOptions
+} from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import type { IDynamoDbEntityStorageConnectorConfig } from "./models/IDynamoDbEntityStorageConnectorConfig.js";
@@ -52,7 +59,9 @@ import type { IDynamoDbEntityStorageConnectorConstructorOptions } from "./models
 /**
  * Class for performing entity storage operations using Dynamo DB.
  */
-export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
+export class DynamoDbEntityStorageConnector<
+	T = unknown
+> implements IEntityStorageMigrationConnector<T> {
 	/**
 	 * Runtime name for the class.
 	 */
@@ -75,6 +84,12 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @internal
 	 */
 	private static readonly _PARTITION_KEY_VALUE: string = "root";
+
+	/**
+	 * The name for the schema.
+	 * @internal
+	 */
+	private readonly _entitySchemaName: string;
 
 	/**
 	 * The schema for the entity.
@@ -142,9 +157,10 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 			options.config.tableName
 		);
 
-		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
 
+		this._entitySchemaName = options.entitySchema;
+		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 
 		this._config = options.config;
@@ -296,7 +312,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 				await waitUntilTableExists(
 					{
 						client: dbConnection,
-						maxWaitTime: 60000
+						maxWaitTime: 60
 					},
 					{
 						TableName: this._config.tableName
@@ -384,8 +400,12 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 
 				const response = await docClient.send(getCommand);
 
-				delete response.Item?.[DynamoDbEntityStorageConnector._PARTITION_KEY];
-				return response.Item as T;
+				if (response.Item) {
+					return EntityHelper.unPrepareEntity<T>(response.Item as T, [
+						DynamoDbEntityStorageConnector._PARTITION_KEY
+					]);
+				}
+				return undefined;
 			}
 
 			const finalConditions: EntityCondition<T> = {
@@ -454,9 +474,20 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		const prepared = EntityHelper.prepareEntity(
+			entity,
+			this._entitySchema,
+			partitionKey
+				? [{ property: DynamoDbEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
+				: [
+						{
+							property: DynamoDbEntityStorageConnector._PARTITION_KEY,
+							value: DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE
+						}
+					]
+		);
 
-		const id = entity[this._primaryKey.property];
+		const id = (prepared as { [id: string]: unknown })[this._primaryKey.property as string];
 
 		try {
 			const docClient = this.createDocClient();
@@ -466,11 +497,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 
 			const putCommand = new PutCommand({
 				TableName: this._config.tableName,
-				Item: {
-					[DynamoDbEntityStorageConnector._PARTITION_KEY]:
-						partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE,
-					...entity
-				} as { [id: string]: unknown },
+				Item: prepared as { [id: string]: unknown },
 				// Only set the condition expression if we have conditions to match
 				// and the primary key exists, otherwise we are creating a new object
 				ConditionExpression: Is.stringValue(conditionExpression)
@@ -519,26 +546,33 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		for (const entity of entities) {
-			EntitySchemaHelper.validateEntity(entity, this.getSchema());
-		}
+		const preparedEntities = entities.map(entity =>
+			EntityHelper.prepareEntity(
+				entity,
+				this._entitySchema,
+				partitionKey
+					? [{ property: DynamoDbEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
+					: [
+							{
+								property: DynamoDbEntityStorageConnector._PARTITION_KEY,
+								value: DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE
+							}
+						]
+			)
+		);
 
 		try {
 			const docClient = this.createDocClient();
 			const chunkSize = 25;
 
-			for (let i = 0; i < entities.length; i += chunkSize) {
-				const chunk = entities.slice(i, i + chunkSize);
+			for (let i = 0; i < preparedEntities.length; i += chunkSize) {
+				const chunk = preparedEntities.slice(i, i + chunkSize);
 				await docClient.send(
 					new BatchWriteCommand({
 						RequestItems: {
 							[this._config.tableName]: chunk.map(entity => ({
 								PutRequest: {
-									Item: {
-										[DynamoDbEntityStorageConnector._PARTITION_KEY]:
-											partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE,
-										...entity
-									}
+									Item: entity as { [id: string]: unknown }
 								}
 							}))
 						}
@@ -755,7 +789,13 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 
 		try {
 			const dbConnection = this.createConnection();
+
 			await dbConnection.deleteTable({ TableName: this._config.tableName });
+
+			await waitUntilTableNotExists(
+				{ client: dbConnection, maxWaitTime: 60 },
+				{ TableName: this._config.tableName }
+			);
 
 			await nodeLogging?.log({
 				level: "info",
@@ -823,14 +863,31 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 
 	/**
 	 * Count all the entities which match the conditions.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
 	 */
-	public async count(): Promise<number> {
+	public async count(conditions?: EntityCondition<T>): Promise<number> {
 		try {
 			const contextIds = await ContextIdStore.getContextIds();
 			const partitionKey = ContextIdHelper.combinedContextKey(
 				contextIds,
 				this._partitionContextIds
+			);
+
+			const attributeNames: { [id: string]: string } = {
+				"#partitionId": DynamoDbEntityStorageConnector._PARTITION_KEY
+			};
+			const attributeValues: { [id: string]: AttributeValue } = {
+				":partitionId": {
+					S: partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE
+				}
+			};
+
+			const expressions = this.buildQueryParameters(
+				"",
+				conditions,
+				attributeNames,
+				attributeValues
 			);
 
 			const dbConnection = this.createConnection();
@@ -843,14 +900,11 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 						TableName: this._config.tableName,
 						Select: "COUNT",
 						KeyConditionExpression: "#partitionId = :partitionId",
-						ExpressionAttributeNames: {
-							"#partitionId": DynamoDbEntityStorageConnector._PARTITION_KEY
-						},
-						ExpressionAttributeValues: {
-							":partitionId": {
-								S: partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE
-							}
-						},
+						FilterExpression: Is.stringValue(expressions.filterCondition)
+							? expressions.filterCondition
+							: undefined,
+						ExpressionAttributeNames: attributeNames,
+						ExpressionAttributeValues: attributeValues,
 						ExclusiveStartKey: exclusiveStartKey
 					})
 				);
@@ -866,6 +920,208 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 				undefined,
 				err
 			);
+		}
+	}
+
+	/**
+	 * Get a unique list of all the context ids from the storage.
+	 * @returns The list of unique context ids.
+	 */
+	public async getPartitionContextIds(): Promise<IContextIds[]> {
+		if (!Is.arrayValue(this._partitionContextIds)) {
+			return [];
+		}
+
+		const contextIdsMap: { [id: string]: IContextIds } = {};
+
+		try {
+			const docClient = this.createDocClient();
+			let exclusiveStartKey: { [key: string]: NativeAttributeValue } | undefined;
+
+			do {
+				const scanResult = await docClient.send(
+					new ScanCommand({
+						TableName: this._config.tableName,
+						ProjectionExpression: "#partitionId",
+						ExpressionAttributeNames: {
+							"#partitionId": DynamoDbEntityStorageConnector._PARTITION_KEY
+						},
+						ExclusiveStartKey: exclusiveStartKey
+					})
+				);
+
+				for (const item of scanResult.Items ?? []) {
+					const partitionId = item[DynamoDbEntityStorageConnector._PARTITION_KEY] as string;
+					if (Is.stringValue(partitionId) && !(partitionId in contextIdsMap)) {
+						contextIdsMap[partitionId] = ContextIdHelper.shortSplit(
+							this._partitionContextIds ?? [],
+							partitionId
+						);
+					}
+				}
+
+				exclusiveStartKey = scanResult.LastEvaluatedKey;
+			} while (exclusiveStartKey);
+		} catch (err) {
+			throw new GeneralError(
+				DynamoDbEntityStorageConnector.CLASS_NAME,
+				"getPartitionContextIdsFailed",
+				undefined,
+				err
+			);
+		}
+
+		return Object.values(contextIdsMap);
+	}
+
+	/**
+	 * Create the target connector for performing the migration it will use a temporary storage location.
+	 * @param newEntitySchema The name of the new entity schema to create the connector for.
+	 * @returns Connector for performing the migration.
+	 */
+	public async createTargetConnector<U>(
+		newEntitySchema: string
+	): Promise<IEntityStorageConnector<U>> {
+		// We create a new table for the migration with a unique name to avoid conflicts with the existing table
+		// This table will be swapped with the existing table once the migration is finalized.
+		const migrationTableName = `${this._config.tableName}Migration${Date.now()}`;
+		return new DynamoDbEntityStorageConnector<U>({
+			entitySchema: newEntitySchema,
+			config: {
+				...this._config,
+				tableName: migrationTableName
+			},
+			partitionContextIds: this._partitionContextIds
+		});
+	}
+
+	/**
+	 * Finalize the migration by tearing down the old connector and replacing it with the new one.
+	 * @param targetConnector The target connector to finalize the migration with.
+	 * @param options The options to control how the migration is finalized.
+	 * @param loggingComponentType The logging component type to use for logging during the migration finalization.
+	 * @returns A promise that resolves when the migration is finalized.
+	 */
+	public async finalizeMigration<U>(
+		targetConnector: DynamoDbEntityStorageConnector<U>,
+		options?: IMigrationOptions<T, U>,
+		loggingComponentType?: string
+	): Promise<DynamoDbEntityStorageConnector<U>> {
+		// There is no rename operation in DynamoDB so we have to create a new table with the original name and copy the data over
+
+		// Teardown the existing table with the original name to free up the name for the new table
+		await this.teardown(loggingComponentType);
+
+		// Create a new connector with the original table name but with the new schema
+		// and copy the data from the migration table to the new table using batch operations
+		const finalConnector = new DynamoDbEntityStorageConnector<U>({
+			entitySchema: targetConnector._entitySchemaName,
+			config: this._config,
+			partitionContextIds: this._partitionContextIds
+		});
+
+		if (await finalConnector.bootstrap(loggingComponentType)) {
+			// Since there is no rename, we need to copy the data from the migration table to the new table
+			const partitions = await targetConnector.getPartitionContextIds();
+			const batchSize = options?.batchSize ?? DynamoDbEntityStorageConnector._DEFAULT_LIMIT;
+			await this.bulkCopy(targetConnector, finalConnector, partitions, batchSize);
+
+			await targetConnector.teardown(loggingComponentType);
+
+			return finalConnector;
+		}
+
+		throw new GeneralError(
+			DynamoDbEntityStorageConnector.CLASS_NAME,
+			"finalizeMigrationFailedBootstrap",
+			undefined
+		);
+	}
+
+	/**
+	 * Cleanup the migration if a migration fails or needs to be aborted.
+	 * @param targetConnector The target connector to cleanup the migration with.
+	 * @param options The options to control how the migration is cleaned up.
+	 * @param loggingComponentType The optional component type to use for logging the migration progress.
+	 * @returns A promise that resolves when the migration is cleaned up.
+	 */
+	public async cleanupMigration<U>(
+		targetConnector: IEntityStorageConnector<U> | undefined,
+		options?: IMigrationOptions<T, U>,
+		loggingComponentType?: string
+	): Promise<void> {
+		// If something failed the only thing to cleanup is the migration table
+		await targetConnector?.teardown?.(loggingComponentType);
+	}
+
+	/**
+	 * Copy all entities from sourceConnector to destConnector, paging through each partition.
+	 * @param sourceConnector The connector to read entities from.
+	 * @param destConnector The connector to write entities to.
+	 * @param partitions The partition list returned by getPartitionContextIds.
+	 * @param batchSize The number of entities to read per page.
+	 * @internal
+	 */
+	private async bulkCopy<U>(
+		sourceConnector: DynamoDbEntityStorageConnector<U>,
+		destConnector: DynamoDbEntityStorageConnector<U>,
+		partitions: IContextIds[],
+		batchSize: number
+	): Promise<void> {
+		let partitionList: IContextIds[];
+		if (Is.arrayValue(partitions)) {
+			partitionList = partitions;
+		} else if (Is.arrayValue(sourceConnector._partitionContextIds)) {
+			partitionList = [];
+		} else {
+			partitionList = [{}];
+		}
+
+		const dbConnection = sourceConnector.createConnection();
+		const chunkSize = 25;
+
+		for (let i = 0; i < partitionList.length; i++) {
+			const partitionKey =
+				ContextIdHelper.combinedContextKey(
+					partitionList[i],
+					sourceConnector._partitionContextIds
+				) ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE;
+
+			let exclusiveStartKey: { [key: string]: AttributeValue } | undefined;
+			do {
+				const { Items: items, LastEvaluatedKey: lastKey } = await dbConnection.send(
+					new QueryCommand({
+						TableName: sourceConnector._config.tableName,
+						KeyConditionExpression: `#${DynamoDbEntityStorageConnector._PARTITION_KEY} = :${DynamoDbEntityStorageConnector._PARTITION_KEY}`,
+						ExpressionAttributeNames: {
+							[`#${DynamoDbEntityStorageConnector._PARTITION_KEY}`]:
+								DynamoDbEntityStorageConnector._PARTITION_KEY
+						},
+						ExpressionAttributeValues: {
+							[`:${DynamoDbEntityStorageConnector._PARTITION_KEY}`]: { S: partitionKey }
+						},
+						Limit: batchSize,
+						ExclusiveStartKey: exclusiveStartKey
+					})
+				);
+
+				exclusiveStartKey = lastKey;
+
+				if (Is.arrayValue(items)) {
+					for (let j = 0; j < items.length; j += chunkSize) {
+						const chunk = items.slice(j, j + chunkSize) as { [key: string]: AttributeValue }[];
+						await dbConnection.send(
+							new BatchWriteItemCommand({
+								RequestItems: {
+									[destConnector._config.tableName]: chunk.map(item => ({
+										PutRequest: { Item: item }
+									}))
+								}
+							})
+						);
+					}
+				}
+			} while (exclusiveStartKey);
 		}
 	}
 
@@ -1123,9 +1379,9 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 	 * @internal
 	 */
 	private createConnectionConfig(): DynamoDBClientConfig {
-		const requestHandler = {
-			requestTimeout: this._config.connectionTimeoutMs
-		};
+		const requestHandler = Is.number(this._config.connectionTimeoutMs)
+			? { requestTimeout: this._config.connectionTimeoutMs }
+			: undefined;
 
 		if (
 			Is.stringValue(this._config.secretAccessKey) &&
@@ -1139,14 +1395,16 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 				},
 				endpoint: this._config.endpoint,
 				region: this._config.region,
-				requestHandler
+				requestHandler,
+				maxAttempts: this._config.maxAttempts
 			};
 		}
 
 		return {
 			endpoint: this._config.endpoint,
 			region: this._config.region,
-			requestHandler
+			requestHandler,
+			maxAttempts: this._config.maxAttempts
 		};
 	}
 
@@ -1160,9 +1418,10 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 		try {
 			const dbConnection = this.createConnection();
 
-			await dbConnection.describeTable({ TableName: tableName });
+			const result = await dbConnection.describeTable({ TableName: tableName });
 
-			return true;
+			// A table in DELETING state should not be treated as existing
+			return result.Table?.TableStatus !== "DELETING";
 		} catch {
 			return false;
 		}
@@ -1269,7 +1528,7 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 				ExpressionAttributeNames: attributeNames,
 				ExpressionAttributeValues: attributeValues,
 				ProjectionExpression: properties?.map(p => p as string).join(", "),
-				Limit: returnSize,
+				Limit: returnSize + 1,
 				ScanIndexForward: scanAscending,
 				ExclusiveStartKey: Is.empty(cursor)
 					? undefined
@@ -1280,22 +1539,34 @@ export class DynamoDbEntityStorageConnector<T = unknown> implements IEntityStora
 
 			const results = await connection.send(query);
 
-			let entities: T[] = [];
+			const rawItems = results.Items ?? [];
+			const hasMore = rawItems.length > returnSize;
+			const returnedRawItems = hasMore ? rawItems.slice(0, returnSize) : rawItems;
 
-			if (Is.arrayValue(results.Items)) {
-				entities = results.Items.map(item => {
-					const unmarshalled = unmarshall(item);
-					delete unmarshalled[DynamoDbEntityStorageConnector._PARTITION_KEY];
-					return unmarshalled as T;
-				});
+			let resultCursor: string | undefined;
+			if (hasMore) {
+				const lastRawItem = returnedRawItems[returnedRawItems.length - 1] as {
+					[id: string]: AttributeValue;
+				};
+				const syntheticKey: { [id: string]: AttributeValue } = {
+					[DynamoDbEntityStorageConnector._PARTITION_KEY]:
+						lastRawItem[DynamoDbEntityStorageConnector._PARTITION_KEY],
+					[this._primaryKey.property as string]: lastRawItem[this._primaryKey.property as string]
+				};
+				if (Is.stringValue(secondaryIndex)) {
+					syntheticKey[secondaryIndex] = lastRawItem[secondaryIndex];
+				}
+				resultCursor = Converter.bytesToBase64(ObjectHelper.toBytes(syntheticKey));
 			}
 
-			return {
-				entities,
-				cursor: Is.empty(results.LastEvaluatedKey)
-					? undefined
-					: Converter.bytesToBase64(ObjectHelper.toBytes(results.LastEvaluatedKey))
-			};
+			const entities: T[] = returnedRawItems.map(item => {
+				const unmarshalled = unmarshall(item);
+				return EntityHelper.unPrepareEntity(unmarshalled as T, [
+					DynamoDbEntityStorageConnector._PARTITION_KEY
+				]);
+			});
+
+			return { entities, cursor: resultCursor };
 		} catch (err) {
 			if (BaseError.isErrorCode(err, "ResourceNotFoundException")) {
 				throw new GeneralError(

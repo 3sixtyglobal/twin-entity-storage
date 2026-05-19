@@ -426,3 +426,61 @@ Check if the database exists.
 `Promise`\<`boolean`\>
 
 True if the database exists, false otherwise.
+
+***
+
+### close() {#close}
+
+> **close**(): `Promise`\<`void`\>
+
+Close the connection pool and release all connections.
+Should be called when the connector is no longer needed.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+***
+
+### migrate() {#migrate}
+
+> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+
+Migrate the MySQL table to a new schema version.
+
+**Full-table scope:** Unlike schemaless connectors, this migration always
+operates on ALL rows in the table regardless of partition. MySQL's
+`RENAME TABLE` is a full-table atomic operation, so it is not possible
+to migrate a single partition in isolation. Callers must ensure no other
+writes occur during migration.
+
+**Safe-swap:** data is first written into a `_migration` table with the new
+schema. Only on full success are the tables atomically swapped via a single
+`RENAME TABLE` statement. A failure leaves the live table untouched.
+
+#### Parameters
+
+##### newSchema
+
+`IEntitySchema`
+
+The target schema to migrate toward.
+
+##### options?
+
+`IMigrationOptions`
+
+Optional configuration controlling batch size, transform
+and progress callback.
+
+#### Returns
+
+`Promise`\<`IMigrationResult`\>
+
+A result describing how many entities were migrated.
+
+#### Implementation of
+
+`IEntityStorageConnector.migrate`

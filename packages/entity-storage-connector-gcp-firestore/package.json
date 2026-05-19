@@ -28,7 +28,7 @@
 		"dist:no-test": "npm run clean && npm run build && npm run test:build"
 	},
 	"dependencies": {
-		"@google-cloud/firestore": "8.5.0",
+		"@google-cloud/firestore": "8.6.0",
 		"@twin.org/context": "next",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
@@ -43,7 +43,7 @@
 		"@twin.org/nameof-transformer": "next",
 		"@twin.org/nameof-vitest-plugin": "next",
 		"@twin.org/validate-locales": "next",
-		"@vitest/coverage-v8": "4.1.5",
+		"@vitest/coverage-v8": "4.1.6",
 		"copyfiles": "2.4.1",
 		"dotenv": "17.4.2",
 		"rimraf": "6.1.3",
@@ -52,7 +52,7 @@
 		"typedoc": "0.28.19",
 		"typedoc-plugin-markdown": "4.11.0",
 		"typescript": "6.0.3",
-		"vitest": "4.1.5"
+		"vitest": "4.1.6"
 	},
 	"main": "./dist/es/index.js",
 	"types": "./dist/types/index.d.ts",

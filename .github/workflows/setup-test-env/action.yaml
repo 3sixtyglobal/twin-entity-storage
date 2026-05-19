@@ -36,7 +36,7 @@ runs:
     - name: Start DynamoDB Service
       if: inputs.package == 'packages/entity-storage-connector-dynamodb' || inputs.package == 'all'
       shell: bash
-      run: docker pull amazon/dynamodb-local:latest && docker run -d --name twin-entity-storage-dynamodb -p 10000:8000 amazon/dynamodb-local:latest
+      run: docker pull amazon/dynamodb-local:latest && docker run -d --name twin-entity-storage-dynamodb -p 8000:8000 amazon/dynamodb-local:latest
 
     # Start MySQL service only for MySQL package
     - name: Start MySQL Service
@@ -56,37 +56,8 @@ runs:
       shell: bash
       run: docker run -d --name twin-entity-storage-firestore -p 20200:8080 gcr.io/google.com/cloudsdktool/cloud-sdk:emulators gcloud beta emulators firestore start --host-port=0.0.0.0:8080
 
-    - name: Increase aio-max-nr
-      if: inputs.package == 'packages/entity-storage-connector-cosmosdb' || inputs.package == 'all'
-      shell: bash
-      # Increase the maximum number of asynchronous I/O (AIO) requests that can be queued to
-      # the kernel. This is necessary for the CosmosDB Emulator to function properly, as it
-      # requires a higher limit for I/O operations.
-      # Reference: https://man7.org/linux/man-pages/man5/proc.5.html#fs.aio-max-nr
-      run: |
-        cat /proc/sys/fs/aio-max-nr > /tmp/twin-entity-storage-aio-max-nr-before
-        echo 1048576 | sudo tee /proc/sys/fs/aio-max-nr
-
     # Start CosmosDB service only for CosmosDB package
-    - name: Pull CosmosDB Emulator Docker Image
-      if: inputs.package == 'packages/entity-storage-connector-cosmosdb' || inputs.package == 'all'
-      shell: bash
-      run: docker pull mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
-
     - name: Run CosmosDB Emulator
       if: inputs.package == 'packages/entity-storage-connector-cosmosdb' || inputs.package == 'all'
       shell: bash
-      run: docker run --publish 8081:8081 --name twin-entity-storage-cosmos --detach --platform=linux/amd64 --memory=3g --cpus=2.0 mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
-
-    - name: Wait for CosmosDB Emulator to be Ready
-      if: inputs.package == 'packages/entity-storage-connector-cosmosdb' || inputs.package == 'all'
-      shell: bash
-      run: |
-        for i in {1..30}; do
-          if nc -zv localhost 8081; then
-            echo "CosmosDB emulator is ready!"
-            break
-          fi
-          echo "Waiting for CosmosDB emulator to be ready..."
-          sleep 5
-        done
+      run: docker run --publish 8081:8081 --name twin-entity-storage-cosmos --detach mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview

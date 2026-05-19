@@ -94,7 +94,8 @@ export interface IEntityStorageConnector<T = unknown> extends IComponent {
 
 	/**
 	 * Count all the entities which match the conditions.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
 	 */
-	count(): Promise<number>;
+	count(conditions?: EntityCondition<T>): Promise<number>;
 }

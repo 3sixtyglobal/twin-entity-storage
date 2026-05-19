@@ -418,3 +418,48 @@ True if the teardown process was successful.
 #### Implementation of
 
 `IEntityStorageConnector.teardown`
+
+***
+
+### migrate() {#migrate}
+
+> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+
+Migrate the storage to a new schema version.
+
+**Partition scope (strictly add-only):** When the diff has no `modified` and
+no `removed` entries, the first copy uses `migrateEntities` (same partition
+as `query()`). The swap adds new columns on the live table, deletes only that
+partition’s rows, copies from `{table}_migration`, then drops the temp table.
+**Dropped columns are not supported** on this path: `ALTER DROP` is
+table-wide and would corrupt other tenants; removals still use the legacy
+full-table migration below.
+
+**Full-table:** When `diff.modified` is non-empty (e.g. type changes with
+`transformEntity`), or when columns are **removed**, CQL cannot apply those
+changes per-partition (`ALTER DROP` is table-wide). The connector uses the
+legacy **drop live → recreate → double-copy** path over **all rows**.
+
+#### Parameters
+
+##### newSchema
+
+`IEntitySchema`
+
+The target schema to migrate toward.
+
+##### options?
+
+`IMigrationOptions`
+
+Optional batch size, transform, and progress callback.
+
+#### Returns
+
+`Promise`\<`IMigrationResult`\>
+
+Migration counts and per-entity errors.
+
+#### Implementation of
+
+`IEntityStorageConnector.migrate`

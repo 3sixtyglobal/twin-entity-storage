@@ -385,3 +385,41 @@ The total count of entities in the storage.
 #### Implementation of
 
 `IEntityStorageConnector.count`
+
+***
+
+### migrate() {#migrate}
+
+> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+
+Migrate the storage to a new schema version for the current partition.
+
+**Strategy B:** `migrateEntities` copies from this connector into a temp
+Firestore collection whose ID is `${partitionCollectionId}_new`, then
+batch-deletes the live partition documents and copies migrated data back.
+Failures before the swap complete leave the live collection unchanged when
+possible; the temp collection is torn down in the error path.
+
+#### Parameters
+
+##### newSchema
+
+`IEntitySchema`
+
+The target entity schema.
+
+##### options?
+
+`IMigrationOptions`
+
+Options controlling migration behaviour.
+
+#### Returns
+
+`Promise`\<`IMigrationResult`\>
+
+The migration result.
+
+#### Implementation of
+
+`IEntityStorageConnector.migrate`

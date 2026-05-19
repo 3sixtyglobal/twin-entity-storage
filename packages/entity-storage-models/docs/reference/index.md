@@ -4,6 +4,8 @@
 
 - [IEntityStorageComponent](interfaces/IEntityStorageComponent.md)
 - [IEntityStorageConnector](interfaces/IEntityStorageConnector.md)
+- [IMigrationOptions](interfaces/IMigrationOptions.md)
+- [IMigrationResult](interfaces/IMigrationResult.md)
 - [IEntityStorageCountRequest](interfaces/IEntityStorageCountRequest.md)
 - [IEntityStorageCountResponse](interfaces/IEntityStorageCountResponse.md)
 - [IEntityStorageEmptyRequest](interfaces/IEntityStorageEmptyRequest.md)
@@ -19,3 +21,7 @@
 ## Variables
 
 - [EntityStorageConnectorFactory](variables/EntityStorageConnectorFactory.md)
+
+## Functions
+
+- [migrateEntities](functions/migrateEntities.md)

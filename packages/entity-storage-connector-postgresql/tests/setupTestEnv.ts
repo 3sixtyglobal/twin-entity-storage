@@ -19,8 +19,6 @@ Guards.stringValue("TestEnv", "TEST_POSTGRESQL_PASSWORD", process.env.TEST_POSTG
 Guards.stringValue("TestEnv", "TEST_POSTGRESQL_DATABASE", process.env.TEST_POSTGRESQL_DATABASE);
 Guards.stringValue("TestEnv", "TEST_POSTGRESQL_TABLE", process.env.TEST_POSTGRESQL_TABLE);
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 export const TEST_POSTGRESQL_CONFIG: IPostgreSqlEntityStorageConnectorConfig = {
 	host: process.env.TEST_POSTGRESQL_HOST,
 	port: Number.parseInt(process.env.TEST_POSTGRESQL_PORT, 10),

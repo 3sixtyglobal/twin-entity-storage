@@ -1,15 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
-import {
-	Coerce,
-	ComponentFactory,
-	GeneralError,
-	Guards,
-	Is,
-	ObjectHelper,
-	StringHelper
-} from "@twin.org/core";
+import { Coerce, ComponentFactory, GeneralError, Guards, Is } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -22,6 +14,7 @@ import {
 	type IEntitySchema,
 	type IEntitySchemaProperty
 } from "@twin.org/entity";
+import { EntityHelper } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import { types as CassandraTypes, Client } from "cassandra-driver";
@@ -53,7 +46,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * Limit the number of entities when finding.
 	 * @internal
 	 */
-	private static readonly _DEFAULT_LIMIT: number = 40;
+	protected static readonly DEFAULT_LIMIT: number = 40;
 
 	/**
 	 * The name of the database table.
@@ -65,7 +58,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * Configuration to connection to ScyllaDB.
 	 * @internal
 	 */
-	protected readonly _config: IScyllaDBConfig;
+	protected readonly _config: IScyllaDBTableConfig;
 
 	/**
 	 * The logging component.
@@ -77,7 +70,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * The schema for the entity.
 	 * @internal
 	 */
-	protected readonly _entitySchema: IEntitySchema<T>;
+	protected _entitySchema: IEntitySchema<T>;
 
 	/**
 	 * The keys to use from the context ids to create partitions.
@@ -90,6 +83,14 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @internal
 	 */
 	protected readonly _primaryKey: IEntitySchemaProperty<T>;
+
+	/**
+	 * Cached persistent client (keyspace-scoped). Reused across all operations on this
+	 * connector instance so the expensive cassandra-driver `connect()` only runs once.
+	 * Closed by `closePersistentClient()` which callers (e.g. `teardown()`) must invoke.
+	 * @internal
+	 */
+	private _persistentClient: Client | undefined;
 
 	/**
 	 * Create a new instance of AbstractScyllaDBConnector.
@@ -139,9 +140,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 
 		this._config = options.config;
-		this._fullTableName = StringHelper.camelCase(
-			Is.stringValue(options.config.tableName) ? options.config.tableName : options.entitySchema
-		);
+		this._fullTableName = options.config.tableName;
 	}
 
 	/**
@@ -193,7 +192,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 			const { sqlCondition, conditionValues } = this.buildConditions(conditions);
 
-			let sql = `SELECT * FROM "${this._fullTableName}" WHERE ${sqlCondition}`;
+			let sql = `SELECT * FROM "${this.safeTableName(this._fullTableName)}" WHERE ${sqlCondition}`;
 
 			if (secondaryIndex) {
 				sql += " ALLOW FILTERING";
@@ -262,131 +261,33 @@ export abstract class AbstractScyllaDBConnector<T> {
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		let conditionsList: EntityCondition<T>[] = [];
-		if (conditions !== undefined) {
-			if ("conditions" in conditions) {
-				conditionsList = conditions.conditions;
-			} else {
-				conditionsList = [conditions];
-			}
-		}
-
-		// Validate conditions before entering the try-catch so that
-		// comparisonNotSupported errors surface directly to the caller.
-		for (const cond of conditionsList) {
-			const comparator = cond as IComparator;
-			if (String(comparator.property).includes(".")) {
-				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "comparisonNotSupported", {
-					property: comparator.property,
-					reason: "dot-notation nested property paths are not supported in CQL"
-				});
-			}
-			if (
-				(comparator.comparison === ComparisonOperator.Equals ||
-					comparator.comparison === ComparisonOperator.NotEquals) &&
-				(comparator.value === null || comparator.value === undefined)
-			) {
-				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "comparisonNotSupported", {
-					property: comparator.property,
-					reason: "null/undefined comparisons are not supported in CQL WHERE clauses"
-				});
-			}
-		}
+		// Validates and throws for unsupported conditions before entering the try-catch
+		// so that comparisonNotSupported errors surface directly to the caller.
+		const { whereClause, params } = this.buildCqlConditions(conditions, partitionKey);
 
 		try {
-			let returnSize = limit ?? AbstractScyllaDBConnector._DEFAULT_LIMIT;
-			let sql = `SELECT * FROM "${this._fullTableName}"`;
+			const returnSize = limit ?? AbstractScyllaDBConnector.DEFAULT_LIMIT;
+			let sql = `SELECT * FROM "${this.safeTableName(this._fullTableName)}"`;
 
 			if (Is.array(properties)) {
 				const fields: string[] = [];
-
 				for (const property of properties) {
 					fields.push(property.toString());
 				}
-
-				const selectFields = fields.join(",");
-				sql = sql.replace("*", selectFields);
+				sql = sql.replace("*", fields.join(","));
 			}
 
-			const conds: string[] = [];
-			let conditionQuery = "";
-			// The params to be used to execute the query
-			const params: unknown[] = [];
+			sql += ` WHERE ${whereClause}`;
 
-			let finalConditionQuery = `"${AbstractScyllaDBConnector.PARTITION_KEY}" = ?`;
-			params.push(partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE);
-
-			for (const cond of conditionsList) {
-				const condition = cond as IComparator;
-
-				const descriptor = this._entitySchema.properties?.find(
-					p => p.property === condition.property
-				);
-				if (
-					condition.comparison === ComparisonOperator.Includes ||
-					condition.comparison === ComparisonOperator.NotIncludes
-				) {
-					const propValue = `'%${condition.value?.toString()}%'`;
-					if (condition.comparison === ComparisonOperator.Includes) {
-						conds.push(`"${condition.property}" LIKE ${propValue}`);
-					} else if (condition.comparison === ComparisonOperator.NotIncludes) {
-						conds.push(`"${condition.property}" NOT LIKE ${propValue}`);
-					}
-				} else if (condition.comparison === ComparisonOperator.In) {
-					let value: unknown[] = [];
-					if (!Is.arrayValue(condition.value)) {
-						value.push(this.propertyToDbValue(condition.value, descriptor));
-					} else {
-						value = condition.value.map(v => this.propertyToDbValue(v, descriptor));
-					}
-					params.push(value);
-					conds.push(`"${condition.property}" IN ?`);
-				} else {
-					const propValue = condition.value;
-					params.push(propValue);
-					if (condition.comparison === ComparisonOperator.Equals) {
-						conds.push(`"${condition.property}" = ?`);
-					} else if (condition.comparison === ComparisonOperator.NotEquals) {
-						conds.push(`"${condition.property}" != ?`);
-					} else if (condition.comparison === ComparisonOperator.GreaterThan) {
-						conds.push(`"${condition.property}" > ?`);
-					} else if (condition.comparison === ComparisonOperator.LessThan) {
-						conds.push(`"${condition.property}" < ?`);
-					} else if (condition.comparison === ComparisonOperator.GreaterThanOrEqual) {
-						conds.push(`"${condition.property}" >= ?`);
-					} else if (condition.comparison === ComparisonOperator.LessThanOrEqual) {
-						conds.push(`"${condition.property}" <= ?`);
-					}
-				}
-
-				const operator = (conditions as IComparatorGroup).logicalOperator ?? LogicalOperator.And;
-				conditionQuery = `${conds.join(` ${operator} `)}`;
+			if (Is.array(sortProperties) && sortProperties.length >= 1) {
+				const orderClauses = sortProperties.map(sp => {
+					const dir = sp.sortDirection === SortDirection.Descending ? "DESC" : "ASC";
+					return `"${String(sp.property)}" ${dir}`;
+				});
+				sql += ` ORDER BY ${orderClauses.join(", ")}`;
 			}
-
-			if (conditionQuery.length > 0) {
-				finalConditionQuery += ` AND ${conditionQuery}`;
-			}
-
-			sql += ` WHERE ${finalConditionQuery}`;
 
 			connection = await this.openConnection();
-
-			// TODO: Only supported one sort property at the moment. This code would need to be revised in a follow-up
-			if (Is.array(sortProperties) && sortProperties.length >= 1) {
-				const sortKey = sortProperties[0].property ?? this._primaryKey.property;
-				const sortDir =
-					sortProperties[0].sortDirection ??
-					this._entitySchema.properties?.find(e => e.property === sortKey)?.sortDirection;
-
-				let sqlSortDir = "asc";
-				if (sortDir === SortDirection.Descending) {
-					sqlSortDir = "desc";
-				}
-
-				sql += ` ORDER BY "${String(sortKey)}" ${sqlSortDir.toUpperCase()}`;
-				// Disabling paging in order by situations
-				returnSize = 0;
-			}
 
 			sql += " ALLOW FILTERING";
 
@@ -406,15 +307,26 @@ export abstract class AbstractScyllaDBConnector<T> {
 				entities.push(this.convertRowToObject(this._entitySchema.properties, row));
 			}
 
+			// ScyllaDB may return a pageState even when the current page is the last one
+			// (when rows.length == fetchSize). Peek at the next page to verify there are
+			// actually more rows before surfacing the cursor to the caller.
+			let nextCursor: string | undefined;
+			if (returnSize > 0 && result.rows.length >= returnSize && Is.stringValue(result.pageState)) {
+				const peek = await this.queryDB(connection, sql, params, result.pageState, 1);
+				if (peek.rows.length > 0) {
+					nextCursor = result.pageState;
+				}
+			}
+
 			return {
 				entities,
-				cursor: Is.stringValue(result.pageState) ? result.pageState : undefined
+				cursor: nextCursor
 			};
 		} catch (error) {
 			throw new GeneralError(
 				AbstractScyllaDBConnector.CLASS_NAME,
 				"findFailed",
-				{ table: this._fullTableName },
+				{ table: this.safeTableName(this._fullTableName) },
 				error
 			);
 		} finally {
@@ -424,20 +336,24 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 	/**
 	 * Count all the entities which match the conditions.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
 	 */
-	public async count(): Promise<number> {
-		const contextIds = await ContextIdStore.getContextIds();
-		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
-
+	public async count(conditions?: EntityCondition<T>): Promise<number> {
 		let connection;
 		try {
-			connection = await this.openConnection();
-			const result = await this.queryDB(
-				connection,
-				`SELECT COUNT(*) FROM "${this._fullTableName}" WHERE "${AbstractScyllaDBConnector.PARTITION_KEY}" = ? ALLOW FILTERING`,
-				[partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE]
+			const contextIds = await ContextIdStore.getContextIds();
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				contextIds,
+				this._partitionContextIds
 			);
+
+			const { whereClause, params } = this.buildCqlConditions(conditions, partitionKey);
+
+			const sql = `SELECT COUNT(*) FROM "${this.safeTableName(this._fullTableName)}" WHERE ${whereClause} ALLOW FILTERING`;
+
+			connection = await this.openConnection();
+			const result = await this.queryDB(connection, sql, params);
 			return Number(result.rows[0]?.get("count") ?? 0);
 		} catch (err) {
 			throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "countFailed", undefined, err);
@@ -454,6 +370,12 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @internal
 	 */
 	protected async openConnection(skipKeySpace: boolean = false): Promise<Client> {
+		// Reuse the cached keyspace-scoped client when available (avoids repeated
+		// cassandra-driver cluster-discovery on every operation).
+		if (!skipKeySpace && this._persistentClient !== undefined) {
+			return this._persistentClient;
+		}
+
 		const client = new Client({
 			contactPoints: this._config.hosts,
 			localDataCenter: this._config.localDataCenter,
@@ -464,11 +386,18 @@ export abstract class AbstractScyllaDBConnector<T> {
 		});
 		await client.connect();
 
+		if (!skipKeySpace) {
+			this._persistentClient = client;
+		}
+
 		return client;
 	}
 
 	/**
 	 * Close database connection.
+	 * When `connection` is the cached persistent client it is kept alive so it
+	 * can be reused by future operations; call `closePersistentClient()` to
+	 * explicitly shut it down (e.g. from `teardown()`).
 	 * @param connection The connection to close.
 	 * @internal
 	 */
@@ -476,7 +405,23 @@ export abstract class AbstractScyllaDBConnector<T> {
 		if (!connection) {
 			return;
 		}
+		if (connection === this._persistentClient) {
+			// Keep the persistent client alive for reuse.
+			return;
+		}
 		return connection.shutdown();
+	}
+
+	/**
+	 * Shut down and clear the persistent client. Call this from `teardown()`
+	 * implementations to release the underlying TCP connection.
+	 * @internal
+	 */
+	protected async closePersistentClient(): Promise<void> {
+		if (this._persistentClient !== undefined) {
+			await this._persistentClient.shutdown();
+			this._persistentClient = undefined;
+		}
 	}
 
 	/**
@@ -504,7 +449,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 				{
 					prepare: true,
 					autoPage: false,
-					fetchSize: limit ?? AbstractScyllaDBConnector._DEFAULT_LIMIT,
+					fetchSize: limit ?? AbstractScyllaDBConnector.DEFAULT_LIMIT,
 					pageState
 				},
 				(n: number, row: CassandraTypes.Row) => {
@@ -707,7 +652,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 			}
 		}
 
-		return ObjectHelper.removeEmptyProperties(obj as T, { removeNull: true });
+		return EntityHelper.unPrepareEntity(obj as T, [AbstractScyllaDBConnector.PARTITION_KEY]);
 	}
 
 	/**
@@ -782,5 +727,128 @@ export abstract class AbstractScyllaDBConnector<T> {
 			}
 		}
 		return { sqlCondition: sqlConditions.join(" AND "), conditionValues };
+	}
+
+	/**
+	 * Get a safe table name by replacing any non-alphanumeric characters.
+	 * @param name The name to sanitize.
+	 * @returns The safe table name.
+	 */
+	protected safeTableName(name: string): string {
+		return name.replace(/[^\dA-Za-z]/g, "");
+	}
+
+	/**
+	 * Parse, validate, and build a CQL WHERE clause from an EntityCondition tree.
+	 * The partition key equality is always the first clause; user conditions follow.
+	 * @param conditions The optional conditions to match for the entities.
+	 * @param partitionKey The partition key value to filter by.
+	 * @returns The complete WHERE clause (without the WHERE keyword) and bound params.
+	 * @internal
+	 */
+	private buildCqlConditions(
+		conditions: EntityCondition<T> | undefined,
+		partitionKey: string | undefined
+	): { whereClause: string; params: unknown[] } {
+		let conditionsList: EntityCondition<T>[] = [];
+		if (conditions !== undefined) {
+			if ("conditions" in conditions) {
+				if ((conditions as IComparatorGroup).logicalOperator === LogicalOperator.Or) {
+					throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "orConditionNotSupported");
+				}
+				conditionsList = conditions.conditions;
+			} else {
+				conditionsList = [conditions];
+			}
+		}
+
+		for (const cond of conditionsList) {
+			const comparator = cond as IComparator;
+			if (String(comparator.property).includes(".")) {
+				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "comparisonNotSupported", {
+					property: comparator.property,
+					reason: "dot-notation nested property paths are not supported in CQL"
+				});
+			}
+			if (
+				(comparator.comparison === ComparisonOperator.Equals ||
+					comparator.comparison === ComparisonOperator.NotEquals) &&
+				(comparator.value === null || comparator.value === undefined)
+			) {
+				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "comparisonNotSupported", {
+					property: comparator.property,
+					reason: "null/undefined comparisons are not supported in CQL WHERE clauses"
+				});
+			}
+			if (comparator.comparison === ComparisonOperator.NotEquals) {
+				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "notEqualsNotSupported", {
+					property: comparator.property
+				});
+			}
+			if (comparator.comparison === ComparisonOperator.NotIncludes) {
+				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "notIncludesNotSupported", {
+					property: comparator.property
+				});
+			}
+		}
+
+		const conds: string[] = [];
+		const params: unknown[] = [partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE];
+
+		for (const cond of conditionsList) {
+			const condition = cond as IComparator;
+			const descriptor = this._entitySchema.properties?.find(
+				p => p.property === condition.property
+			);
+			if (
+				condition.comparison === ComparisonOperator.Includes ||
+				condition.comparison === ComparisonOperator.NotIncludes
+			) {
+				const serialized = this.propertyToDbValue(condition.value, descriptor);
+				const propValue = `'%${Is.stringValue(serialized) ? serialized : ""}%'`;
+				if (condition.comparison === ComparisonOperator.Includes) {
+					conds.push(`"${condition.property}" LIKE ${propValue}`);
+				} else if (condition.comparison === ComparisonOperator.NotIncludes) {
+					conds.push(`"${condition.property}" NOT LIKE ${propValue}`);
+				}
+			} else if (condition.comparison === ComparisonOperator.In) {
+				let value: unknown[] = [];
+				if (!Is.arrayValue(condition.value)) {
+					value.push(this.propertyToDbValue(condition.value, descriptor));
+				} else {
+					value = condition.value.map(v => this.propertyToDbValue(v, descriptor));
+				}
+				params.push(value);
+				conds.push(`"${condition.property}" IN ?`);
+			} else {
+				const propValue = this.propertyToDbValue(condition.value, descriptor);
+				params.push(propValue);
+				if (condition.comparison === ComparisonOperator.Equals) {
+					conds.push(`"${condition.property}" = ?`);
+				} else if (condition.comparison === ComparisonOperator.NotEquals) {
+					conds.push(`"${condition.property}" != ?`);
+				} else if (condition.comparison === ComparisonOperator.GreaterThan) {
+					conds.push(`"${condition.property}" > ?`);
+				} else if (condition.comparison === ComparisonOperator.LessThan) {
+					conds.push(`"${condition.property}" < ?`);
+				} else if (condition.comparison === ComparisonOperator.GreaterThanOrEqual) {
+					conds.push(`"${condition.property}" >= ?`);
+				} else if (condition.comparison === ComparisonOperator.LessThanOrEqual) {
+					conds.push(`"${condition.property}" <= ?`);
+				}
+			}
+		}
+
+		const operator =
+			"conditions" in (conditions ?? {})
+				? ((conditions as IComparatorGroup).logicalOperator ?? LogicalOperator.And)
+				: LogicalOperator.And;
+
+		let whereClause = `"${AbstractScyllaDBConnector.PARTITION_KEY}" = ?`;
+		if (conds.length > 0) {
+			whereClause += ` AND ${conds.join(` ${operator} `)}`;
+		}
+
+		return { whereClause, params };
 	}
 }

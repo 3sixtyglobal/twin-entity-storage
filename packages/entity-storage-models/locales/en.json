@@ -1,3 +1,9 @@
 {
-	"error": {}
+	"error": {
+		"migrationHelper": {
+			"migrationFailed": "Migration failed.",
+			"transformRequiredForProperty": "A transformation function is required to migrate property \"{from}\" to \"{to}\" of type \"{type}\"",
+			"coercionProducedUndefined": "Coercion of property \"{property}\" to type \"{type}\" produced undefined but the property is not optional"
+		}
+	}
 }

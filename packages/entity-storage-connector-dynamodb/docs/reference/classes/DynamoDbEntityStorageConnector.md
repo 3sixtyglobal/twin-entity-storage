@@ -386,3 +386,41 @@ The total count of entities in the storage.
 #### Implementation of
 
 `IEntityStorageConnector.count`
+
+***
+
+### migrate() {#migrate}
+
+> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+
+Migrate entities in-place to a new schema for the **current partition**.
+
+**Strategy C:** DynamoDB has no cheap atomic table rename for emulation
+workflows. Uses `migrateEntities` with a **second connector instance**
+(same table/config, synthetic target schema) so `setBatch` validates
+transformed items; writes are partition-scoped `BatchWriteItem` upserts.
+Partial failure may leave a mixed schema in the partition — back up first.
+
+#### Parameters
+
+##### newSchema
+
+`IEntitySchema`
+
+The target entity schema.
+
+##### options?
+
+`IMigrationOptions`
+
+Options controlling migration behaviour.
+
+#### Returns
+
+`Promise`\<`IMigrationResult`\>
+
+The migration result.
+
+#### Implementation of
+
+`IEntityStorageConnector.migrate`

@@ -17,8 +17,6 @@ Guards.stringValue("TestEnv", "TEST_COSMOS_KEY", process.env.TEST_COSMOS_KEY);
 Guards.stringValue("TestEnv", "TEST_COSMOS_DATABASE", process.env.TEST_COSMOS_DATABASE);
 Guards.stringValue("TestEnv", "TEST_COSMOS_CONTAINER", process.env.TEST_COSMOS_CONTAINER);
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 export const TEST_COSMOS_CONFIG: ICosmosDbEntityStorageConnectorConfig = {
 	endpoint: process.env.TEST_COSMOS_ENDPOINT,
 	key: process.env.TEST_COSMOS_KEY,

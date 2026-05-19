@@ -378,3 +378,34 @@ True if the teardown process was successful.
 #### Implementation of
 
 `IEntityStorageConnector.teardown`
+
+***
+
+### migrate() {#migrate}
+
+> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+
+Migrate is not supported on views — the owning ScyllaDBTableConnector handles
+migration, including dropping and recreating any dependent views.
+
+#### Parameters
+
+##### newSchema
+
+`IEntitySchema`
+
+Ignored.
+
+##### options?
+
+`IMigrationOptions`
+
+Ignored.
+
+#### Returns
+
+`Promise`\<`IMigrationResult`\>
+
+#### Implementation of
+
+`IEntityStorageConnector.migrate`

@@ -10,6 +10,7 @@
 	"error": {
 		"firestoreEntityStorageConnector": {
 			"firestoreCreationFailed": "Failed to connect to Firestore",
+			"getPartitionContextIdsFailed": "Unable to get partition context ids",
 			"setEntityFailed": "Failed to set entity \"{id}\"",
 			"getEntityFailed": "Failed to get entity \"{id}\"",
 			"removeEntityFailed": "Failed to remove entity \"{id}\"",
@@ -19,7 +20,8 @@
 			"countFailed": "Unable to count entities",
 			"emptyFailed": "Failed to empty entity storage",
 			"removeBatchFailed": "Unable to remove batch of entities",
-			"teardownFailed": "Unable to teardown entity storage"
+			"teardownFailed": "Unable to teardown entity storage",
+			"finalizeMigrationFailedBootstrap": "Finalizing migration failed during bootstrap phase"
 		}
 	},
 	"health": {

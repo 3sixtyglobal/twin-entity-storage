@@ -1,6 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
 	ComponentFactory,
@@ -21,7 +21,12 @@ import {
 	LogicalOperator,
 	type SortDirection
 } from "@twin.org/entity";
-import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
+import {
+	EntityHelper,
+	type IEntityStorageConnector,
+	type IEntityStorageMigrationConnector,
+	type IMigrationOptions
+} from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import { type Collection, type Document, type Filter, MongoClient, type WithId } from "mongodb";
@@ -31,7 +36,9 @@ import type { IMongoDbEntityStorageConnectorConstructorOptions } from "./models/
 /**
  * Class for performing entity storage operations using MongoDb.
  */
-export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
+export class MongoDbEntityStorageConnector<
+	T = unknown
+> implements IEntityStorageMigrationConnector<T> {
 	/**
 	 * Runtime name for the class.
 	 */
@@ -48,6 +55,12 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 	 * @internal
 	 */
 	private static readonly _PARTITION_KEY: string = "partitionId";
+
+	/**
+	 * The name for the schema.
+	 * @internal
+	 */
+	private readonly _entitySchemaName: string;
 
 	/**
 	 * The schema for the entity.
@@ -105,6 +118,7 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 			options.config.collection
 		);
 
+		this._entitySchemaName = options.entitySchema;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
 
@@ -267,8 +281,11 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 			const collection = await this.getCollection();
 			const result = await collection.findOne(query);
 			ObjectHelper.propertyDelete(result, "_id");
-			ObjectHelper.propertyDelete(result, MongoDbEntityStorageConnector._PARTITION_KEY);
-			return result as T | undefined;
+			return Is.objectValue(result)
+				? EntityHelper.unPrepareEntity<T>(result as T, [
+						MongoDbEntityStorageConnector._PARTITION_KEY
+					])
+				: undefined;
 		} catch (err) {
 			throw new GeneralError(
 				MongoDbEntityStorageConnector.CLASS_NAME,
@@ -293,22 +310,22 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		const prepared = EntityHelper.prepareEntity(
+			entity,
+			this._entitySchema,
+			Is.stringValue(partitionKey)
+				? [{ property: MongoDbEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
+				: undefined
+		);
 
 		const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
-		const id = entity[primaryKey.property];
+		const id = prepared[primaryKey.property];
 
 		try {
 			const filter: { [key in keyof T]?: unknown } = { [primaryKey.property]: id };
-			const finalEntity = ObjectHelper.clone(entity);
 
 			if (Is.stringValue(partitionKey)) {
 				filter[MongoDbEntityStorageConnector._PARTITION_KEY as keyof T] = partitionKey;
-				ObjectHelper.propertySet(
-					finalEntity,
-					MongoDbEntityStorageConnector._PARTITION_KEY,
-					partitionKey
-				);
 			}
 
 			if (Is.arrayValue(conditions)) {
@@ -320,7 +337,7 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 			const collection = await this.getCollection();
 			await collection.findOneAndUpdate(
 				filter,
-				{ $set: ObjectHelper.removeEmptyProperties(finalEntity) as Partial<Document> },
+				{ $set: prepared as Partial<Document> },
 				{ upsert: true }
 			);
 		} catch (err) {
@@ -347,31 +364,31 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 		const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
 
-		for (const entity of entities) {
-			EntitySchemaHelper.validateEntity(entity, this.getSchema());
-		}
+		const preparedEntities = entities.map(entity =>
+			EntityHelper.prepareEntity(
+				entity,
+				this._entitySchema,
+				Is.stringValue(partitionKey)
+					? [{ property: MongoDbEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
+					: undefined
+			)
+		);
 
 		try {
 			const collection = await this.getCollection();
 			await collection.bulkWrite(
-				entities.map(entity => {
-					const finalEntity = ObjectHelper.clone(entity);
+				preparedEntities.map(prepared => {
 					const filter: { [key: string]: unknown } = {
-						[primaryKey.property]: entity[primaryKey.property]
+						[primaryKey.property]: prepared[primaryKey.property]
 					};
 					if (Is.stringValue(partitionKey)) {
 						filter[MongoDbEntityStorageConnector._PARTITION_KEY] = partitionKey;
-						ObjectHelper.propertySet(
-							finalEntity,
-							MongoDbEntityStorageConnector._PARTITION_KEY,
-							partitionKey
-						);
 					}
 					return {
 						updateOne: {
 							filter,
 							update: {
-								$set: ObjectHelper.removeEmptyProperties(finalEntity) as Partial<Document>
+								$set: prepared as Partial<Document>
 							},
 							upsert: true
 						}
@@ -549,27 +566,7 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 
 		const returnSize = limit ?? MongoDbEntityStorageConnector._DEFAULT_LIMIT;
 
-		const finalConditions: EntityCondition<T> = {
-			conditions: [],
-			logicalOperator: LogicalOperator.And
-		};
-
-		if (Is.stringValue(partitionKey)) {
-			finalConditions.conditions.push({
-				property: MongoDbEntityStorageConnector._PARTITION_KEY,
-				comparison: ComparisonOperator.Equals,
-				value: partitionKey
-			});
-		}
-
-		if (!Is.empty(conditions)) {
-			finalConditions.conditions.push(conditions);
-		}
-
-		const filter: Filter<T> = {};
-		if (finalConditions.conditions.length > 0) {
-			this.buildQueryParameters("", finalConditions, filter);
-		}
+		const filter = this.buildFilter(conditions, partitionKey);
 
 		const sort = new Map<string, SortDirection>();
 		if (Array.isArray(sortProperties)) {
@@ -594,27 +591,33 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 			?.find(filter as Filter<Document>, { projection })
 			.sort(sort)
 			.skip(cursorValue)
-			.limit(returnSize)
+			.limit(returnSize + 1)
 			.toArray();
 
-		const entities = (entitiesResult as unknown as Partial<T>[]) ?? [];
+		const rawResults = (entitiesResult as unknown as Partial<T>[]) ?? [];
+		const hasMore = rawResults.length > returnSize;
+		const entities = hasMore ? rawResults.slice(0, returnSize) : rawResults;
 
-		for (const entity of entities) {
+		for (let i = 0; i < entities.length; i++) {
+			const entity = entities[i];
 			ObjectHelper.propertyDelete(entity, "_id");
-			ObjectHelper.propertyDelete(entity, MongoDbEntityStorageConnector._PARTITION_KEY);
+			entities[i] = EntityHelper.unPrepareEntity(entity, [
+				MongoDbEntityStorageConnector._PARTITION_KEY
+			]);
 		}
 
 		return {
 			entities,
-			cursor: entities?.length === returnSize ? String(cursorValue + returnSize) : undefined
+			cursor: hasMore ? String(cursorValue + returnSize) : undefined
 		};
 	}
 
 	/**
 	 * Count all the entities which match the conditions.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
 	 */
-	public async count(): Promise<number> {
+	public async count(conditions?: EntityCondition<T>): Promise<number> {
 		try {
 			const contextIds = await ContextIdStore.getContextIds();
 			const partitionKey = ContextIdHelper.combinedContextKey(
@@ -622,15 +625,12 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 				this._partitionContextIds
 			);
 
-			const filter: { [key: string]: unknown } = {};
-			if (Is.stringValue(partitionKey)) {
-				filter[MongoDbEntityStorageConnector._PARTITION_KEY] = partitionKey;
-			}
+			const filter = this.buildFilter(conditions, partitionKey);
 
 			return await this._client
 				.db(this._config.database)
 				.collection(this._config.collection)
-				.countDocuments(filter);
+				.countDocuments(filter as Filter<Document>);
 		} catch (err) {
 			throw new GeneralError(
 				MongoDbEntityStorageConnector.CLASS_NAME,
@@ -639,6 +639,114 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 				err
 			);
 		}
+	}
+
+	/**
+	 * Get all unique partition context ids present in the collection.
+	 * @returns An array of context id objects, one per unique partition.
+	 */
+	public async getPartitionContextIds(): Promise<IContextIds[]> {
+		if (!Is.arrayValue(this._partitionContextIds)) {
+			return [];
+		}
+
+		try {
+			const collection = await this.getCollection();
+			const partitionIds = await collection.distinct(MongoDbEntityStorageConnector._PARTITION_KEY);
+
+			return partitionIds
+				.filter((id): id is string => Is.stringValue(id))
+				.map(partitionId =>
+					ContextIdHelper.shortSplit(this._partitionContextIds ?? [], partitionId)
+				);
+		} catch (err) {
+			throw new GeneralError(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				"getPartitionContextIdsFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Create the target connector for performing the migration using a temporary collection.
+	 * @param newEntitySchema The name of the new entity schema to create the connector for.
+	 * @returns Connector for performing the migration.
+	 */
+	public async createTargetConnector<U>(
+		newEntitySchema: string
+	): Promise<IEntityStorageConnector<U>> {
+		const migrationCollectionName = `${this._config.collection}Migration${Date.now()}`;
+		return new MongoDbEntityStorageConnector<U>({
+			entitySchema: newEntitySchema,
+			config: {
+				...this._config,
+				collection: migrationCollectionName
+			},
+			partitionContextIds: this._partitionContextIds
+		});
+	}
+
+	/**
+	 * Finalize the migration by dropping the source collection and renaming the migration collection to the original name.
+	 * @param targetConnector The connector holding the migrated data in a temporary collection.
+	 * @param options The options to control how the migration is finalized.
+	 * @param loggingComponentType The logging component type to use during finalization.
+	 * @returns The final connector using the original collection name with the new schema.
+	 */
+	public async finalizeMigration<U>(
+		targetConnector: MongoDbEntityStorageConnector<U>,
+		options?: IMigrationOptions<T, U>,
+		loggingComponentType?: string
+	): Promise<MongoDbEntityStorageConnector<U>> {
+		// Only rename if the migration collection was actually created (it won't exist if no
+		// entities were written, since MongoDB creates collections lazily on first write).
+		const migrationCollection = await targetConnector.getCollection();
+
+		const collections = await targetConnector._client
+			.db(targetConnector._config.database)
+			.listCollections({ name: targetConnector._config.collection })
+			.toArray();
+
+		if (collections.length > 0) {
+			// Teardown the existing table with the original name to free up the name for the new table
+			await this.teardown(loggingComponentType);
+
+			await migrationCollection.rename(this._config.collection);
+		}
+
+		const finalConnector = new MongoDbEntityStorageConnector<U>({
+			entitySchema: targetConnector._entitySchemaName,
+			config: this._config,
+			partitionContextIds: this._partitionContextIds
+		});
+
+		if (await finalConnector.bootstrap(loggingComponentType)) {
+			await targetConnector.stop?.();
+			return finalConnector;
+		}
+
+		throw new GeneralError(
+			MongoDbEntityStorageConnector.CLASS_NAME,
+			"finalizeMigrationFailedBootstrap",
+			undefined
+		);
+	}
+
+	/**
+	 * Cleanup a failed or aborted migration by dropping the temporary migration collection.
+	 * @param targetConnector The target connector to cleanup.
+	 * @param options The options to control how the migration is cleaned up.
+	 * @param loggingComponentType The optional component type to use for logging.
+	 * @returns A promise that resolves when the cleanup is complete.
+	 */
+	public async cleanupMigration<U>(
+		targetConnector: IEntityStorageConnector<U> | undefined,
+		options?: IMigrationOptions<T, U>,
+		loggingComponentType?: string
+	): Promise<void> {
+		await targetConnector?.teardown?.(loggingComponentType);
 	}
 
 	/**
@@ -663,6 +771,42 @@ export class MongoDbEntityStorageConnector<T = unknown> implements IEntityStorag
 	private async getCollection(): Promise<Collection> {
 		const { database, collection } = this._config;
 		return this._client.db(database).collection(collection);
+	}
+
+	/**
+	 * Build a MongoDB filter combining partition key and optional conditions.
+	 * @param conditions The optional entity conditions to include.
+	 * @param partitionKey The partition key value.
+	 * @returns The MongoDB filter object.
+	 * @internal
+	 */
+	private buildFilter(
+		conditions: EntityCondition<T> | undefined,
+		partitionKey: string | undefined
+	): Filter<T> {
+		const finalConditions: EntityCondition<T> = {
+			conditions: [],
+			logicalOperator: LogicalOperator.And
+		};
+
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.conditions.push({
+				property: MongoDbEntityStorageConnector._PARTITION_KEY,
+				comparison: ComparisonOperator.Equals,
+				value: partitionKey
+			});
+		}
+
+		if (!Is.empty(conditions)) {
+			finalConditions.conditions.push(conditions);
+		}
+
+		const filter: Filter<T> = {};
+		if (finalConditions.conditions.length > 0) {
+			this.buildQueryParameters("", finalConditions, filter);
+		}
+
+		return filter;
 	}
 
 	/**

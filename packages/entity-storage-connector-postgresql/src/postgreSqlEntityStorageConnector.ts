@@ -1,6 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
 	Coerce,
@@ -8,9 +8,9 @@ import {
 	GeneralError,
 	Guards,
 	HealthStatus,
+	type IHealth,
 	Is,
-	ObjectHelper,
-	type IHealth
+	ObjectHelper
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
@@ -24,7 +24,11 @@ import {
 	LogicalOperator,
 	SortDirection
 } from "@twin.org/entity";
-import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
+import {
+	EntityHelper,
+	type IEntityStorageMigrationConnector,
+	type IMigrationOptions
+} from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import postgres, { type ParameterOrJSON } from "postgres";
@@ -34,7 +38,9 @@ import type { IPostgreSqlEntityStorageConnectorConstructorOptions } from "./mode
 /**
  * Class for performing entity storage operations using ql.
  */
-export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
+export class PostgreSqlEntityStorageConnector<
+	T = unknown
+> implements IEntityStorageMigrationConnector<T> {
 	/**
 	 * Runtime name for the class.
 	 */
@@ -57,6 +63,12 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	 * @internal
 	 */
 	private static readonly _PARTITION_KEY_VALUE: string = "root";
+
+	/**
+	 * The name for the schema.
+	 * @internal
+	 */
+	private readonly _entitySchemaName: string;
 
 	/**
 	 * The schema for the entity.
@@ -130,6 +142,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 			options.config.tableName
 		);
 
+		this._entitySchemaName = options.entitySchema;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKeyProperty = EntitySchemaHelper.getPrimaryKey(this._entitySchema);
@@ -346,9 +359,9 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 						}
 					}
 				}
-				const entity = ObjectHelper.removeEmptyProperties(rows[0] as T, { removeNull: true });
-				ObjectHelper.propertyDelete(entity, PostgreSqlEntityStorageConnector._PARTITION_KEY);
-				return entity;
+				return EntityHelper.unPrepareEntity<T>(rows[0] as T, [
+					PostgreSqlEntityStorageConnector._PARTITION_KEY
+				]);
 			}
 		} catch (err) {
 			throw new GeneralError(
@@ -375,9 +388,14 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		const prepared = EntityHelper.prepareEntity(entity, this._entitySchema, [
+			{
+				property: PostgreSqlEntityStorageConnector._PARTITION_KEY,
+				value: partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
+			}
+		]);
 
-		const id = entity[this._primaryKeyProperty.property] as unknown as string;
+		const id = prepared[this._primaryKeyProperty.property] as unknown as string;
 
 		try {
 			if (Is.arrayValue(conditions)) {
@@ -387,32 +405,19 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 				}
 			}
 
-			const finalEntity = ObjectHelper.clone(entity);
-
 			const props = [...(this._entitySchema.properties ?? [])];
 			props.unshift({
 				property: PostgreSqlEntityStorageConnector._PARTITION_KEY as keyof T,
 				type: EntitySchemaPropertyType.String
 			});
 
-			ObjectHelper.propertySet(
-				finalEntity,
-				PostgreSqlEntityStorageConnector._PARTITION_KEY,
-				partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
-			);
-
 			const keys: string[] = [];
 			const values: unknown[] = [];
 
 			for (const prop of props) {
-				if (!(Is.empty(finalEntity[prop.property]) && (prop.optional ?? false))) {
-					keys.push(prop.property as string);
-					if (finalEntity[prop.property] === undefined) {
-						values.push(null);
-					} else {
-						values.push(finalEntity[prop.property]);
-					}
-				}
+				keys.push(prop.property as string);
+				const val = prepared[prop.property];
+				values.push(val ?? null);
 			}
 
 			let sql = `INSERT INTO "${this._config.tableName}"`;
@@ -446,9 +451,14 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		for (const entity of entities) {
-			EntitySchemaHelper.validateEntity(entity, this.getSchema());
-		}
+		const preparedEntities = entities.map(entity =>
+			EntityHelper.prepareEntity(entity, this._entitySchema, [
+				{
+					property: PostgreSqlEntityStorageConnector._PARTITION_KEY,
+					value: partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
+				}
+			])
+		);
 
 		try {
 			const props = [...(this._entitySchema.properties ?? [])];
@@ -461,17 +471,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 			const allValues: unknown[] = [];
 			const rowPlaceholders: string[] = [];
 
-			for (const entity of entities) {
-				const finalEntity = ObjectHelper.clone(entity);
-				ObjectHelper.propertySet(
-					finalEntity,
-					PostgreSqlEntityStorageConnector._PARTITION_KEY,
-					partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
-				);
-
+			for (const prepared of preparedEntities) {
 				const rowValues: string[] = [];
 				for (const prop of props) {
-					const val = finalEntity[prop.property];
+					const val = prepared[prop.property];
 					allValues.push(Is.empty(val) ? null : val);
 					rowValues.push(`$${allValues.length}`);
 				}
@@ -651,6 +654,101 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	}
 
 	/**
+	 * Get all the distinct partition context ids from the storage.
+	 * @returns An array of context id objects, one per unique partition.
+	 */
+	public async getPartitionContextIds(): Promise<IContextIds[]> {
+		if (!Is.arrayValue(this._partitionContextIds)) {
+			return [];
+		}
+		try {
+			const dbConnection = await this.createConnection();
+			const rows = await dbConnection.unsafe(
+				`SELECT DISTINCT "${PostgreSqlEntityStorageConnector._PARTITION_KEY}" FROM "${this._config.tableName}"`
+			);
+			return (rows as { [key: string]: string }[])
+				.map(row => row[PostgreSqlEntityStorageConnector._PARTITION_KEY])
+				.filter((id): id is string => Is.stringValue(id))
+				.map(id => ContextIdHelper.shortSplit(this._partitionContextIds ?? [], id));
+		} catch (err) {
+			throw new GeneralError(
+				PostgreSqlEntityStorageConnector.CLASS_NAME,
+				"getPartitionContextIdsFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Create a new target connector for the migration.
+	 * @param entitySchemaName The entity schema name to use for the target connector.
+	 * @returns A new connector configured with a migration table name.
+	 */
+	public async createTargetConnector<U>(
+		entitySchemaName: string
+	): Promise<PostgreSqlEntityStorageConnector<U>> {
+		return new PostgreSqlEntityStorageConnector<U>({
+			entitySchema: entitySchemaName,
+			config: {
+				...this._config,
+				tableName: `${this._config.tableName}Migration${Date.now()}`
+			},
+			partitionContextIds: this._partitionContextIds
+		});
+	}
+
+	/**
+	 * Finalize the migration by renaming the migration table to the original table name.
+	 * @param targetConnector The connector pointing to the migration table.
+	 * @param options The optional migration options.
+	 * @param loggingComponentType The node logging component type.
+	 * @returns A connector pointing to the final (renamed) table.
+	 */
+	public async finalizeMigration<U>(
+		targetConnector: PostgreSqlEntityStorageConnector<U>,
+		options?: IMigrationOptions<T, U>,
+		loggingComponentType?: string
+	): Promise<PostgreSqlEntityStorageConnector<U>> {
+		// Teardown the existing table with the original name to free up the name for the new table
+		await this.teardown(loggingComponentType);
+
+		const dbConnection = await targetConnector.createConnection();
+		await dbConnection.unsafe(
+			`ALTER TABLE "${targetConnector._config.tableName}" RENAME TO "${this._config.tableName}"`
+		);
+		const finalConnector = new PostgreSqlEntityStorageConnector<U>({
+			entitySchema: targetConnector._entitySchemaName,
+			config: this._config,
+			partitionContextIds: this._partitionContextIds
+		});
+		if (await finalConnector.bootstrap(loggingComponentType)) {
+			await targetConnector.stop();
+			return finalConnector;
+		}
+		throw new GeneralError(
+			PostgreSqlEntityStorageConnector.CLASS_NAME,
+			"finalizeMigrationFailedBootstrap",
+			undefined
+		);
+	}
+
+	/**
+	 * Clean up the migration by tearing down the migration table.
+	 * @param targetConnector The connector pointing to the migration table.
+	 * @param options The optional migration options.
+	 * @param loggingComponentType The node logging component type.
+	 */
+	public async cleanupMigration<U>(
+		targetConnector?: PostgreSqlEntityStorageConnector<U>,
+		options?: IMigrationOptions<T, U>,
+		loggingComponentType?: string
+	): Promise<void> {
+		// If something failed the only thing to cleanup is the migration table
+		await targetConnector?.teardown?.(loggingComponentType);
+	}
+
+	/**
 	 * Find all the entities which match the conditions.
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
@@ -684,34 +782,18 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 				orderByClause = `ORDER BY ${orderClauses.join(", ")}`;
 			}
 
-			const whereClauses: string[] = [];
-			const values: unknown[] = [];
-
-			const finalConditions: EntityCondition<T> = {
-				conditions: [],
-				logicalOperator: LogicalOperator.And
-			};
-
-			finalConditions.conditions.push({
-				property: PostgreSqlEntityStorageConnector._PARTITION_KEY,
-				comparison: ComparisonOperator.Equals,
-				value: partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
-			});
-
-			if (!Is.empty(conditions)) {
-				finalConditions.conditions.push(conditions);
-			}
-
-			this.buildQueryParameters("", finalConditions, whereClauses, values, 1);
+			const { whereClauses, values } = this.buildWhereClause(conditions, partitionKey);
 
 			const startIndex = Coerce.number(cursor) ?? 0;
 
 			sql = `SELECT ${properties ? properties.map(p => `"${String(p)}"`).join(", ") : "*"} FROM "${this._config.tableName}"`;
-			sql += ` WHERE ${whereClauses.join(" AND ")}`;
-			sql += ` ${orderByClause} LIMIT ${returnSize} OFFSET ${startIndex}`;
+			if (whereClauses.length > 0) {
+				sql += ` WHERE ${whereClauses.join(" AND ")}`;
+			}
+			sql += ` ${orderByClause} LIMIT ${returnSize + 1} OFFSET ${startIndex}`;
 
 			const dbConnection = await this.createConnection();
-			const rows = await dbConnection.unsafe(sql, values as postgres.ParameterOrJSON<never>[]);
+			const rows = await dbConnection.unsafe(sql, values);
 
 			if (this._entitySchema.properties) {
 				for (const row of rows) {
@@ -741,18 +823,18 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 				}
 			}
 
-			const entities = rows as unknown as Partial<T>[];
+			const hasMore = Is.array(rows) && rows.length > returnSize;
+			const resultRows = hasMore ? rows.slice(0, returnSize) : rows;
+			const entities = resultRows as unknown as Partial<T>[];
 			for (let i = 0; i < entities.length; i++) {
-				ObjectHelper.propertyDelete(entities[i], PostgreSqlEntityStorageConnector._PARTITION_KEY);
-				entities[i] = ObjectHelper.removeEmptyProperties(entities[i], { removeNull: true });
+				entities[i] = EntityHelper.unPrepareEntity(entities[i], [
+					PostgreSqlEntityStorageConnector._PARTITION_KEY
+				]);
 			}
 
 			return {
 				entities,
-				cursor:
-					Is.array(rows) && rows.length === returnSize
-						? Coerce.string(startIndex + returnSize)
-						: undefined
+				cursor: hasMore ? Coerce.string(startIndex + returnSize) : undefined
 			};
 		} catch (err) {
 			throw new GeneralError(
@@ -766,25 +848,34 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 
 	/**
 	 * Count all the entities which match the conditions.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
 	 */
-	public async count(): Promise<number> {
+	public async count(conditions?: EntityCondition<T>): Promise<number> {
+		let queryStr: string | undefined;
 		try {
+			const dbConnection = await this.createConnection();
+
 			const contextIds = await ContextIdStore.getContextIds();
 			const partitionKey = ContextIdHelper.combinedContextKey(
 				contextIds,
 				this._partitionContextIds
 			);
 
-			const sql = await this.createConnection();
-			const result =
-				await sql`SELECT COUNT(*) AS count FROM ${sql(this._config.tableName)} WHERE "partitionId" = ${partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE}`;
+			const { whereClauses, values } = this.buildWhereClause(conditions, partitionKey);
+
+			queryStr = `SELECT COUNT(*) AS count FROM "${this._config.tableName}"`;
+			if (whereClauses.length > 0) {
+				queryStr += ` WHERE ${whereClauses.join(" AND ")}`;
+			}
+
+			const result = await dbConnection.unsafe(queryStr, values);
 			return Number(result[0].count);
 		} catch (err) {
 			throw new GeneralError(
 				PostgreSqlEntityStorageConnector.CLASS_NAME,
 				"countFailed",
-				undefined,
+				{ sql: queryStr },
 				err
 			);
 		}
@@ -830,9 +921,11 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 	private async tableExists(): Promise<boolean> {
 		try {
 			const dbConnection = await this.createConnection();
-			const tableExistsQuery = `SELECT to_regclass('${this._config.tableName}')`;
-			const tableExistsResult = await dbConnection.unsafe(tableExistsQuery);
-			return tableExistsResult[0].to_regclass !== null;
+			const res = await dbConnection.unsafe(
+				"SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1 LIMIT 1",
+				[this._config.tableName] as postgres.ParameterOrJSON<never>[]
+			);
+			return res.length > 0;
 		} catch {
 			return false;
 		}
@@ -892,6 +985,40 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 			user: this._config.user,
 			password: this._config.password
 		};
+	}
+
+	/**
+	 * Build where clause arrays for a query, combining partition key and optional conditions.
+	 * @param conditions The optional entity conditions to include.
+	 * @param partitionKey The partition key value.
+	 * @returns The where clauses and bound values.
+	 * @internal
+	 */
+	private buildWhereClause(
+		conditions: EntityCondition<T> | undefined,
+		partitionKey: string | undefined
+	): { whereClauses: string[]; values: ParameterOrJSON<never>[] } {
+		const whereClauses: string[] = [];
+		const values: ParameterOrJSON<never>[] = [];
+
+		const finalConditions: EntityCondition<T> = {
+			conditions: [],
+			logicalOperator: LogicalOperator.And
+		};
+
+		finalConditions.conditions.push({
+			property: PostgreSqlEntityStorageConnector._PARTITION_KEY,
+			comparison: ComparisonOperator.Equals,
+			value: partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
+		});
+
+		if (!Is.empty(conditions)) {
+			finalConditions.conditions.push(conditions);
+		}
+
+		this.buildQueryParameters("", finalConditions, whereClauses, values, 1);
+
+		return { whereClauses, values };
 	}
 
 	/**
@@ -1029,6 +1156,17 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 					}
 					return `LOWER(${jsonTextExpr}) ILIKE $${valueIndex}`;
 				}
+				case ComparisonOperator.NotIncludes: {
+					values.pop();
+					values.push(`%${String(comparator.value).toLowerCase()}%`);
+					if (isArray) {
+						const elemPath = nestedParts
+							.map((p, i, arr) => (i === arr.length - 1 ? `->>'${p}'` : `->'${p}'`))
+							.join("");
+						return `NOT EXISTS (SELECT 1 FROM jsonb_array_elements("${rootProp}") elem WHERE LOWER(elem${elemPath}) ILIKE $${valueIndex})`;
+					}
+					return `LOWER(${jsonTextExpr}) NOT ILIKE $${valueIndex}`;
+				}
 				case ComparisonOperator.NotEquals:
 					return `${jsonTextExpr} <> $${valueIndex}`;
 				case ComparisonOperator.GreaterThan:
@@ -1069,6 +1207,22 @@ export class PostgreSqlEntityStorageConnector<T = unknown> implements IEntitySto
 				}
 				if (type === EntitySchemaPropertyType.Array || type === EntitySchemaPropertyType.Object) {
 					return `EXISTS (SELECT 1 FROM jsonb_array_elements("${prop}") elem WHERE elem @> $${valueIndex}::jsonb)`;
+				}
+				throw new GeneralError(
+					PostgreSqlEntityStorageConnector.CLASS_NAME,
+					"comparisonNotSupported",
+					{
+						comparison: comparator.comparison,
+						type
+					}
+				);
+			}
+			case ComparisonOperator.NotIncludes: {
+				if (type === EntitySchemaPropertyType.String) {
+					return `"${prop}" NOT ILIKE '%' || $${valueIndex} || '%'`;
+				}
+				if (type === EntitySchemaPropertyType.Array || type === EntitySchemaPropertyType.Object) {
+					return `NOT EXISTS (SELECT 1 FROM jsonb_array_elements("${prop}") elem WHERE elem @> $${valueIndex}::jsonb)`;
 				}
 				throw new GeneralError(
 					PostgreSqlEntityStorageConnector.CLASS_NAME,

@@ -17,8 +17,6 @@ Guards.stringValue("TestEnv", "TEST_MONGODB_PORT", process.env.TEST_MONGODB_PORT
 Guards.stringValue("TestEnv", "TEST_MONGODB_DATABASE", process.env.TEST_MONGODB_DATABASE);
 Guards.stringValue("TestEnv", "TEST_MONGODB_COLLECTION", process.env.TEST_MONGODB_COLLECTION);
 
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
-
 export const TEST_MONGODB_CONFIG: IMongoDbEntityStorageConnectorConfig = {
 	host: process.env.TEST_MONGODB_ENDPOINT,
 	port: Coerce.number(process.env.TEST_MONGODB_PORT),

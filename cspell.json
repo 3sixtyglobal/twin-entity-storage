@@ -21,6 +21,7 @@
 	"words": [
 		"abbrev",
 		"autorelease",
+		"bavail",
 		"cloudsdktool",
 		"conds",
 		"cosmosdb",
@@ -32,12 +33,13 @@
 		"nameof",
 		"regclass",
 		"scylladb",
-		"Stiftung",
 		"statfs",
-		"bavail",
-		"TINYINT",
+		"Stiftung",
 		"teardown",
-		"unmarshall"
+		"TINYINT",
+		"unmarshall",
+		"upserted",
+		"upserts"
 	],
 	"ignoreRegExpList": [
 		"/from\\s+(['\"]).*\\1/",

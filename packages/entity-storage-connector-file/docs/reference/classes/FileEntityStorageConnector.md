@@ -386,3 +386,35 @@ The total count of entities in the storage.
 #### Implementation of
 
 `IEntityStorageConnector.count`
+
+***
+
+### migrate() {#migrate}
+
+> **migrate**(`newSchema`, `options?`): `Promise`\<`IMigrationResult`\>
+
+Migrate entities to a new schema using in-place patching.
+
+#### Parameters
+
+##### newSchema
+
+`IEntitySchema`
+
+The target entity schema.
+
+##### options?
+
+`IMigrationOptions`
+
+Options controlling migration behaviour.
+
+#### Returns
+
+`Promise`\<`IMigrationResult`\>
+
+The migration result.
+
+#### Implementation of
+
+`IEntityStorageConnector.migrate`

@@ -52,12 +52,13 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 	/**
 	 * Set an entity.
 	 * @param entity The entity to set.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The id of the entity.
 	 */
-	public async set(entity: T): Promise<void> {
+	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object(EntityStorageService.CLASS_NAME, nameof(entity), entity);
 
-		return this._entityStorage.set(entity, undefined);
+		return this._entityStorage.set(entity, conditions);
 	}
 
 	/**
@@ -75,23 +76,32 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 	 * Get an entity.
 	 * @param id The id of the entity to get, or the index value if secondaryIndex is set.
 	 * @param secondaryIndex Get the item using a secondary index.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The object if it can be found or undefined.
 	 */
-	public async get(id: string, secondaryIndex?: keyof T): Promise<T | undefined> {
+	public async get(
+		id: string,
+		secondaryIndex?: keyof T,
+		conditions?: { property: keyof T; value: unknown }[]
+	): Promise<T | undefined> {
 		Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(id), id);
 
-		return this._entityStorage.get(id, secondaryIndex);
+		return this._entityStorage.get(id, secondaryIndex, conditions);
 	}
 
 	/**
 	 * Remove the entity.
 	 * @param id The id of the entity to remove.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns Nothing.
 	 */
-	public async remove(id: string): Promise<void> {
+	public async remove(
+		id: string,
+		conditions?: { property: keyof T; value: unknown }[]
+	): Promise<void> {
 		Guards.stringValue(EntityStorageService.CLASS_NAME, nameof(id), id);
 
-		await this._entityStorage.remove(id);
+		await this._entityStorage.remove(id, conditions);
 	}
 
 	/**
@@ -115,10 +125,11 @@ export class EntityStorageService<T = any> implements IEntityStorageComponent<T>
 
 	/**
 	 * Count all the entities which match the conditions.
+	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
 	 */
-	public async count(): Promise<number> {
-		return this._entityStorage.count();
+	public async count(conditions?: EntityCondition<T>): Promise<number> {
+		return this._entityStorage.count(conditions);
 	}
 
 	/**

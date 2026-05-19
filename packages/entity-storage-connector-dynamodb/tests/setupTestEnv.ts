@@ -31,5 +31,7 @@ export const TEST_DYNAMODB_CONFIG: IDynamoDbEntityStorageConnectorConfig = {
 	accessKeyId: process.env.TEST_DYNAMODB_ACCESS_KEY_ID,
 	secretAccessKey: process.env.TEST_DYNAMODB_SECRET_ACCESS_KEY,
 	tableName: process.env.TEST_DYNAMODB_TABLE_NAME,
-	endpoint: process.env.TEST_DYNAMODB_ENDPOINT
+	endpoint: process.env.TEST_DYNAMODB_ENDPOINT,
+	connectionTimeoutMs: 10000,
+	maxAttempts: 1
 };
