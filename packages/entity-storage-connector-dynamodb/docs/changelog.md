@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.15](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-dynamodb-v0.0.3-next.14...entity-storage-connector-dynamodb-v0.0.3-next.15) (2026-05-19)
+
+
+### Bug Fixes
+
+* document AWS SDK pins for minimum release age consumers ([#96](https://github.com/iotaledger/twin-entity-storage/issues/96)) ([c4bcc26](https://github.com/iotaledger/twin-entity-storage/commit/c4bcc26f962da6f6bd090630f48d26ab58946c4e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.14 to 0.0.3-next.15
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.14 to 0.0.3-next.15
+
 ## [0.0.3-next.14](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-dynamodb-v0.0.3-next.13...entity-storage-connector-dynamodb-v0.0.3-next.14) (2026-05-19)
 
 

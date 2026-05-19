@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3-next.15](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.0.3-next.14...entity-storage-models-v0.0.3-next.15) (2026-05-19)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-models:** Synchronize repo versions
+
 ## [0.0.3-next.14](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.0.3-next.13...entity-storage-models-v0.0.3-next.14) (2026-05-19)
 
 
