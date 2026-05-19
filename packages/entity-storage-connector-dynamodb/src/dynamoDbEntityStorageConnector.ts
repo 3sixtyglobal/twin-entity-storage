@@ -8,6 +8,7 @@ import {
 	type DynamoDBClientConfig,
 	type GlobalSecondaryIndex,
 	QueryCommand,
+	ScanCommand as RawScanCommand,
 	waitUntilTableExists,
 	waitUntilTableNotExists
 } from "@aws-sdk/client-dynamodb";
@@ -1143,12 +1144,14 @@ export class DynamoDbEntityStorageConnector<
 	): {
 		keyCondition: string;
 		filterCondition: string;
+		requiresScan: boolean;
 	} {
 		// If no conditions are defined then return empty string
 		if (Is.undefined(condition)) {
 			return {
 				keyCondition: "",
-				filterCondition: ""
+				filterCondition: "",
+				requiresScan: false
 			};
 		}
 
@@ -1156,18 +1159,47 @@ export class DynamoDbEntityStorageConnector<
 			if (condition.conditions.length === 0) {
 				return {
 					keyCondition: "",
-					filterCondition: ""
+					filterCondition: "",
+					requiresScan: false
 				};
 			}
 			// It's a group of comparisons, so check the individual items and combine with the logical operator
 			const joinConditions: {
 				keyCondition: string;
 				filterCondition: string;
+				requiresScan: boolean;
 			}[] = condition.conditions.map(c =>
 				this.buildQueryParameters(objectPath, c, attributeNames, attributeValues, secondaryIndex)
 			);
 
 			const logicalOperator = this.mapConditionalOperator(condition.logicalOperator);
+
+			// DynamoDB does not support OR in KeyConditionExpression, so when the operator
+			// is OR we must move all conditions (including key conditions) into FilterExpression.
+			if (condition.logicalOperator === LogicalOperator.Or) {
+				const parts = joinConditions
+					.map(j => {
+						const subParts = [j.keyCondition.trim(), j.filterCondition.trim()].filter(
+							s => s.length > 0
+						);
+						if (subParts.length === 0) {
+							return "";
+						}
+						if (subParts.length === 1) {
+							return subParts[0];
+						}
+						return `(${subParts.join(" AND ")})`;
+					})
+					.filter(s => s.length > 0);
+				const hasKeyConditions = joinConditions.some(j => j.keyCondition.length > 0);
+				const filterCondition = parts.join(" OR ");
+				return {
+					keyCondition: "",
+					filterCondition: Is.stringValue(filterCondition) ? ` (${filterCondition}) ` : "",
+					requiresScan: hasKeyConditions
+				};
+			}
+
 			const keyCondition = joinConditions
 				.filter(j => j.keyCondition.length > 0)
 				.map(j => j.keyCondition)
@@ -1179,7 +1211,8 @@ export class DynamoDbEntityStorageConnector<
 
 			return {
 				keyCondition: Is.stringValue(keyCondition) ? ` (${keyCondition}) ` : "",
-				filterCondition: Is.stringValue(filterCondition) ? ` (${filterCondition}) ` : ""
+				filterCondition: Is.stringValue(filterCondition) ? ` (${filterCondition}) ` : "",
+				requiresScan: joinConditions.some(j => j.requiresScan)
 			};
 		}
 
@@ -1198,7 +1231,8 @@ export class DynamoDbEntityStorageConnector<
 			schemaProp?.isPrimary ?? (schemaProp?.isSecondary && schemaProp?.property === secondaryIndex);
 		return {
 			keyCondition: isKey ? comparison : "",
-			filterCondition: !isKey ? comparison : ""
+			filterCondition: !isKey ? comparison : "",
+			requiresScan: false
 		};
 	}
 
@@ -1229,14 +1263,24 @@ export class DynamoDbEntityStorageConnector<
 		let attributeName = this.populateAttributeNames(prop, attributeNames);
 
 		if (Is.empty(comparator.value)) {
+			// prepareEntity converts undefined → null before storing, so DynamoDB holds the
+			// attribute with type NULL rather than omitting it. Use attribute_type to match.
+			const nullTypePropName = `:${attributeName.replace(/\./g, "").replace(/#/g, "")}Null`;
+			attributeValues[nullTypePropName] = { S: "NULL" };
 			if (comparator.comparison === ComparisonOperator.Equals) {
-				return `attribute_not_exists(${attributeName})`;
+				return `attribute_type(${attributeName}, ${nullTypePropName})`;
 			} else if (comparator.comparison === ComparisonOperator.NotEquals) {
-				return `attribute_exists(${attributeName})`;
+				return `NOT attribute_type(${attributeName}, ${nullTypePropName})`;
 			}
 		}
 
-		let propName = `:${attributeName.replace(/\./g, "").replace(/#/g, "")}`;
+		const basePropName = `:${attributeName.replace(/\./g, "").replace(/#/g, "")}`;
+		let propName = basePropName;
+		let propSuffix = 0;
+		while (!Is.undefined(attributeValues[propName])) {
+			propSuffix++;
+			propName = `${basePropName}${propSuffix}`;
+		}
 
 		if (Is.array(comparator.value)) {
 			const dbValues = comparator.value.map(v => this.propertyToDbValue(v, type));
@@ -1267,7 +1311,7 @@ export class DynamoDbEntityStorageConnector<
 		} else if (comparator.comparison === ComparisonOperator.Includes) {
 			return `contains(${attributeName}, ${propName})`;
 		} else if (comparator.comparison === ComparisonOperator.NotIncludes) {
-			return `notContains(${attributeName}, ${propName})`;
+			return `NOT contains(${attributeName}, ${propName})`;
 		} else if (comparator.comparison === ComparisonOperator.In) {
 			return `${propName} IN ${attributeName}`;
 		}
@@ -1512,6 +1556,59 @@ export class DynamoDbEntityStorageConnector<
 				attributeValues,
 				secondaryIndex
 			);
+
+			// OR conditions on primary key attributes can't use KeyConditionExpression or
+			// FilterExpression in a QueryCommand — fall back to a full table ScanCommand.
+			if (expressions.requiresScan) {
+				let scanFilter = "#partitionId = :partitionId";
+				if (Is.stringValue(expressions.filterCondition)) {
+					scanFilter += ` AND ${expressions.filterCondition.trim()}`;
+				}
+
+				const dbConnection = this.createConnection();
+				const matchingItems: { [id: string]: AttributeValue }[] = [];
+				let scanStartKey: { [id: string]: AttributeValue } | undefined = Is.empty(cursor)
+					? undefined
+					: ObjectHelper.fromBytes(Converter.base64ToBytes(cursor));
+
+				do {
+					const scanResult = await dbConnection.send(
+						new RawScanCommand({
+							TableName: this._config.tableName,
+							FilterExpression: scanFilter,
+							ExpressionAttributeNames: attributeNames,
+							ExpressionAttributeValues: attributeValues,
+							ProjectionExpression: properties?.map(p => p as string).join(", "),
+							ExclusiveStartKey: scanStartKey
+						})
+					);
+					matchingItems.push(...(scanResult.Items ?? []));
+					scanStartKey = scanResult.LastEvaluatedKey;
+				} while (!Is.empty(scanStartKey));
+
+				const hasMore = matchingItems.length > returnSize;
+				const returnedRawItems = hasMore ? matchingItems.slice(0, returnSize) : matchingItems;
+
+				let resultCursor: string | undefined;
+				if (hasMore) {
+					const lastRawItem = returnedRawItems[returnedRawItems.length - 1];
+					const syntheticKey: { [id: string]: AttributeValue } = {
+						[DynamoDbEntityStorageConnector._PARTITION_KEY]:
+							lastRawItem[DynamoDbEntityStorageConnector._PARTITION_KEY],
+						[this._primaryKey.property as string]: lastRawItem[this._primaryKey.property as string]
+					};
+					resultCursor = Converter.bytesToBase64(ObjectHelper.toBytes(syntheticKey));
+				}
+
+				const scanEntities: T[] = returnedRawItems.map(item => {
+					const unmarshalled = unmarshall(item);
+					return EntityHelper.unPrepareEntity(unmarshalled as T, [
+						DynamoDbEntityStorageConnector._PARTITION_KEY
+					]);
+				});
+
+				return { entities: scanEntities, cursor: resultCursor };
+			}
 
 			let keyExpression = "#partitionId = :partitionId";
 			if (expressions.keyCondition.length > 0) {
