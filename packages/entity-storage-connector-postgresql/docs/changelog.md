@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.16](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-postgresql-v0.0.3-next.15...entity-storage-connector-postgresql-v0.0.3-next.16) (2026-05-20)
+
+
+### Features
+
+* disable endpoint discovery for cosmos ([49df2a2](https://github.com/iotaledger/twin-entity-storage/commit/49df2a254f385dc42e2e1f7e26e71f89b5bf5bcf))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.15 to 0.0.3-next.16
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.15 to 0.0.3-next.16
+
 ## [0.0.3-next.15](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-postgresql-v0.0.3-next.14...entity-storage-connector-postgresql-v0.0.3-next.15) (2026-05-19)
 
 
