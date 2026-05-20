@@ -166,7 +166,10 @@ export class CosmosDbEntityStorageConnector<
 
 		this._client = new CosmosClient({
 			endpoint: this._config.endpoint,
-			key: this._config.key
+			key: this._config.key,
+			connectionPolicy: {
+				enableEndpointDiscovery: !this._config.disableEndpointDiscovery
+			}
 		});
 
 		this._container = this._client

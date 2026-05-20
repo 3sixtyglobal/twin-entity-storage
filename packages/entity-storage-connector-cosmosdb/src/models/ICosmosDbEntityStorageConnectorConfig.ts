@@ -29,4 +29,12 @@ export interface ICosmosDbEntityStorageConnectorConfig {
 	 * The offer throughput for the container.
 	 */
 	offerThroughput?: number;
+
+	/**
+	 * Disable endpoint discovery so the SDK always uses the configured endpoint.
+	 * Required when using the CosmosDB emulator behind a port-mapped Docker container,
+	 * because the emulator's account response advertises its internal container port
+	 * instead of the mapped host port.
+	 */
+	disableEndpointDiscovery?: boolean;
 }

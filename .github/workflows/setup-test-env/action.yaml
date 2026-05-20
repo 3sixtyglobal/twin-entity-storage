@@ -36,7 +36,7 @@ runs:
     - name: Start DynamoDB Service
       if: inputs.package == 'packages/entity-storage-connector-dynamodb' || inputs.package == 'all'
       shell: bash
-      run: docker pull amazon/dynamodb-local:latest && docker run -d --name twin-entity-storage-dynamodb -p 8000:8000 amazon/dynamodb-local:latest
+      run: docker pull amazon/dynamodb-local:latest && docker run -d --name twin-entity-storage-dynamodb -p 18000:8000 amazon/dynamodb-local:latest
 
     # Start MySQL service only for MySQL package
     - name: Start MySQL Service
@@ -60,4 +60,4 @@ runs:
     - name: Run CosmosDB Emulator
       if: inputs.package == 'packages/entity-storage-connector-cosmosdb' || inputs.package == 'all'
       shell: bash
-      run: docker run --publish 8081:8081 --name twin-entity-storage-cosmos --detach mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+      run: docker run -p 18081:8081 --name twin-entity-storage-cosmos --detach mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview

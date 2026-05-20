@@ -34,8 +34,8 @@
 		"@twin.org/nameof": "next",
 		"@twin.org/entity-storage-models": "0.0.3-next.15",
 		"@twin.org/logging-models": "next",
-		"@aws-sdk/client-dynamodb": "3.1045",
-		"@aws-sdk/lib-dynamodb": "3.1045",
+		"@aws-sdk/client-dynamodb": "3.1050",
+		"@aws-sdk/lib-dynamodb": "3.1050",
 		"@aws-sdk/util-dynamodb": "3.996"
 	},
 	"devDependencies": {
@@ -45,7 +45,7 @@
 		"@twin.org/nameof-transformer": "next",
 		"@twin.org/nameof-vitest-plugin": "next",
 		"@twin.org/validate-locales": "next",
-		"@types/node": "25.8.0",
+		"@types/node": "25.9.1",
 		"@vitest/coverage-v8": "4.1.6",
 		"copyfiles": "2.4.1",
 		"dotenv": "17.4.2",

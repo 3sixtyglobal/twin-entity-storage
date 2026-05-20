@@ -21,5 +21,6 @@ export const TEST_COSMOS_CONFIG: ICosmosDbEntityStorageConnectorConfig = {
 	endpoint: process.env.TEST_COSMOS_ENDPOINT,
 	key: process.env.TEST_COSMOS_KEY,
 	databaseId: process.env.TEST_COSMOS_DATABASE,
-	containerId: process.env.TEST_COSMOS_CONTAINER
+	containerId: process.env.TEST_COSMOS_CONTAINER,
+	disableEndpointDiscovery: process.env.TEST_COSMOS_DISABLE_ENDPOINT_DISCOVERY === "true"
 };

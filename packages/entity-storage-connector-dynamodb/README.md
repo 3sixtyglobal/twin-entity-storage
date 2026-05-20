@@ -17,7 +17,7 @@ Published versions pin `@aws-sdk/client-dynamodb` and `@aws-sdk/lib-dynamodb` to
 To perform testing of this component it may be necessary to launch a local instance to communicate with.
 
 ```shell
-docker run -d --name twin-entity-storage-dynamodb -p 8000:8000 amazon/dynamodb-local
+docker run -d --name twin-entity-storage-dynamodb -p 18000:8000 amazon/dynamodb-local
 ```
 
 ## Examples

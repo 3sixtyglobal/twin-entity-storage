@@ -14,7 +14,7 @@ To perform testing of this component it may be necessary to launch a local insta
 
 ```shell
 docker pull mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
-docker run --publish 8081:8081 --detach --name twin-entity-storage-cosmos mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+docker run -p 18081:8081 --detach --name twin-entity-storage-cosmos mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
 ```
 
 ## Examples
