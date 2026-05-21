@@ -22,7 +22,7 @@ concurrency:
 jobs:
   dist-all-packages:
     # No need to trigger on merging pull request 'chore: release next'
-	# or 'docs: regenerate package documentation' as they have already performed a build
+    # or 'docs: regenerate package documentation' as they have already performed a build
     if: "${{ github.event_name != 'push' || (!startsWith(github.event.head_commit.message, 'Merge pull request') && !startsWith(github.event.head_commit.message, 'chore: release next') && !startsWith(github.event.head_commit.message, 'docs: regenerate package documentation')) }}"
     runs-on:
       labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
