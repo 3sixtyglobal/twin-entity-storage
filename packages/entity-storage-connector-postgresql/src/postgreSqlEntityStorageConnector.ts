@@ -422,7 +422,7 @@ export class PostgreSqlEntityStorageConnector<
 
 			let sql = `INSERT INTO "${this._config.tableName}"`;
 			sql += ` (${keys.map(key => `"${key}"`).join(", ")})`;
-			sql += ` VALUES (${values.map((_, i) => `$${i + 1}`).join(", ")})`;
+			sql += ` VALUES (${values.map((value, i) => `$${i + 1}`).join(", ")})`;
 			sql += ` ON CONFLICT ("${PostgreSqlEntityStorageConnector._PARTITION_KEY}", "${this._primaryKeyProperty.property as string}")`;
 			sql += ` DO UPDATE SET ${keys.map(key => `"${key}" = EXCLUDED."${key}"`).join(", ")};`;
 
@@ -1102,7 +1102,7 @@ export class PostgreSqlEntityStorageConnector<
 		if (comparator.comparison === ComparisonOperator.In) {
 			const inValues = Is.array(comparator.value) ? comparator.value : [comparator.value];
 			values.push(...inValues.map(val => this.propertyToDbValue(val, type)));
-			const placeholders = inValues.map((_, index) => `$${valueIndex + index}`).join(", ");
+			const placeholders = inValues.map((value, index) => `$${valueIndex + index}`).join(", ");
 			return `"${prop}" IN (${placeholders})`;
 		}
 

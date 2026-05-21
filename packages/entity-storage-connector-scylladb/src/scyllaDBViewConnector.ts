@@ -180,9 +180,9 @@ export class ScyllaDBViewConnector<T>
 
 	/**
 	 * Remove multiple entities.
-	 * @param _ids The ids of the entities to remove.
+	 * @param ids The ids of the entities to remove.
 	 */
-	public async removeBatch(_ids: string[]): Promise<void> {
+	public async removeBatch(ids: string[]): Promise<void> {
 		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
 			methodName: "removeBatch"
 		});
@@ -190,10 +190,10 @@ export class ScyllaDBViewConnector<T>
 
 	/**
 	 * Teardown the entity storage (not supported for views).
-	 * @param _nodeLoggingComponentType The node logging component type.
+	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the teardown process was successful.
 	 */
-	public async teardown(_nodeLoggingComponentType?: string): Promise<boolean> {
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
 		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
 			methodName: "teardown"
 		});

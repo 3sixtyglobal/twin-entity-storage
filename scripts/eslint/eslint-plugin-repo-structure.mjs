@@ -9,7 +9,7 @@ import {
 	pascalCase,
 	snakeCase,
 	upperCase
-} from './common.mjs';
+} from '../common.mjs';
 
 /**
  * Get the expected name for a given case type.

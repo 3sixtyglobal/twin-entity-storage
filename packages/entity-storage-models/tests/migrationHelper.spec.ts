@@ -55,9 +55,9 @@ function makeConnector(entities: ITestEntity[]): IEntityStorageMigrationConnecto
 			store = store.filter(e => !ids.includes(e.id));
 		},
 		query: async (
-			_conditions: unknown,
-			_sort: unknown,
-			_props: unknown,
+			conditions: unknown,
+			sort: unknown,
+			props: unknown,
 			cursor: string | undefined,
 			limit = 100
 		) => {
@@ -271,7 +271,7 @@ describe("MigrationHelper.applyEntityTransform", () => {
 			{ tags: "a,b,c" },
 			d,
 			{
-				transformEntityProperty: (_f, _t, v) => (v as string).split(",")
+				transformEntityProperty: (f, t, v) => (v as string).split(",")
 			}
 		);
 		expect(result.tags).toEqual(["a", "b", "c"]);
@@ -412,7 +412,7 @@ describe("MigrationHelper.migratePartition", () => {
 	});
 
 	test("respects batchSize by paginating across multiple batches", async () => {
-		const entities = Array.from({ length: 5 }, (_, i) => ({ id: String(i), value: `v${i}` }));
+		const entities = Array.from({ length: 5 }, (element, i) => ({ id: String(i), value: `v${i}` }));
 		const source = makeConnector(entities);
 		const target = makeConnector([]);
 
@@ -446,7 +446,7 @@ describe("MigrationHelper.migratePartition", () => {
 	});
 
 	test("onProgress rowTotal is consistent and rowIndex increments across multiple batches", async () => {
-		const entities = Array.from({ length: 5 }, (_, i) => ({ id: String(i), value: `v${i}` }));
+		const entities = Array.from({ length: 5 }, (element, i) => ({ id: String(i), value: `v${i}` }));
 		const source = makeConnector(entities);
 		const target = makeConnector([]);
 
@@ -472,12 +472,12 @@ describe("MigrationHelper.migratePartition", () => {
 	});
 
 	test("setBatch failure propagates the error out of migratePartition", async () => {
-		const entities = Array.from({ length: 4 }, (_, i) => ({ id: String(i), value: `v${i}` }));
+		const entities = Array.from({ length: 4 }, (element, i) => ({ id: String(i), value: `v${i}` }));
 		const source = makeConnector(entities);
 
 		let batchCallCount = 0;
 		const failingTarget = {
-			setBatch: async (_batch: ITestEntity[]) => {
+			setBatch: async (batch: ITestEntity[]) => {
 				batchCallCount++;
 				if (batchCallCount >= 2) {
 					throw new Error("simulated setBatch failure");
@@ -832,7 +832,7 @@ describe("MigrationHelper.migrate (full lifecycle)", () => {
 	});
 
 	test("migrates all entities correctly when batchSize is smaller than entity count", async () => {
-		const entities: ITestEntity[] = Array.from({ length: 5 }, (_, i) => ({
+		const entities: ITestEntity[] = Array.from({ length: 5 }, (element, i) => ({
 			id: String(i),
 			value: `v${i}`
 		}));

@@ -1120,7 +1120,7 @@ describe("CosmosDbEntityStorageConnector", () => {
 		test("can count more items than the default page limit", async () => {
 			const connector = await createConnector<TestType>(nameof<TestType>());
 			await connector.setBatch(
-				Array.from({ length: 45 }, (_, i) => ({
+				Array.from({ length: 45 }, (element, i) => ({
 					id: String(i + 1),
 					value1: i < 20 ? "aaa" : "bbb",
 					value2: i + 1
@@ -1132,7 +1132,7 @@ describe("CosmosDbEntityStorageConnector", () => {
 		test("can count more items than the default page limit with a condition", async () => {
 			const connector = await createConnector<TestType>(nameof<TestType>());
 			await connector.setBatch(
-				Array.from({ length: 45 }, (_, i) => ({
+				Array.from({ length: 45 }, (element, i) => ({
 					id: String(i + 1),
 					value1: i < 20 ? "aaa" : "bbb",
 					value2: i + 1

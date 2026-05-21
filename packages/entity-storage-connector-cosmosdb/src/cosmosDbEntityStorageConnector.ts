@@ -985,7 +985,14 @@ export class CosmosDbEntityStorageConnector<
 
 				if (Is.arrayValue(resources)) {
 					const operations: OperationInput[] = resources.map(
-						({ _rid, _self, _ts, _etag, _attachments, ...rest }) => ({
+						({
+							_rid: rid,
+							_self: self,
+							_ts: ts,
+							_etag: etag,
+							_attachments: attachments,
+							...rest
+						}) => ({
 							operationType: BulkOperationType.Upsert,
 							partitionKey,
 							resourceBody: rest

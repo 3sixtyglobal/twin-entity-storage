@@ -618,7 +618,7 @@ describe("PostgreSqlEntityStorageConnector — partitioning and migration", () =
 				MigV1WithStr,
 				MigV2WithObj
 			>(source, nameof<MigV2WithObj>(), undefined, {
-				transformEntityProperty: (_from, _to, value) => ({ label: value as string })
+				transformEntityProperty: (from, to, value) => ({ label: value as string })
 			});
 
 			expect(migrated).toBe(2);
