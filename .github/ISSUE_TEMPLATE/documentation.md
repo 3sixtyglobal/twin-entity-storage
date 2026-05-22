@@ -24,6 +24,13 @@ Which section should this documentation live in, select one ?
 - [ ] Media
 - [ ] Roadmap
 
+## 📄 Scope
+
+Should this be a single document or multiple documents within the section, select one?
+
+- [ ] Single document within section:
+- [ ] Multiple documents within section:
+
 ## 📋 Suggested Content
 
 - [ ]
