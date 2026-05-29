@@ -11,12 +11,6 @@ inputs:
   pr_url:
     description: Pull request URL to show in messages.
     required: true
-  notice_title:
-    description: Title for the GitHub Actions notice annotation.
-    required: true
-  notice_message:
-    description: Notice message shown before polling starts. Supports __PR_NUMBER__ and __PR_URL__ placeholders.
-    required: true
   waiting_message:
     description: Message printed before the polling loop starts. Supports __PR_NUMBER__ and __PR_URL__ placeholders.
     required: true
@@ -36,7 +30,7 @@ inputs:
   poll_seconds:
     description: Number of seconds to wait between polls.
     required: false
-    default: '60'
+    default: '20'
   github_token:
     description: Token used by gh to query the pull request.
     required: true
@@ -60,16 +54,12 @@ runs:
             -e "s|__PR_URL__|$PR_URL|g"
         }
 
-        NOTICE_TITLE='${{ inputs.notice_title }}'
-        NOTICE_MESSAGE="$(render '${{ inputs.notice_message }}')"
         WAITING_MESSAGE="$(render '${{ inputs.waiting_message }}')"
         SUCCESS_MESSAGE="$(render '${{ inputs.success_message }}')"
         CLOSED_ERROR_TITLE='${{ inputs.closed_error_title }}'
         CLOSED_ERROR_MESSAGE="$(render '${{ inputs.closed_error_message }}')"
         CLOSED_FOLLOW_UP="$(render '${{ inputs.closed_follow_up }}')"
 
-        echo "::notice title=$NOTICE_TITLE::$NOTICE_MESSAGE"
-        echo ""
         printf '%s\n' "$WAITING_MESSAGE"
 
         while true; do

@@ -69,17 +69,19 @@ jobs:
       group: ${{ github.event.repository.private && 'twin' || 'default' }}
     timeout-minutes: 360
     permissions:
+      contents: read
       pull-requests: read
 
     steps:
+      - name: Checkout workflow ref
+        uses: actions/checkout@v6
+
       - name: Poll until release PR is merged
         uses: ./.github/workflows/wait-for-pr
         with:
           repo: ${{ github.repository }}
           pr_number: ${{ needs.prepare.outputs.pr_number }}
           pr_url: ${{ needs.prepare.outputs.pr_url }}
-          notice_title: Gate 1 – Release PR
-          notice_message: 'Review and merge to publish: __PR_URL__'
           waiting_message: Waiting for release PR #__PR_NUMBER__ to be approved and merged...
           success_message: Release PR #__PR_NUMBER__ merged. Proceeding to publish.
           closed_error_title: Gate 1 Failed
