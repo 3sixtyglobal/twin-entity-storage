@@ -1,0 +1,98 @@
+name: Wait for PR
+description: Poll a pull request until it is merged or closed.
+
+inputs:
+  repo:
+    description: Repository in owner/name format.
+    required: true
+  pr_number:
+    description: Pull request number to poll.
+    required: true
+  pr_url:
+    description: Pull request URL to show in messages.
+    required: true
+  notice_title:
+    description: Title for the GitHub Actions notice annotation.
+    required: true
+  notice_message:
+    description: Notice message shown before polling starts. Supports __PR_NUMBER__ and __PR_URL__ placeholders.
+    required: true
+  waiting_message:
+    description: Message printed before the polling loop starts. Supports __PR_NUMBER__ and __PR_URL__ placeholders.
+    required: true
+  success_message:
+    description: Message printed once the PR is merged. Supports __PR_NUMBER__ and __PR_URL__ placeholders.
+    required: true
+  closed_error_title:
+    description: Title for the error annotation when the PR closes without merging.
+    required: true
+  closed_error_message:
+    description: Error annotation message for a PR closed without merging. Supports __PR_NUMBER__ and __PR_URL__ placeholders.
+    required: true
+  closed_follow_up:
+    description: Optional follow-up message printed after the closed error. Supports __PR_NUMBER__ and __PR_URL__ placeholders.
+    required: false
+    default: ''
+  poll_seconds:
+    description: Number of seconds to wait between polls.
+    required: false
+    default: '60'
+  github_token:
+    description: Token used by gh to query the pull request.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Wait for PR to merge
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+      run: |
+        PR_NUMBER='${{ inputs.pr_number }}'
+        PR_URL='${{ inputs.pr_url }}'
+        REPO='${{ inputs.repo }}'
+        POLL_SECONDS='${{ inputs.poll_seconds }}'
+
+        render() {
+          printf '%s' "$1" | sed \
+            -e "s|__PR_NUMBER__|$PR_NUMBER|g" \
+            -e "s|__PR_URL__|$PR_URL|g"
+        }
+
+        NOTICE_TITLE='${{ inputs.notice_title }}'
+        NOTICE_MESSAGE="$(render '${{ inputs.notice_message }}')"
+        WAITING_MESSAGE="$(render '${{ inputs.waiting_message }}')"
+        SUCCESS_MESSAGE="$(render '${{ inputs.success_message }}')"
+        CLOSED_ERROR_TITLE='${{ inputs.closed_error_title }}'
+        CLOSED_ERROR_MESSAGE="$(render '${{ inputs.closed_error_message }}')"
+        CLOSED_FOLLOW_UP="$(render '${{ inputs.closed_follow_up }}')"
+
+        echo "::notice title=$NOTICE_TITLE::$NOTICE_MESSAGE"
+        echo ""
+        printf '%s\n' "$WAITING_MESSAGE"
+
+        while true; do
+          PR_JSON=$(gh pr view "$PR_NUMBER" \
+            --repo "$REPO" \
+            --json state,mergedAt)
+
+          STATE=$(echo "$PR_JSON" | jq -r '.state')
+          MERGED_AT=$(echo "$PR_JSON" | jq -r '.mergedAt // empty')
+
+          if [ -n "$MERGED_AT" ]; then
+            printf '%s\n' "$SUCCESS_MESSAGE"
+            exit 0
+          fi
+
+          if [ "$STATE" = "CLOSED" ]; then
+            echo "::error title=$CLOSED_ERROR_TITLE::$CLOSED_ERROR_MESSAGE"
+            if [ -n "$CLOSED_FOLLOW_UP" ]; then
+              printf '%s\n' "$CLOSED_FOLLOW_UP"
+            fi
+            exit 1
+          fi
+
+          echo "PR #$PR_NUMBER is still open. Rechecking in $POLL_SECONDS seconds..."
+          sleep "$POLL_SECONDS"
+        done

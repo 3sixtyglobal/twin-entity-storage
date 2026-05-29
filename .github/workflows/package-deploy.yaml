@@ -77,10 +77,12 @@ jobs:
 
       # Create a new branch for the deployment
       - name: Create Deployment Update Branch
+        id: create-branch
         run: |
           BRANCH_NAME="release/deploy-${{ steps.set-branch.outputs.branch }}-$(date +%s)"
           git checkout -b $BRANCH_NAME
           echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+          echo "branch_name=$BRANCH_NAME" >> $GITHUB_OUTPUT
 
       # Install dependencies with retry
       - name: Install dependencies
@@ -101,7 +103,7 @@ jobs:
         uses: ./.github/workflows/package-deploy
         with:
           branch: ${{ steps.set-branch.outputs.branch }}
-          branch-name: BRANCH_NAME
+          branch-name: ${{ steps.create-branch.outputs.branch_name }}
           deploy-config-json: ${{ secrets.TWIN_DEPLOY_CONFIG_JSON }}
 
       # Stage all changes for commit
@@ -130,7 +132,7 @@ jobs:
             --title "chore: prepare deployments for ${{ steps.set-branch.outputs.branch }}" \
             --body "This PR prepares the deployments of all packages for ${{ steps.set-branch.outputs.branch }}." \
             --base $BASE_BRANCH \
-            --head ${{ env.BRANCH_NAME }})
+            --head ${{ steps.create-branch.outputs.branch_name }})
 
           # Extract PR number from URL
           PR_NUMBER=$(echo $PR_URL | grep -o '[0-9]\+$')
