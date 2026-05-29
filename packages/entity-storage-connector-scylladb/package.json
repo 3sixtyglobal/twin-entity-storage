@@ -4,7 +4,7 @@
 	"description": "ScyllaDB connector for distributed, high-throughput persistence.",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/iotaledger/entity-storage.git",
+		"url": "git+https://github.com/iotaledger/twin-entity-storage.git",
 		"directory": "packages/entity-storage-connector-scylladb"
 	},
 	"author": "jose.cantera@iota.org",
@@ -87,7 +87,7 @@
 		"integration"
 	],
 	"bugs": {
-		"url": "git+https://github.com/iotaledger/entity-storage/issues"
+		"url": "git+https://github.com/iotaledger/twin-entity-storage/issues"
 	},
 	"homepage": "https://twindev.org"
 }

@@ -4,7 +4,7 @@
 	"description": "Shared models for storage contracts, requests, responses and connector capabilities.",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/iotaledger/entity-storage.git",
+		"url": "git+https://github.com/iotaledger/twin-entity-storage.git",
 		"directory": "packages/entity-storage-models"
 	},
 	"author": "martyn.janes@iota.org",
@@ -79,7 +79,7 @@
 		"schemas"
 	],
 	"bugs": {
-		"url": "git+https://github.com/iotaledger/entity-storage/issues"
+		"url": "git+https://github.com/iotaledger/twin-entity-storage/issues"
 	},
 	"homepage": "https://twindev.org"
 }

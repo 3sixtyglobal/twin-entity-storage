@@ -4,7 +4,7 @@
 	"description": "Service layer exposing storage contracts and REST endpoint definitions.",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/iotaledger/entity-storage.git",
+		"url": "git+https://github.com/iotaledger/twin-entity-storage.git",
 		"directory": "packages/entity-storage-service"
 	},
 	"author": "martyn.janes@iota.org",
@@ -84,7 +84,7 @@
 		"business-logic"
 	],
 	"bugs": {
-		"url": "git+https://github.com/iotaledger/entity-storage/issues"
+		"url": "git+https://github.com/iotaledger/twin-entity-storage/issues"
 	},
 	"homepage": "https://twindev.org"
 }
