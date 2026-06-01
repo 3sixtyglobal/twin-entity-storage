@@ -12,7 +12,3 @@ runs:
         docker rmi -f $(docker images -aq) || true
         docker system prune -a --volumes -f || true
 
-        if [ -f /tmp/twin-entity-storage-aio-max-nr-before ]; then
-          sudo tee /proc/sys/fs/aio-max-nr < /tmp/twin-entity-storage-aio-max-nr-before >/dev/null || true
-          rm -f /tmp/twin-entity-storage-aio-max-nr-before
-        fi
