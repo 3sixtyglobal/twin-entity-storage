@@ -511,6 +511,7 @@ jobs:
       - name: Setup Test Environment
         uses: ./.github/workflows/setup-test-env
         with:
+          package: ${{ matrix.package }}
           test_env_vars: ${{ secrets.TWIN_TEST_ENV_VARS }}
 
       - name: Remove Mono-Repo Node Modules
