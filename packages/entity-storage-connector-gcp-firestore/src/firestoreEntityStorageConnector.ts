@@ -794,10 +794,22 @@ export class FirestoreEntityStorageConnector<
 				return { entities: page, cursor: nextCursor };
 			}
 
+			if (this.hasEmptyInCondition(conditions)) {
+				return { entities: [], cursor: undefined };
+			}
+
+			// Prune empty-In leaves from OR branches: the Firestore SDK throws on
+			// Filter.where(prop, "in", []) even inside an OR where other branches still match.
+			// hasEmptyInCondition above already handles the all-false case, so pruning here
+			// is safe — any removed leaf was a no-op branch.
+			const effectiveConditions = !Is.empty(conditions)
+				? (this.pruneEmptyInConditions(conditions) ?? undefined)
+				: conditions;
+
 			let query = collection as Query;
 
-			if (!Is.empty(conditions)) {
-				query = this.applyConditions(query, conditions);
+			if (!Is.empty(effectiveConditions)) {
+				query = this.applyConditions(query, effectiveConditions);
 				queryDescription.push(`Conditions: ${JSON.stringify(conditions)}`);
 			}
 
@@ -869,6 +881,10 @@ export class FirestoreEntityStorageConnector<
 
 			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
 
+			if (this.hasEmptyInCondition(conditions)) {
+				return 0;
+			}
+
 			if (!Is.empty(conditions) && this.needsPostFilter(conditions)) {
 				const allSnapshot = await collection.get();
 				const allEntities = allSnapshot.docs.map((doc: DocumentSnapshot) =>
@@ -877,9 +893,13 @@ export class FirestoreEntityStorageConnector<
 				return allEntities.filter(e => EntityConditions.check(e as Partial<T>, conditions)).length;
 			}
 
+			const effectiveConditions = !Is.empty(conditions)
+				? (this.pruneEmptyInConditions(conditions) ?? undefined)
+				: conditions;
+
 			let query = collection as Query;
-			if (!Is.empty(conditions)) {
-				query = this.applyConditions(query, conditions);
+			if (!Is.empty(effectiveConditions)) {
+				query = this.applyConditions(query, effectiveConditions);
 			}
 
 			const snapshot = await query.count().get();
@@ -979,6 +999,73 @@ export class FirestoreEntityStorageConnector<
 				}
 			}
 		}
+	}
+
+	/**
+	 * Returns true when the condition tree is guaranteed to match nothing due to empty
+	 * In lists, respecting AND/OR boolean semantics (#141):
+	 *   - AND group: true if ANY child is always-false (false AND x = false)
+	 *   - OR  group: true if ALL children are always-false (false OR false = false)
+	 *   - Leaf:      true only for `In []`
+	 * @param condition The condition tree to inspect.
+	 * @returns True if a short-circuit to empty results is required.
+	 * @internal
+	 */
+	private hasEmptyInCondition(condition?: EntityCondition<T>): boolean {
+		if (Is.empty(condition)) {
+			return false;
+		}
+		if ("conditions" in condition) {
+			return condition.logicalOperator === LogicalOperator.Or
+				? condition.conditions.every(c => this.hasEmptyInCondition(c))
+				: condition.conditions.some(c => this.hasEmptyInCondition(c));
+		}
+		return (
+			condition.comparison === ComparisonOperator.In &&
+			Is.array(condition.value) &&
+			condition.value.length === 0
+		);
+	}
+
+	/**
+	 * Returns a copy of the condition tree with all empty-In leaves removed.
+	 * Used to keep `In []` out of native Firestore Filter calls (the SDK throws on
+	 * `Filter.where(prop, "in", [])`) while preserving correct OR semantics (#141).
+	 * Returns null when the entire subtree reduces to nothing (caller should treat
+	 * as no conditions).
+	 * @param condition The condition to prune.
+	 * @returns The pruned condition, or null if the subtree was fully removed.
+	 * @internal
+	 */
+	private pruneEmptyInConditions(condition: EntityCondition<T>): EntityCondition<T> | null {
+		if (!("conditions" in condition)) {
+			if (
+				condition.comparison === ComparisonOperator.In &&
+				Is.array(condition.value) &&
+				condition.value.length === 0
+			) {
+				return null;
+			}
+			return condition;
+		}
+		// For AND groups: if any child has an empty In, the whole AND is dead.
+		// Do not recurse — promoting the surviving siblings would turn a dead
+		// branch into a live one when this AND sits inside an OR (#141).
+		if (condition.logicalOperator !== LogicalOperator.Or && this.hasEmptyInCondition(condition)) {
+			return null;
+		}
+		// For OR groups: prune dead branches individually so the Firestore SDK
+		// never receives `In []`, while keeping live siblings.
+		const pruned = condition.conditions
+			.map(c => this.pruneEmptyInConditions(c))
+			.filter((c): c is EntityCondition<T> => c !== null);
+		if (pruned.length === 0) {
+			return null;
+		}
+		if (pruned.length === 1) {
+			return pruned[0];
+		}
+		return { ...condition, conditions: pruned };
 	}
 
 	/**

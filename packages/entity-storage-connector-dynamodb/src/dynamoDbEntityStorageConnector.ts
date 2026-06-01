@@ -893,6 +893,10 @@ export class DynamoDbEntityStorageConnector<
 				attributeValues
 			);
 
+			if (expressions.noResults) {
+				return 0;
+			}
+
 			const dbConnection = this.createConnection();
 			let total = 0;
 			let exclusiveStartKey: { [key: string]: AttributeValue } | undefined;
@@ -1147,6 +1151,7 @@ export class DynamoDbEntityStorageConnector<
 		keyCondition: string;
 		filterCondition: string;
 		requiresScan: boolean;
+		noResults?: boolean;
 	} {
 		// If no conditions are defined then return empty string
 		if (Is.undefined(condition)) {
@@ -1165,22 +1170,64 @@ export class DynamoDbEntityStorageConnector<
 					requiresScan: false
 				};
 			}
+			// Snapshot before the entire group. Used by the AND path to undo
+			// surviving siblings' attribute registrations when the AND is dead (#141).
+			const preGroupNames = new Set(Object.keys(attributeNames));
+			const preGroupValues = new Set(Object.keys(attributeValues));
+
 			// It's a group of comparisons, so check the individual items and combine with the logical operator
 			const joinConditions: {
 				keyCondition: string;
 				filterCondition: string;
 				requiresScan: boolean;
-			}[] = condition.conditions.map(c =>
-				this.buildQueryParameters(objectPath, c, attributeNames, attributeValues, secondaryIndex)
-			);
+				noResults?: boolean;
+			}[] = condition.conditions.map(c => {
+				// Snapshot before each branch. When a branch is dead (noResults),
+				// undo its attribute registrations so the final expressions stay
+				// consistent — DynamoDB rejects unused ExpressionAttributeNames (#141).
+				const preBranchNames = new Set(Object.keys(attributeNames));
+				const preBranchValues = new Set(Object.keys(attributeValues));
+				const result = this.buildQueryParameters(
+					objectPath,
+					c,
+					attributeNames,
+					attributeValues,
+					secondaryIndex
+				);
+				if (result.noResults) {
+					for (const key of Object.keys(attributeNames)) {
+						if (!preBranchNames.has(key)) {
+							delete attributeNames[key];
+						}
+					}
+					for (const key of Object.keys(attributeValues)) {
+						if (!preBranchValues.has(key)) {
+							delete attributeValues[key];
+						}
+					}
+				}
+				return result;
+			});
 
 			const logicalOperator = this.mapConditionalOperator(condition.logicalOperator);
 
 			// DynamoDB does not support OR in KeyConditionExpression, so when the operator
 			// is OR we must move all conditions (including key conditions) into FilterExpression.
 			if (condition.logicalOperator === LogicalOperator.Or) {
+				// OR: only empty if ALL branches are guaranteed empty (e.g. all empty IN lists).
+				// If only some are empty they are naturally filtered out of `parts` below,
+				// which is correct — false OR x = x (#141).
+				if (joinConditions.every(j => j.noResults)) {
+					return { keyCondition: "", filterCondition: "", requiresScan: false, noResults: true };
+				}
+
 				const parts = joinConditions
 					.map(j => {
+						// A branch marked noResults (e.g. a dead AND group containing In [])
+						// must contribute nothing to the OR — false OR x = x (#141).
+						if (j.noResults) {
+							return "";
+						}
 						const subParts = [j.keyCondition.trim(), j.filterCondition.trim()].filter(
 							s => s.length > 0
 						);
@@ -1211,6 +1258,26 @@ export class DynamoDbEntityStorageConnector<
 				.map(j => j.filterCondition)
 				.join(` ${logicalOperator} `);
 
+			// AND: if any sub-condition is a guaranteed empty result (e.g. empty IN list),
+			// the whole AND group is also empty (#141). Restore the attribute maps to the
+			// pre-group snapshot so surviving siblings' registrations are also undone —
+			// per-branch cleanup above only undoes dead branches, not live ones whose AND
+			// partner was dead.
+			const noResults = joinConditions.some(j => j.noResults);
+			if (noResults) {
+				for (const key of Object.keys(attributeNames)) {
+					if (!preGroupNames.has(key)) {
+						delete attributeNames[key];
+					}
+				}
+				for (const key of Object.keys(attributeValues)) {
+					if (!preGroupValues.has(key)) {
+						delete attributeValues[key];
+					}
+				}
+				return { keyCondition: "", filterCondition: "", requiresScan: false, noResults: true };
+			}
+
 			return {
 				keyCondition: Is.stringValue(keyCondition) ? ` (${keyCondition}) ` : "",
 				filterCondition: Is.stringValue(filterCondition) ? ` (${filterCondition}) ` : "",
@@ -1219,6 +1286,16 @@ export class DynamoDbEntityStorageConnector<
 		}
 
 		const schemaProp = this._entitySchema.properties?.find(p => p.property === condition.property);
+
+		// Empty IN list: DynamoDB has no `IN ()` syntax — short-circuit to empty result (#141).
+		if (
+			"comparison" in condition &&
+			condition.comparison === ComparisonOperator.In &&
+			Is.array(condition.value) &&
+			condition.value.length === 0
+		) {
+			return { keyCondition: "", filterCondition: "", requiresScan: false, noResults: true };
+		}
 
 		// It's a single value so just create the property comparison for the condition
 		const comparison = this.mapComparisonOperator(
@@ -1556,6 +1633,10 @@ export class DynamoDbEntityStorageConnector<
 				attributeValues,
 				secondaryIndex
 			);
+
+			if (expressions.noResults) {
+				return { entities: [], cursor: undefined };
+			}
 
 			// OR conditions on primary key attributes can't use KeyConditionExpression or
 			// FilterExpression in a QueryCommand — fall back to a full table ScanCommand.

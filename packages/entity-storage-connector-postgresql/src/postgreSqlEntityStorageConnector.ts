@@ -1111,6 +1111,11 @@ export class PostgreSqlEntityStorageConnector<
 
 		if (comparator.comparison === ComparisonOperator.In) {
 			const inValues = Is.array(comparator.value) ? comparator.value : [comparator.value];
+			if (inValues.length === 0) {
+				// PostgreSQL rejects `IN ()` as a syntax error — short-circuit to a condition
+				// that is always false so the query returns zero rows cleanly (#141).
+				return "1 = 0";
+			}
 			values.push(...inValues.map(val => this.propertyToDbValue(val, type)));
 			const placeholders = inValues.map((value, index) => `$${valueIndex + index}`).join(", ");
 			return `"${prop}" IN (${placeholders})`;

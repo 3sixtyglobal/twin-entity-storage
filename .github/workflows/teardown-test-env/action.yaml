@@ -11,4 +11,3 @@ runs:
         docker rm $(docker ps -aq) || true
         docker rmi -f $(docker images -aq) || true
         docker system prune -a --volumes -f || true
-

@@ -599,6 +599,92 @@ describe("FileEntityStorageConnector", () => {
 		expect((result.entities[1] as TestType).value1).toEqual("7");
 	});
 
+	test("can query with empty In list returns no results without error", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i });
+		}
+		const result = await connector.query({
+			conditions: [
+				{
+					property: "id",
+					value: [],
+					comparison: ComparisonOperator.In
+				}
+			]
+		});
+		expect(result.entities.length).toEqual(0);
+		expect(result.cursor).toBeUndefined();
+	});
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with empty In list in OR condition returns other matching entities",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			for (let i = 0; i < 5; i++) {
+				await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i });
+			}
+			const result = await connector.query({
+				conditions: [
+					{ property: "id", value: "1", comparison: ComparisonOperator.Equals },
+					{ property: "id", value: [], comparison: ComparisonOperator.In }
+				],
+				logicalOperator: LogicalOperator.Or
+			});
+			expect(result.entities.length).toEqual(1);
+			expect((result.entities[0] as TestType).id).toEqual("1");
+		}
+	);
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with all empty In lists in OR condition returns no results",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			for (let i = 0; i < 5; i++) {
+				await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i });
+			}
+			const result = await connector.query({
+				conditions: [
+					{ property: "id", value: [], comparison: ComparisonOperator.In },
+					{ property: "value1", value: [], comparison: ComparisonOperator.In }
+				],
+				logicalOperator: LogicalOperator.Or
+			});
+			expect(result.entities.length).toEqual(0);
+			expect(result.cursor).toBeUndefined();
+		}
+	);
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with empty In list in nested AND inside OR returns only matching OR branch",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			for (let i = 0; i < 5; i++) {
+				await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i });
+			}
+			// (id IN [] AND value1=="aaa") OR id=="999"
+			// The AND branch is dead — In [] is always false.
+			// No entity has id=="999", so the result must be empty.
+			// Without the fix, the dead AND branch incorrectly promotes value1=="aaa"
+			// into the OR and returns 5 rows (#141).
+			const result = await connector.query({
+				logicalOperator: LogicalOperator.Or,
+				conditions: [
+					{
+						logicalOperator: LogicalOperator.And,
+						conditions: [
+							{ property: "id", value: [], comparison: ComparisonOperator.In },
+							{ property: "value1", value: "aaa", comparison: ComparisonOperator.Equals }
+						]
+					},
+					{ property: "id", value: "999", comparison: ComparisonOperator.Equals }
+				]
+			});
+			expect(result.entities.length).toEqual(0);
+			expect(result.cursor).toBeUndefined();
+		}
+	);
+
 	test("can query with multiple AND conditions", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());
 		for (let i = 0; i < 5; i++) {
@@ -678,18 +764,23 @@ describe("FileEntityStorageConnector", () => {
 
 	test("can query with object condition", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());
-		await connector.set({ id: "1", value1: "aaa", value2: 7777, value3: { field1: "foo" } });
+		await connector.set({
+			id: "1",
+			value1: "aaa",
+			value2: 7777,
+			value3: { field1: "2024-01-01T00:00:00.000Z" }
+		});
 		const result = await connector.query({
 			conditions: [
 				{
 					property: "value3",
-					value: { field1: "foo" },
+					value: { field1: "2024-01-01T00:00:00.000Z" },
 					comparison: ComparisonOperator.Equals
 				}
 			]
 		});
 		expect(result.entities.length).toEqual(1);
-		expect((result.entities[0] as TestType).value3).toEqual({ field1: "foo" });
+		expect((result.entities[0] as TestType).value3).toEqual({ field1: "2024-01-01T00:00:00.000Z" });
 	});
 
 	test("can query with Includes on string field", async () => {

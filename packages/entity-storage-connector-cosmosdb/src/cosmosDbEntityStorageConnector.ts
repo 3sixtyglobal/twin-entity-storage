@@ -1100,6 +1100,10 @@ export class CosmosDbEntityStorageConnector<
 			return `(IS_DEFINED(c.${attributeName}) AND NOT IS_NULL(c.${attributeName}))`;
 		} else if (Is.array(comparator.value)) {
 			const dbValues = comparator.value.map(v => this.propertyToDbValue(v, type));
+			if (dbValues.length === 0 && comparator.comparison === ComparisonOperator.In) {
+				// CosmosDB rejects `IN ()` — return always-false sentinel (#141).
+				return "1=0";
+			}
 			const arrAttributeNames = [];
 			for (let i = 0; i < dbValues.length; i++) {
 				const arrAttributeName = `${propName}${i}`;

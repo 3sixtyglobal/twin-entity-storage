@@ -263,7 +263,11 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 		// Validates and throws for unsupported conditions before entering the try-catch
 		// so that comparisonNotSupported errors surface directly to the caller.
-		const { whereClause, params } = this.buildCqlConditions(conditions, partitionKey);
+		const { whereClause, params, noResults } = this.buildCqlConditions(conditions, partitionKey);
+
+		if (noResults) {
+			return { entities: [], cursor: undefined };
+		}
 
 		try {
 			const returnSize = limit ?? AbstractScyllaDBConnector.DEFAULT_LIMIT;
@@ -348,7 +352,11 @@ export abstract class AbstractScyllaDBConnector<T> {
 				this._partitionContextIds
 			);
 
-			const { whereClause, params } = this.buildCqlConditions(conditions, partitionKey);
+			const { whereClause, params, noResults } = this.buildCqlConditions(conditions, partitionKey);
+
+			if (noResults) {
+				return 0;
+			}
 
 			const sql = `SELECT COUNT(*) FROM "${this.safeTableName(this._fullTableName)}" WHERE ${whereClause} ALLOW FILTERING`;
 
@@ -749,7 +757,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 	private buildCqlConditions(
 		conditions: EntityCondition<T> | undefined,
 		partitionKey: string | undefined
-	): { whereClause: string; params: unknown[] } {
+	): { whereClause: string; params: unknown[]; noResults?: boolean } {
 		let conditionsList: EntityCondition<T>[] = [];
 		if (conditions !== undefined) {
 			if ("conditions" in conditions) {
@@ -812,6 +820,16 @@ export abstract class AbstractScyllaDBConnector<T> {
 					conds.push(`"${condition.property}" NOT LIKE ${propValue}`);
 				}
 			} else if (condition.comparison === ComparisonOperator.In) {
+				// Guard must come first: Is.arrayValue([]) returns false for an empty array,
+				// so an empty value would be wrapped as a single element below and bypass
+				// the length check. Check Is.array (true for any array) before branching (#141).
+				if (Is.array(condition.value) && condition.value.length === 0) {
+					return {
+						whereClause: "",
+						params: [],
+						noResults: true
+					};
+				}
 				let value: unknown[] = [];
 				if (!Is.arrayValue(condition.value)) {
 					value.push(this.propertyToDbValue(condition.value, descriptor));
