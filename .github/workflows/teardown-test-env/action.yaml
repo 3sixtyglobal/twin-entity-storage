@@ -16,8 +16,3 @@ runs:
           sudo tee /proc/sys/fs/aio-max-nr < /tmp/twin-entity-storage-aio-max-nr-before >/dev/null || true
           rm -f /tmp/twin-entity-storage-aio-max-nr-before
         fi
-
-    - name: Remove Test Environment Variables File
-      shell: bash
-      run: |
-        rm -f /tmp/test_env_vars.txt

@@ -600,10 +600,7 @@ jobs:
 
       - name: Teardown Test Environment
         if: always()
-        shell: bash
-        run: |
-          echo "No Docker test resources are created by setup-test-env in this repository."
-          rm -f /tmp/test_env_vars.txt
+        uses: ./.github/workflows/teardown-test-env
 
   publish-gh-releases:
     name: Publish GitHub Releases
