@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.21](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.0.3-next.20...entity-storage-connector-mysql-v0.0.3-next.21) (2026-06-01)
+
+
+### Bug Fixes
+
+* guard against empty IN list in all SQL-style connectors ([#101](https://github.com/iotaledger/twin-entity-storage/issues/101)) ([fb2bf8b](https://github.com/iotaledger/twin-entity-storage/commit/fb2bf8beb148f0c9b92661c4899e28cd4559f39a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.20 to 0.0.3-next.21
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.20 to 0.0.3-next.21
+
 ## [0.0.3-next.20](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.0.3-next.19...entity-storage-connector-mysql-v0.0.3-next.20) (2026-06-01)
 
 

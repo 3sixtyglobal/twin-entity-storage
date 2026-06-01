@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-dynamodb",
-	"version": "0.0.3-next.20",
+	"version": "0.0.3-next.21",
 	"description": "Amazon DynamoDB connector for managed NoSQL persistence.",
 	"repository": {
 		"type": "git",
@@ -32,14 +32,14 @@
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
 		"@twin.org/nameof": "next",
-		"@twin.org/entity-storage-models": "0.0.3-next.20",
+		"@twin.org/entity-storage-models": "0.0.3-next.21",
 		"@twin.org/logging-models": "next",
 		"@aws-sdk/client-dynamodb": "3.1050",
 		"@aws-sdk/lib-dynamodb": "3.1050",
 		"@aws-sdk/util-dynamodb": "3.996"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.0.3-next.20",
+		"@twin.org/entity-storage-connector-memory": "0.0.3-next.21",
 		"@twin.org/logging-connector-entity-storage": "next",
 		"@twin.org/logging-service": "next",
 		"@twin.org/nameof-transformer": "next",
