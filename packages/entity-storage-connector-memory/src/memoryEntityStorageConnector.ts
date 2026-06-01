@@ -23,7 +23,7 @@ import {
 	type SortDirection
 } from "@twin.org/entity";
 import {
-	EntityHelper,
+	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -156,7 +156,9 @@ export class MemoryEntityStorageConnector<T = unknown>
 		const item = index >= 0 ? this._store[index] : undefined;
 
 		if (Is.objectValue(item)) {
-			return EntityHelper.unPrepareEntity<T>(item, [MemoryEntityStorageConnector._PARTITION_KEY]);
+			return EntityStorageHelper.unPrepareEntity<T>(item, [
+				MemoryEntityStorageConnector._PARTITION_KEY
+			]);
 		}
 
 		return undefined;
@@ -176,12 +178,13 @@ export class MemoryEntityStorageConnector<T = unknown>
 
 		const finalConditions = conditions ?? [];
 
-		const prepared = EntityHelper.prepareEntity(
+		const prepared = EntityStorageHelper.prepareEntity(
 			entity,
 			this._entitySchema,
 			Is.stringValue(partitionKey)
 				? [{ property: MemoryEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
-				: undefined
+				: undefined,
+			{ nullBehavior: "omit" }
 		);
 
 		if (Is.stringValue(partitionKey)) {
@@ -227,12 +230,13 @@ export class MemoryEntityStorageConnector<T = unknown>
 		}
 
 		for (const entity of entities) {
-			const prepared = EntityHelper.prepareEntity(
+			const prepared = EntityStorageHelper.prepareEntity(
 				entity,
 				this._entitySchema,
 				Is.stringValue(partitionKey)
 					? [{ property: MemoryEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
-					: undefined
+					: undefined,
+				{ nullBehavior: "omit" }
 			);
 			const id = prepared[this._primaryKey.property] as string;
 			const existingIndex = indexMap.get(id);
@@ -323,7 +327,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 		}
 
 		if (!Is.empty(conditions)) {
-			finalConditions.conditions.push(EntityHelper.normalizeConditionValues(conditions));
+			finalConditions.conditions.push(EntityStorageHelper.normalizeConditionValues(conditions));
 		}
 
 		const entities = [];
@@ -348,7 +352,9 @@ export class MemoryEntityStorageConnector<T = unknown>
 						? ObjectHelper.pick(allEntities[i], properties)
 						: allEntities[i];
 					entities.push(
-						EntityHelper.unPrepareEntity<T>(entity, [MemoryEntityStorageConnector._PARTITION_KEY])
+						EntityStorageHelper.unPrepareEntity<T>(entity, [
+							MemoryEntityStorageConnector._PARTITION_KEY
+						])
 					);
 					if (entities.length >= finalLimit) {
 						if (i < allEntities.length - 1) {
@@ -465,7 +471,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 		}
 
 		if (!Is.empty(conditions)) {
-			finalConditions.conditions.push(EntityHelper.normalizeConditionValues(conditions));
+			finalConditions.conditions.push(EntityStorageHelper.normalizeConditionValues(conditions));
 		}
 
 		if (finalConditions.conditions.length === 0) {
@@ -481,7 +487,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 */
 	public getStore(): T[] {
 		return this._store.map(item =>
-			EntityHelper.unPrepareEntity<T>(item, [MemoryEntityStorageConnector._PARTITION_KEY])
+			EntityStorageHelper.unPrepareEntity<T>(item, [MemoryEntityStorageConnector._PARTITION_KEY])
 		);
 	}
 

@@ -27,7 +27,7 @@ import {
 	type SortDirection
 } from "@twin.org/entity";
 import {
-	EntityHelper,
+	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IMigrationOptions
 } from "@twin.org/entity-storage-models";
@@ -300,7 +300,9 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		const item = index >= 0 ? store[index] : undefined;
 
 		if (Is.objectValue(item)) {
-			return EntityHelper.unPrepareEntity<T>(item, [FileEntityStorageConnector._PARTITION_KEY]);
+			return EntityStorageHelper.unPrepareEntity<T>(item, [
+				FileEntityStorageConnector._PARTITION_KEY
+			]);
 		}
 
 		return undefined;
@@ -318,12 +320,13 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const prepared = EntityHelper.prepareEntity(
+		const prepared = EntityStorageHelper.prepareEntity(
 			entity,
 			this._entitySchema,
 			Is.stringValue(partitionKey)
 				? [{ property: FileEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
-				: undefined
+				: undefined,
+			{ nullBehavior: "omit" }
 		);
 
 		const store = await this.readStore();
@@ -366,12 +369,13 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		for (const entity of entities) {
 			Guards.object<T>(FileEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
-			const prepared = EntityHelper.prepareEntity(
+			const prepared = EntityStorageHelper.prepareEntity(
 				entity,
 				this._entitySchema,
 				Is.stringValue(partitionKey)
 					? [{ property: FileEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
-					: undefined
+					: undefined,
+				{ nullBehavior: "omit" }
 			);
 
 			const existingIndex = this.findItem(
@@ -575,7 +579,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		}
 
 		if (!Is.empty(conditions)) {
-			finalConditions.conditions.push(EntityHelper.normalizeConditionValues(conditions));
+			finalConditions.conditions.push(EntityStorageHelper.normalizeConditionValues(conditions));
 		}
 
 		const entities = [];
@@ -600,7 +604,9 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 						? ObjectHelper.pick(allEntities[i], properties)
 						: allEntities[i];
 					entities.push(
-						EntityHelper.unPrepareEntity<T>(entity, [FileEntityStorageConnector._PARTITION_KEY])
+						EntityStorageHelper.unPrepareEntity<T>(entity, [
+							FileEntityStorageConnector._PARTITION_KEY
+						])
 					);
 					if (entities.length >= finalLimit) {
 						if (i < allEntities.length - 1) {
@@ -643,7 +649,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		}
 
 		if (!Is.empty(conditions)) {
-			finalConditions.conditions.push(EntityHelper.normalizeConditionValues(conditions));
+			finalConditions.conditions.push(EntityStorageHelper.normalizeConditionValues(conditions));
 		}
 
 		if (finalConditions.conditions.length === 0) {

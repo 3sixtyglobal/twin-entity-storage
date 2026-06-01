@@ -29,6 +29,8 @@ const SUPPORT_OR_CONDITIONS = false;
 const SUPPORT_NOT_EQUALS = false;
 // Does the connector support NotIncludes (NOT LIKE) comparisons.
 const SUPPORT_NOT_INCLUDES = false;
+// Does the connector support optional secondary index fields (clustering keys) being null.
+const SUPPORT_NULLABLE_SECONDARY_INDEX = false;
 
 @entity()
 class SubType {
@@ -94,6 +96,18 @@ class NestedSearchType {
 	public items?: { label: string }[];
 }
 
+@entity()
+class NullableIndexType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", isSecondary: true, optional: true })
+	public indexedField?: string;
+
+	@property({ type: "string" })
+	public otherField!: string;
+}
+
 let currentUser = "user";
 let currentConnector: IEntityStorageConnector | undefined;
 
@@ -116,6 +130,9 @@ describe("ScyllaDBTableConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<NestedSearchType>(), () =>
 			EntitySchemaHelper.getSchema(NestedSearchType)
+		);
+		EntitySchemaFactory.register(nameof<NullableIndexType>(), () =>
+			EntitySchemaHelper.getSchema(NullableIndexType)
 		);
 
 		createConnector = async <T>(entitySchema: string, partitionContextIds?: string[]) => {
@@ -318,6 +335,18 @@ describe("ScyllaDBTableConnector", () => {
 		const item = await connector.get("zzz", "value1", [{ property: "value2", value: 99 }]);
 		expect(item).toBeUndefined();
 	});
+
+	test.skipIf(!SUPPORT_NULLABLE_SECONDARY_INDEX)(
+		"can set and get an item when the secondary index field is null or undefined",
+		async () => {
+			const connector = await createConnector<NullableIndexType>(nameof<NullableIndexType>());
+			await connector.set({ id: "1", indexedField: undefined, otherField: "test" });
+			const item = await connector.get("1");
+			expect(item?.id).toEqual("1");
+			expect(item?.indexedField).toBeUndefined();
+			expect(item?.otherField).toEqual("test");
+		}
+	);
 
 	test("get does not return additional internal keys", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>(), [

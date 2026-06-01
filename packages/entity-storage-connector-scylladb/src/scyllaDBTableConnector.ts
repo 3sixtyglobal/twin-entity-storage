@@ -18,7 +18,7 @@ import {
 	type IEntitySchemaProperty
 } from "@twin.org/entity";
 import {
-	EntityHelper,
+	EntityStorageHelper,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
 } from "@twin.org/entity-storage-models";
@@ -235,12 +235,13 @@ export class ScyllaDBTableConnector<T = unknown>
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const normalizedEntity = EntityHelper.prepareEntity(
+		const normalizedEntity = EntityStorageHelper.prepareEntity(
 			entity,
 			this._entitySchema,
 			partitionKey
 				? [{ property: AbstractScyllaDBConnector.PARTITION_KEY, value: partitionKey }]
-				: undefined
+				: undefined,
+			{ nullBehavior: "omit" }
 		);
 
 		let connection;
@@ -329,12 +330,13 @@ export class ScyllaDBTableConnector<T = unknown>
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		const normalizedEntities = entities.map(entity =>
-			EntityHelper.prepareEntity(
+			EntityStorageHelper.prepareEntity(
 				entity,
 				this._entitySchema,
 				partitionKey
 					? [{ property: AbstractScyllaDBConnector.PARTITION_KEY, value: partitionKey }]
-					: undefined
+					: undefined,
+				{ nullBehavior: "omit" }
 			)
 		);
 

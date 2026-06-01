@@ -12,23 +12,27 @@ import { nameof } from "@twin.org/nameof";
 /**
  * Helper class for performing schema migrations between two connectors.
  */
-export class EntityHelper {
+export class EntityStorageHelper {
 	/**
 	 * Runtime name for the class.
 	 */
-	public static readonly CLASS_NAME: string = nameof<EntityHelper>();
+	public static readonly CLASS_NAME: string = nameof<EntityStorageHelper>();
 
 	/**
 	 * Prepare the entity by handling undefined and null values and validating it against the schema.
 	 * @param entity The entity to handle undefined and null values for.
 	 * @param schema The schema to validate the entity against.
 	 * @param additionalProperties Optional list of additional properties to set on the entity.
+	 * @param options Options controlling how null/undefined optional properties are stored.
+	 * @param options.nullBehavior "omit" strips null/undefined optional properties before writing
+	 * (NoSQL — avoids index-key type errors). "nullify" converts undefined to null (SQL — the default).
 	 * @returns The entity with undefined and null values handled.
 	 */
 	public static prepareEntity<T>(
 		entity: T,
 		schema: IEntitySchema<T>,
-		additionalProperties?: { property: string; value: unknown }[]
+		additionalProperties?: { property: string; value: unknown }[],
+		options?: { nullBehavior?: "omit" | "nullify" }
 	): T {
 		const entityForValidation = ObjectHelper.clone(entity);
 		EntitySchemaHelper.validateEntity(entityForValidation, schema);
@@ -37,7 +41,11 @@ export class EntityHelper {
 			for (const property of schema.properties) {
 				if (property.optional ?? false) {
 					const propValue = entityForValidation[property.property];
-					if (propValue === undefined) {
+					if (options?.nullBehavior === "omit") {
+						if (propValue === undefined || propValue === null) {
+							ObjectHelper.propertyDelete(entityForValidation, property.property as string);
+						}
+					} else if (propValue === undefined) {
 						ObjectHelper.propertySet(entityForValidation, property.property as string, null);
 					}
 				}
@@ -76,8 +84,8 @@ export class EntityHelper {
 	}
 
 	/**
-	 * Deep-clone condition tree and map `undefined` to `null` on Equals/NotEquals leaves
-	 * so in-memory evaluation matches stored-null semantics (optional absent props are stored as null).
+	 * Deep-clone condition tree and normalise null/undefined to undefined on Equals/NotEquals leaves
+	 * so in-memory evaluation matches stored-absent semantics (optional absent props are omitted/undefined).
 	 * @param condition The user-supplied condition (not mutated).
 	 * @returns A clone safe to pass to check.
 	 */
@@ -85,7 +93,7 @@ export class EntityHelper {
 		if ("conditions" in condition) {
 			return {
 				...condition,
-				conditions: condition.conditions.map(c => EntityHelper.normalizeConditionValues(c))
+				conditions: condition.conditions.map(c => EntityStorageHelper.normalizeConditionValues(c))
 			};
 		}
 
@@ -93,9 +101,9 @@ export class EntityHelper {
 		if (
 			(leaf.comparison === ComparisonOperator.Equals ||
 				leaf.comparison === ComparisonOperator.NotEquals) &&
-			leaf.value === undefined
+			(leaf.value === undefined || leaf.value === null)
 		) {
-			return { ...leaf, value: null };
+			return { ...leaf, value: undefined };
 		}
 		return { ...leaf };
 	}

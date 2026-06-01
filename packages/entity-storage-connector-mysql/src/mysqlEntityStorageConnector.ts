@@ -26,7 +26,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
-	EntityHelper,
+	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -352,7 +352,7 @@ export class MySqlEntityStorageConnector<
 			const [rows] = await pool.query(query, values);
 
 			if (Is.array(rows) && rows.length === 1) {
-				const item = EntityHelper.unPrepareEntity<T>(rows[0] as T, [
+				const item = EntityStorageHelper.unPrepareEntity<T>(rows[0] as T, [
 					MySqlEntityStorageConnector._PARTITION_KEY
 				]);
 				return this.coerceEntityTypes(item) as T;
@@ -382,12 +382,17 @@ export class MySqlEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const prepared = EntityHelper.prepareEntity(entity, this._entitySchema, [
-			{
-				property: MySqlEntityStorageConnector._PARTITION_KEY,
-				value: partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE
-			}
-		]);
+		const prepared = EntityStorageHelper.prepareEntity(
+			entity,
+			this._entitySchema,
+			[
+				{
+					property: MySqlEntityStorageConnector._PARTITION_KEY,
+					value: partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE
+				}
+			],
+			{ nullBehavior: "nullify" }
+		);
 
 		const id = prepared[this._primaryKeyProperty.property] as unknown as string;
 
@@ -454,12 +459,17 @@ export class MySqlEntityStorageConnector<
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		const preparedEntities = entities.map(entity =>
-			EntityHelper.prepareEntity(entity, this._entitySchema, [
-				{
-					property: MySqlEntityStorageConnector._PARTITION_KEY,
-					value: partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE
-				}
-			])
+			EntityStorageHelper.prepareEntity(
+				entity,
+				this._entitySchema,
+				[
+					{
+						property: MySqlEntityStorageConnector._PARTITION_KEY,
+						value: partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE
+					}
+				],
+				{ nullBehavior: "nullify" }
+			)
 		);
 
 		try {
@@ -699,7 +709,7 @@ export class MySqlEntityStorageConnector<
 			const resultRows = hasMore ? (rows as unknown[]).slice(0, returnSize) : rows;
 			const entities = resultRows as Partial<T>[];
 			for (let i = 0; i < entities.length; i++) {
-				entities[i] = EntityHelper.unPrepareEntity(entities[i], [
+				entities[i] = EntityStorageHelper.unPrepareEntity(entities[i], [
 					MySqlEntityStorageConnector._PARTITION_KEY
 				]);
 				entities[i] = this.coerceEntityTypes(entities[i]);

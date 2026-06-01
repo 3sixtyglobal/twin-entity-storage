@@ -2,7 +2,7 @@
 
 ## Classes
 
-- [EntityHelper](classes/EntityHelper.md)
+- [EntityStorageHelper](classes/EntityStorageHelper.md)
 - [MigrationHelper](classes/MigrationHelper.md)
 
 ## Interfaces

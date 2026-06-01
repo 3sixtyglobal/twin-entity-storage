@@ -31,7 +31,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
-	EntityHelper,
+	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -291,7 +291,7 @@ export class FirestoreEntityStorageConnector<
 				const doc = await docRef.get();
 
 				if (doc.exists) {
-					return EntityHelper.unPrepareEntity<T>(doc.data() as T, []);
+					return EntityStorageHelper.unPrepareEntity<T>(doc.data() as T, []);
 				}
 			}
 
@@ -313,7 +313,7 @@ export class FirestoreEntityStorageConnector<
 
 			const querySnapshot = await query.limit(1).get();
 			if (!querySnapshot.empty) {
-				return EntityHelper.unPrepareEntity<T>(querySnapshot.docs[0].data() as T, []);
+				return EntityStorageHelper.unPrepareEntity<T>(querySnapshot.docs[0].data() as T, []);
 			}
 		} catch (err) {
 			throw new GeneralError(
@@ -341,7 +341,9 @@ export class FirestoreEntityStorageConnector<
 			FirestoreEntityStorageConnector._PARTITION_SEPARATOR
 		);
 
-		const prepared = EntityHelper.prepareEntity(entity, this._entitySchema);
+		const prepared = EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
+			nullBehavior: "nullify"
+		});
 
 		try {
 			const id = prepared[this._primaryKey.property] as string;
@@ -401,7 +403,9 @@ export class FirestoreEntityStorageConnector<
 		);
 
 		const preparedEntities = entities.map(entity =>
-			EntityHelper.prepareEntity(entity, this._entitySchema)
+			EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
+				nullBehavior: "nullify"
+			})
 		);
 
 		try {
@@ -762,7 +766,7 @@ export class FirestoreEntityStorageConnector<
 
 				const allSnapshot = await baseQuery.get();
 				let allEntities = allSnapshot.docs.map((doc: DocumentSnapshot) =>
-					EntityHelper.unPrepareEntity<T>(doc.data() as T, [])
+					EntityStorageHelper.unPrepareEntity<T>(doc.data() as T, [])
 				);
 
 				allEntities = allEntities.filter(e => EntityConditions.check(e as Partial<T>, conditions));
@@ -827,7 +831,7 @@ export class FirestoreEntityStorageConnector<
 			const hasMore = querySnapshot.docs.length > finalLimit;
 			const resultDocs = hasMore ? querySnapshot.docs.slice(0, finalLimit) : querySnapshot.docs;
 			const entities = resultDocs.map((doc: DocumentSnapshot) =>
-				EntityHelper.unPrepareEntity<T>(doc.data() as T, [])
+				EntityStorageHelper.unPrepareEntity<T>(doc.data() as T, [])
 			);
 
 			let nextCursor: string | undefined;
@@ -868,7 +872,7 @@ export class FirestoreEntityStorageConnector<
 			if (!Is.empty(conditions) && this.needsPostFilter(conditions)) {
 				const allSnapshot = await collection.get();
 				const allEntities = allSnapshot.docs.map((doc: DocumentSnapshot) =>
-					EntityHelper.unPrepareEntity<T>(doc.data() as T, [])
+					EntityStorageHelper.unPrepareEntity<T>(doc.data() as T, [])
 				);
 				return allEntities.filter(e => EntityConditions.check(e as Partial<T>, conditions)).length;
 			}

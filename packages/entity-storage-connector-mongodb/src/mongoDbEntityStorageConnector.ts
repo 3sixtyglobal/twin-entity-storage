@@ -22,7 +22,7 @@ import {
 	type SortDirection
 } from "@twin.org/entity";
 import {
-	EntityHelper,
+	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -282,7 +282,7 @@ export class MongoDbEntityStorageConnector<
 			const result = await collection.findOne(query);
 			ObjectHelper.propertyDelete(result, "_id");
 			return Is.objectValue(result)
-				? EntityHelper.unPrepareEntity<T>(result as T, [
+				? EntityStorageHelper.unPrepareEntity<T>(result as T, [
 						MongoDbEntityStorageConnector._PARTITION_KEY
 					])
 				: undefined;
@@ -310,12 +310,13 @@ export class MongoDbEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const prepared = EntityHelper.prepareEntity(
+		const prepared = EntityStorageHelper.prepareEntity(
 			entity,
 			this._entitySchema,
 			Is.stringValue(partitionKey)
 				? [{ property: MongoDbEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
-				: undefined
+				: undefined,
+			{ nullBehavior: "omit" }
 		);
 
 		const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
@@ -365,12 +366,13 @@ export class MongoDbEntityStorageConnector<
 		const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
 
 		const preparedEntities = entities.map(entity =>
-			EntityHelper.prepareEntity(
+			EntityStorageHelper.prepareEntity(
 				entity,
 				this._entitySchema,
 				Is.stringValue(partitionKey)
 					? [{ property: MongoDbEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
-					: undefined
+					: undefined,
+				{ nullBehavior: "omit" }
 			)
 		);
 
@@ -601,7 +603,7 @@ export class MongoDbEntityStorageConnector<
 		for (let i = 0; i < entities.length; i++) {
 			const entity = entities[i];
 			ObjectHelper.propertyDelete(entity, "_id");
-			entities[i] = EntityHelper.unPrepareEntity(entity, [
+			entities[i] = EntityStorageHelper.unPrepareEntity(entity, [
 				MongoDbEntityStorageConnector._PARTITION_KEY
 			]);
 		}

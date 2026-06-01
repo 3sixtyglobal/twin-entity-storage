@@ -47,7 +47,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
-	EntityHelper,
+	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -402,7 +402,7 @@ export class DynamoDbEntityStorageConnector<
 				const response = await docClient.send(getCommand);
 
 				if (response.Item) {
-					return EntityHelper.unPrepareEntity<T>(response.Item as T, [
+					return EntityStorageHelper.unPrepareEntity<T>(response.Item as T, [
 						DynamoDbEntityStorageConnector._PARTITION_KEY
 					]);
 				}
@@ -475,7 +475,7 @@ export class DynamoDbEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const prepared = EntityHelper.prepareEntity(
+		const prepared = EntityStorageHelper.prepareEntity(
 			entity,
 			this._entitySchema,
 			partitionKey
@@ -485,7 +485,8 @@ export class DynamoDbEntityStorageConnector<
 							property: DynamoDbEntityStorageConnector._PARTITION_KEY,
 							value: DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE
 						}
-					]
+					],
+			{ nullBehavior: "omit" }
 		);
 
 		const id = (prepared as { [id: string]: unknown })[this._primaryKey.property as string];
@@ -548,7 +549,7 @@ export class DynamoDbEntityStorageConnector<
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		const preparedEntities = entities.map(entity =>
-			EntityHelper.prepareEntity(
+			EntityStorageHelper.prepareEntity(
 				entity,
 				this._entitySchema,
 				partitionKey
@@ -558,7 +559,8 @@ export class DynamoDbEntityStorageConnector<
 								property: DynamoDbEntityStorageConnector._PARTITION_KEY,
 								value: DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE
 							}
-						]
+						],
+				{ nullBehavior: "omit" }
 			)
 		);
 
@@ -1263,14 +1265,12 @@ export class DynamoDbEntityStorageConnector<
 		let attributeName = this.populateAttributeNames(prop, attributeNames);
 
 		if (Is.empty(comparator.value)) {
-			// prepareEntity converts undefined → null before storing, so DynamoDB holds the
-			// attribute with type NULL rather than omitting it. Use attribute_type to match.
-			const nullTypePropName = `:${attributeName.replace(/\./g, "").replace(/#/g, "")}Null`;
-			attributeValues[nullTypePropName] = { S: "NULL" };
+			// With "omit" storage, optional null/undefined fields are absent from the item entirely.
+			// attribute_not_exists matches absent attributes; attribute_exists matches present ones.
 			if (comparator.comparison === ComparisonOperator.Equals) {
-				return `attribute_type(${attributeName}, ${nullTypePropName})`;
+				return `attribute_not_exists(${attributeName})`;
 			} else if (comparator.comparison === ComparisonOperator.NotEquals) {
-				return `NOT attribute_type(${attributeName}, ${nullTypePropName})`;
+				return `attribute_exists(${attributeName})`;
 			}
 		}
 
@@ -1602,7 +1602,7 @@ export class DynamoDbEntityStorageConnector<
 
 				const scanEntities: T[] = returnedRawItems.map(item => {
 					const unmarshalled = unmarshall(item);
-					return EntityHelper.unPrepareEntity(unmarshalled as T, [
+					return EntityStorageHelper.unPrepareEntity(unmarshalled as T, [
 						DynamoDbEntityStorageConnector._PARTITION_KEY
 					]);
 				});
@@ -1658,7 +1658,7 @@ export class DynamoDbEntityStorageConnector<
 
 			const entities: T[] = returnedRawItems.map(item => {
 				const unmarshalled = unmarshall(item);
-				return EntityHelper.unPrepareEntity(unmarshalled as T, [
+				return EntityStorageHelper.unPrepareEntity(unmarshalled as T, [
 					DynamoDbEntityStorageConnector._PARTITION_KEY
 				]);
 			});

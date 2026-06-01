@@ -8,9 +8,9 @@ import {
 	entity,
 	property
 } from "@twin.org/entity";
-import type { EntityCondition } from "@twin.org/entity";
+import type { EntityCondition, IComparator } from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
-import { EntityHelper } from "../src/helpers/entityHelper.js";
+import { EntityStorageHelper } from "../src/helpers/entityStorageHelper.js";
 
 @entity()
 class RequiredOnlyType {
@@ -42,7 +42,7 @@ class MixedType {
 	public nested?: { value: string };
 }
 
-describe("EntityHelper.prepareEntity", () => {
+describe("EntityStorageHelper.prepareEntity", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<RequiredOnlyType>(), () =>
 			EntitySchemaHelper.getSchema(RequiredOnlyType)
@@ -55,13 +55,13 @@ describe("EntityHelper.prepareEntity", () => {
 	test("returns a clone, not the original entity", () => {
 		const schema = EntitySchemaFactory.get(nameof<MixedType>());
 		const original = { id: "1", required: "r" };
-		const result = EntityHelper.prepareEntity(original, schema);
+		const result = EntityStorageHelper.prepareEntity(original, schema);
 		expect(result).not.toBe(original);
 	});
 
 	test("leaves required properties with values unchanged", () => {
 		const schema = EntitySchemaFactory.get(nameof<MixedType>());
-		const result = EntityHelper.prepareEntity({ id: "1", required: "hello" }, schema);
+		const result = EntityStorageHelper.prepareEntity({ id: "1", required: "hello" }, schema);
 		expect(result.id).toEqual("1");
 		expect(result.required).toEqual("hello");
 	});
@@ -69,13 +69,16 @@ describe("EntityHelper.prepareEntity", () => {
 	test("throws when a required property is undefined", () => {
 		const schema = EntitySchemaFactory.get(nameof<MixedType>());
 		expect(() =>
-			EntityHelper.prepareEntity({ id: "1", required: undefined as unknown as string }, schema)
+			EntityStorageHelper.prepareEntity(
+				{ id: "1", required: undefined as unknown as string },
+				schema
+			)
 		).toThrow();
 	});
 
 	test("sets optional undefined properties to null", () => {
 		const schema = EntitySchemaFactory.get(nameof<MixedType>());
-		const result = EntityHelper.prepareEntity<MixedType>({ id: "1", required: "r" }, schema);
+		const result = EntityStorageHelper.prepareEntity<MixedType>({ id: "1", required: "r" }, schema);
 		expect(result.optional).toBeNull();
 		expect(result.count).toBeNull();
 		expect(result.flag).toBeNull();
@@ -84,7 +87,7 @@ describe("EntityHelper.prepareEntity", () => {
 
 	test("preserves optional null values as null", () => {
 		const schema = EntitySchemaFactory.get(nameof<MixedType>());
-		const result = EntityHelper.prepareEntity(
+		const result = EntityStorageHelper.prepareEntity(
 			{ id: "1", required: "r", optional: null as unknown as string },
 			schema
 		);
@@ -93,7 +96,7 @@ describe("EntityHelper.prepareEntity", () => {
 
 	test("preserves optional properties that have values", () => {
 		const schema = EntitySchemaFactory.get(nameof<MixedType>());
-		const result = EntityHelper.prepareEntity(
+		const result = EntityStorageHelper.prepareEntity(
 			{ id: "1", required: "r", optional: "val", count: 42, flag: true },
 			schema
 		);
@@ -104,7 +107,7 @@ describe("EntityHelper.prepareEntity", () => {
 
 	test("sets additional properties on the returned entity", () => {
 		const schema = EntitySchemaFactory.get(nameof<MixedType>());
-		const result = EntityHelper.prepareEntity({ id: "1", required: "r" }, schema, [
+		const result = EntityStorageHelper.prepareEntity({ id: "1", required: "r" }, schema, [
 			{ property: "partitionId", value: "tenant:user" }
 		]);
 		expect((result as { [key: string]: unknown }).partitionId).toEqual("tenant:user");
@@ -113,14 +116,14 @@ describe("EntityHelper.prepareEntity", () => {
 	test("does not mutate the original entity", () => {
 		const schema = EntitySchemaFactory.get(nameof<MixedType>());
 		const original = { id: "1", required: "r" };
-		EntityHelper.prepareEntity(original, schema, [{ property: "partitionId", value: "x" }]);
+		EntityStorageHelper.prepareEntity(original, schema, [{ property: "partitionId", value: "x" }]);
 		expect((original as { [key: string]: unknown }).partitionId).toBeUndefined();
 	});
 });
 
-describe("EntityHelper.unPrepareEntity", () => {
+describe("EntityStorageHelper.unPrepareEntity", () => {
 	test("removes null properties from the entity", () => {
-		const result = EntityHelper.unPrepareEntity({
+		const result = EntityStorageHelper.unPrepareEntity({
 			id: "1",
 			required: "r",
 			optional: null
@@ -130,7 +133,7 @@ describe("EntityHelper.unPrepareEntity", () => {
 	});
 
 	test("removes undefined properties from the entity", () => {
-		const result = EntityHelper.unPrepareEntity({
+		const result = EntityStorageHelper.unPrepareEntity({
 			id: "1",
 			required: "r",
 			optional: undefined
@@ -139,22 +142,23 @@ describe("EntityHelper.unPrepareEntity", () => {
 	});
 
 	test("leaves non-empty properties unchanged", () => {
-		const result = EntityHelper.unPrepareEntity({ id: "1", required: "r", count: 0 });
+		const result = EntityStorageHelper.unPrepareEntity({ id: "1", required: "r", count: 0 });
 		expect(result.id).toEqual("1");
 		expect(result.required).toEqual("r");
 		expect(result.count).toEqual(0);
 	});
 
 	test("removes specified named properties", () => {
-		const result = EntityHelper.unPrepareEntity({ id: "1", required: "r", partitionId: "t:u" }, [
-			"partitionId"
-		]);
+		const result = EntityStorageHelper.unPrepareEntity(
+			{ id: "1", required: "r", partitionId: "t:u" },
+			["partitionId"]
+		);
 		expect(result.partitionId).toBeUndefined();
 		expect(result.id).toEqual("1");
 	});
 
 	test("removes null values from nested objects", () => {
-		const result = EntityHelper.unPrepareEntity({
+		const result = EntityStorageHelper.unPrepareEntity({
 			id: "1",
 			nested: { value: "v", empty: null }
 		});
@@ -163,30 +167,30 @@ describe("EntityHelper.unPrepareEntity", () => {
 
 	test("returns a new object, not the original", () => {
 		const original = { id: "1", optional: null };
-		const result = EntityHelper.unPrepareEntity(original);
+		const result = EntityStorageHelper.unPrepareEntity(original);
 		expect(result).not.toBe(original);
 	});
 });
 
-describe("EntityHelper.normalizeConditionValues", () => {
-	test("converts undefined to null for Equals leaf condition", () => {
+describe("EntityStorageHelper.normalizeConditionValues", () => {
+	test("normalizes undefined to undefined for Equals leaf condition", () => {
 		const condition: EntityCondition<MixedType> = {
 			property: "optional",
 			comparison: ComparisonOperator.Equals,
 			value: undefined
 		};
-		const result = EntityHelper.normalizeConditionValues(condition);
-		expect(result).toMatchObject({ value: null });
+		const result = EntityStorageHelper.normalizeConditionValues(condition);
+		expect((result as IComparator).value).toBeUndefined();
 	});
 
-	test("converts undefined to null for NotEquals leaf condition", () => {
+	test("normalizes undefined to undefined for NotEquals leaf condition", () => {
 		const condition: EntityCondition<MixedType> = {
 			property: "optional",
 			comparison: ComparisonOperator.NotEquals,
 			value: undefined
 		};
-		const result = EntityHelper.normalizeConditionValues(condition);
-		expect(result).toMatchObject({ value: null });
+		const result = EntityStorageHelper.normalizeConditionValues(condition);
+		expect((result as IComparator).value).toBeUndefined();
 	});
 
 	test("does not transform undefined for non-Equals/NotEquals operators", () => {
@@ -195,18 +199,28 @@ describe("EntityHelper.normalizeConditionValues", () => {
 			comparison: ComparisonOperator.GreaterThan,
 			value: undefined as unknown as number
 		};
-		const result = EntityHelper.normalizeConditionValues(condition);
-		expect(result).toMatchObject({ value: undefined });
+		const result = EntityStorageHelper.normalizeConditionValues(condition);
+		expect((result as IComparator).value).toBeUndefined();
 	});
 
-	test("does not transform a null value (already null)", () => {
+	test("normalizes null to undefined for Equals leaf condition", () => {
 		const condition: EntityCondition<MixedType> = {
 			property: "optional",
 			comparison: ComparisonOperator.Equals,
 			value: null as unknown as string
 		};
-		const result = EntityHelper.normalizeConditionValues(condition);
-		expect(result).toMatchObject({ value: null });
+		const result = EntityStorageHelper.normalizeConditionValues(condition);
+		expect((result as IComparator).value).toBeUndefined();
+	});
+
+	test("normalizes null to undefined for NotEquals leaf condition", () => {
+		const condition: EntityCondition<MixedType> = {
+			property: "optional",
+			comparison: ComparisonOperator.NotEquals,
+			value: null as unknown as string
+		};
+		const result = EntityStorageHelper.normalizeConditionValues(condition);
+		expect((result as IComparator).value).toBeUndefined();
 	});
 
 	test("does not transform a non-null non-undefined value", () => {
@@ -215,7 +229,7 @@ describe("EntityHelper.normalizeConditionValues", () => {
 			comparison: ComparisonOperator.Equals,
 			value: "hello"
 		};
-		const result = EntityHelper.normalizeConditionValues(condition);
+		const result = EntityStorageHelper.normalizeConditionValues(condition);
 		expect(result).toMatchObject({ value: "hello" });
 	});
 
@@ -225,7 +239,7 @@ describe("EntityHelper.normalizeConditionValues", () => {
 			comparison: ComparisonOperator.Equals,
 			value: undefined
 		};
-		EntityHelper.normalizeConditionValues(condition);
+		EntityStorageHelper.normalizeConditionValues(condition);
 		expect(condition.value).toBeUndefined();
 	});
 
@@ -237,10 +251,10 @@ describe("EntityHelper.normalizeConditionValues", () => {
 			],
 			logicalOperator: LogicalOperator.And
 		};
-		const result = EntityHelper.normalizeConditionValues(condition);
+		const result = EntityStorageHelper.normalizeConditionValues(condition);
 		expect("conditions" in result).toBe(true);
 		const group = result as { conditions: EntityCondition<MixedType>[] };
-		expect(group.conditions[0]).toMatchObject({ value: null });
+		expect((group.conditions[0] as IComparator).value).toBeUndefined();
 		expect(group.conditions[1]).toMatchObject({ value: 5 });
 	});
 
@@ -255,10 +269,10 @@ describe("EntityHelper.normalizeConditionValues", () => {
 			conditions: [inner],
 			logicalOperator: LogicalOperator.And
 		};
-		const result = EntityHelper.normalizeConditionValues(outer);
+		const result = EntityStorageHelper.normalizeConditionValues(outer);
 		const outerGroup = result as { conditions: EntityCondition<MixedType>[] };
 		const innerGroup = outerGroup.conditions[0] as { conditions: EntityCondition<MixedType>[] };
-		expect(innerGroup.conditions[0]).toMatchObject({ value: null });
+		expect((innerGroup.conditions[0] as IComparator).value).toBeUndefined();
 	});
 
 	test("does not mutate nested compound conditions", () => {
@@ -271,7 +285,7 @@ describe("EntityHelper.normalizeConditionValues", () => {
 			conditions: [leaf],
 			logicalOperator: LogicalOperator.And
 		};
-		EntityHelper.normalizeConditionValues(condition);
+		EntityStorageHelper.normalizeConditionValues(condition);
 		expect(leaf.value).toBeUndefined();
 	});
 });

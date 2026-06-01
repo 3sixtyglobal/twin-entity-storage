@@ -25,7 +25,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
-	EntityHelper,
+	EntityStorageHelper,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
 } from "@twin.org/entity-storage-models";
@@ -359,7 +359,7 @@ export class PostgreSqlEntityStorageConnector<
 						}
 					}
 				}
-				return EntityHelper.unPrepareEntity<T>(rows[0] as T, [
+				return EntityStorageHelper.unPrepareEntity<T>(rows[0] as T, [
 					PostgreSqlEntityStorageConnector._PARTITION_KEY
 				]);
 			}
@@ -388,12 +388,17 @@ export class PostgreSqlEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const prepared = EntityHelper.prepareEntity(entity, this._entitySchema, [
-			{
-				property: PostgreSqlEntityStorageConnector._PARTITION_KEY,
-				value: partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
-			}
-		]);
+		const prepared = EntityStorageHelper.prepareEntity(
+			entity,
+			this._entitySchema,
+			[
+				{
+					property: PostgreSqlEntityStorageConnector._PARTITION_KEY,
+					value: partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
+				}
+			],
+			{ nullBehavior: "nullify" }
+		);
 
 		const id = prepared[this._primaryKeyProperty.property] as unknown as string;
 
@@ -452,12 +457,17 @@ export class PostgreSqlEntityStorageConnector<
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		const preparedEntities = entities.map(entity =>
-			EntityHelper.prepareEntity(entity, this._entitySchema, [
-				{
-					property: PostgreSqlEntityStorageConnector._PARTITION_KEY,
-					value: partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
-				}
-			])
+			EntityStorageHelper.prepareEntity(
+				entity,
+				this._entitySchema,
+				[
+					{
+						property: PostgreSqlEntityStorageConnector._PARTITION_KEY,
+						value: partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
+					}
+				],
+				{ nullBehavior: "nullify" }
+			)
 		);
 
 		try {
@@ -827,7 +837,7 @@ export class PostgreSqlEntityStorageConnector<
 			const resultRows = hasMore ? rows.slice(0, returnSize) : rows;
 			const entities = resultRows as unknown as Partial<T>[];
 			for (let i = 0; i < entities.length; i++) {
-				entities[i] = EntityHelper.unPrepareEntity(entities[i], [
+				entities[i] = EntityStorageHelper.unPrepareEntity(entities[i], [
 					PostgreSqlEntityStorageConnector._PARTITION_KEY
 				]);
 			}

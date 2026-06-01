@@ -1,4 +1,4 @@
-# Class: EntityHelper
+# Class: EntityStorageHelper
 
 Helper class for performing schema migrations between two connectors.
 
@@ -6,11 +6,11 @@ Helper class for performing schema migrations between two connectors.
 
 ### Constructor
 
-> **new EntityHelper**(): `EntityHelper`
+> **new EntityStorageHelper**(): `EntityStorageHelper`
 
 #### Returns
 
-`EntityHelper`
+`EntityStorageHelper`
 
 ## Properties
 

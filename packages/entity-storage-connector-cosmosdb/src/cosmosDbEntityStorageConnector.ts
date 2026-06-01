@@ -38,7 +38,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
-	EntityHelper,
+	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -433,9 +433,11 @@ export class CosmosDbEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		const prepared = EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
+			nullBehavior: "omit"
+		});
 
-		const id = entity[this._primaryKey.property] as string;
+		const id = prepared[this._primaryKey.property] as string;
 
 		try {
 			if (Is.arrayValue(conditions)) {
@@ -453,7 +455,7 @@ export class CosmosDbEntityStorageConnector<
 				id,
 				[CosmosDbEntityStorageConnector._PARTITION_KEY]:
 					partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
-				...entity
+				...prepared
 			});
 		} catch (err) {
 			if (BaseError.isAggregateError(err)) {
@@ -491,22 +493,24 @@ export class CosmosDbEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		for (const entity of entities) {
-			EntitySchemaHelper.validateEntity(entity, this.getSchema());
-		}
+		const preparedEntities = entities.map(entity =>
+			EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
+				nullBehavior: "omit"
+			})
+		);
 
 		try {
 			await this._container.items.executeBulkOperations(
-				entities.map(
-					entity =>
+				preparedEntities.map(
+					prepared =>
 						({
 							operationType: BulkOperationType.Upsert,
 							partitionKey: partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
 							resourceBody: {
-								id: entity[this._primaryKey.property] as string,
+								id: prepared[this._primaryKey.property] as string,
 								[CosmosDbEntityStorageConnector._PARTITION_KEY]:
 									partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
-								...(entity as { [key: string]: unknown })
+								...(prepared as { [key: string]: unknown })
 							}
 						}) as OperationInput
 				)
@@ -1255,7 +1259,7 @@ export class CosmosDbEntityStorageConnector<
 	 * @internal
 	 */
 	private itemToEntity(item: (ItemDefinition & Resource) | undefined): T {
-		return EntityHelper.unPrepareEntity<T>(item as T, [
+		return EntityStorageHelper.unPrepareEntity<T>(item as T, [
 			CosmosDbEntityStorageConnector._PARTITION_KEY,
 			"_attachments",
 			"_etag",

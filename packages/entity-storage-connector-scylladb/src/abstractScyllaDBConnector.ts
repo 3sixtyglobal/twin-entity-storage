@@ -14,7 +14,7 @@ import {
 	type IEntitySchema,
 	type IEntitySchemaProperty
 } from "@twin.org/entity";
-import { EntityHelper } from "@twin.org/entity-storage-models";
+import { EntityStorageHelper } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import { types as CassandraTypes, Client } from "cassandra-driver";
@@ -652,7 +652,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 			}
 		}
 
-		return EntityHelper.unPrepareEntity(obj as T, [AbstractScyllaDBConnector.PARTITION_KEY]);
+		return EntityStorageHelper.unPrepareEntity(obj as T, [AbstractScyllaDBConnector.PARTITION_KEY]);
 	}
 
 	/**
