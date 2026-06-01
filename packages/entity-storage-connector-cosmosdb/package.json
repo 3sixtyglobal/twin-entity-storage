@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-cosmosdb",
-	"version": "0.0.3-next.16",
+	"version": "0.0.3-next.17",
 	"description": "Azure Cosmos DB connector for globally distributed persistence.",
 	"repository": {
 		"type": "git",
@@ -33,12 +33,12 @@
 		"@twin.org/context": "next",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.0.3-next.16",
+		"@twin.org/entity-storage-models": "0.0.3-next.17",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.0.3-next.16",
+		"@twin.org/entity-storage-connector-memory": "0.0.3-next.17",
 		"@twin.org/logging-connector-entity-storage": "next",
 		"@twin.org/logging-service": "next",
 		"@twin.org/nameof-transformer": "next",

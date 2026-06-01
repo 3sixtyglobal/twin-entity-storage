@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3-next.17](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.0.3-next.16...entity-storage-models-v0.0.3-next.17) (2026-06-01)
+
+
+### Bug Fixes
+
+* null secondary indexes ([#103](https://github.com/iotaledger/twin-entity-storage/issues/103)) ([5e44f11](https://github.com/iotaledger/twin-entity-storage/commit/5e44f11bb5af5bf2c27d6f1d56aba5851116ff89))
+
 ## [0.0.3-next.16](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.0.3-next.15...entity-storage-models-v0.0.3-next.16) (2026-05-20)
 
 
