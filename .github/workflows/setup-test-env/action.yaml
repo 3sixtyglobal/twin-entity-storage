@@ -14,12 +14,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Write Test Environment Variables
-      if: inputs.package == 'packages/messaging-connector-aws' || inputs.package == 'all'
-      shell: bash
-      run: |
-        echo "${{ inputs.test_env_vars }}" > /tmp/test_env_vars.txt
-
     # Start PostgreSQL service only for PostgreSQL package
     - name: Start PostgreSQL Service
       if: inputs.package == 'packages/entity-storage-connector-postgresql' || inputs.package == 'all'
@@ -30,7 +24,10 @@ runs:
     - name: Start ScyllaDB Service
       if: inputs.package == 'packages/entity-storage-connector-scylladb' || inputs.package == 'all'
       shell: bash
-      run: docker run -d --name twin-entity-storage-scylladb -p 9500:9042 scylladb/scylla:5.4.9
+      run: |
+        docker run -d --name twin-entity-storage-scylladb -p 9500:9042 scylladb/scylla:5.4.9
+        echo "Waiting for ScyllaDB to be ready (may take up to 2 minutes)..."
+        timeout 120 bash -c 'until docker exec twin-entity-storage-scylladb cqlsh -e "SELECT now() FROM system.local" > /dev/null 2>&1; do sleep 5; done'
 
     # Start DynamoDB service only for DynamoDB package
     - name: Start DynamoDB Service
