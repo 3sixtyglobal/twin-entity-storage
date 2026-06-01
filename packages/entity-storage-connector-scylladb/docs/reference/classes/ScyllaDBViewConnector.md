@@ -367,13 +367,13 @@ The id of the entity to remove.
 
 ### removeBatch() {#removebatch}
 
-> **removeBatch**(`_ids`): `Promise`\<`void`\>
+> **removeBatch**(`ids`): `Promise`\<`void`\>
 
 Remove multiple entities.
 
 #### Parameters
 
-##### \_ids
+##### ids
 
 `string`[]
 
@@ -391,13 +391,13 @@ The ids of the entities to remove.
 
 ### teardown() {#teardown}
 
-> **teardown**(`_nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+> **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
 
 Teardown the entity storage (not supported for views).
 
 #### Parameters
 
-##### \_nodeLoggingComponentType?
+##### nodeLoggingComponentType?
 
 `string`
 

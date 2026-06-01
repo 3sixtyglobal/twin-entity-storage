@@ -24,7 +24,7 @@ Runtime name for the class.
 
 ### prepareEntity() {#prepareentity}
 
-> `static` **prepareEntity**\<`T`\>(`entity`, `schema`, `additionalProperties?`): `T`
+> `static` **prepareEntity**\<`T`\>(`entity`, `schema`, `additionalProperties?`, `options?`): `T`
 
 Prepare the entity by handling undefined and null values and validating it against the schema.
 
@@ -53,6 +53,17 @@ The schema to validate the entity against.
 `object`[]
 
 Optional list of additional properties to set on the entity.
+
+##### options?
+
+Options controlling how null/undefined optional properties are stored.
+
+###### nullBehavior?
+
+`"omit"` \| `"nullify"`
+
+"omit" strips null/undefined optional properties before writing
+(NoSQL — avoids index-key type errors). "nullify" converts undefined to null (SQL — the default).
 
 #### Returns
 
@@ -100,8 +111,8 @@ The entity with undefined and null values handled.
 
 > `static` **normalizeConditionValues**\<`T`\>(`condition`): `EntityCondition`\<`T`\>
 
-Deep-clone condition tree and map `undefined` to `null` on Equals/NotEquals leaves
-so in-memory evaluation matches stored-null semantics (optional absent props are stored as null).
+Deep-clone condition tree and normalise null/undefined to undefined on Equals/NotEquals leaves
+so in-memory evaluation matches stored-absent semantics (optional absent props are omitted/undefined).
 
 #### Type Parameters
 
