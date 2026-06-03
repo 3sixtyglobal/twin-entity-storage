@@ -1,4 +1,4 @@
-name: Add issues to project
+name: Project Add Issue
 
 # GHA_RELEASE_TOKEN requires
 # org->project: read/write
@@ -19,3 +19,14 @@ jobs:
         with:
           project-url: https://github.com/orgs/iotaledger/projects/104
           github-token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+
+      - uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['needs-triage'],
+            })
