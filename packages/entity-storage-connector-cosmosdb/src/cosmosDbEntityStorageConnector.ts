@@ -1065,7 +1065,7 @@ export class CosmosDbEntityStorageConnector<
 	 * @param objectPath The prefix to use for the condition.
 	 * @param comparator The operator to map.
 	 * @param type The type of the property.
-	 * @param attributeValues The attribute values to use in the query.
+	 * @param attributeNames The attribute names to use in the query.
 	 * @returns The comparison expression.
 	 * @throws GeneralError if the comparison operator is not supported.
 	 * @internal
@@ -1245,6 +1245,8 @@ export class CosmosDbEntityStorageConnector<
 	/**
 	 * Verify the conditions for the entity.
 	 * @param conditions The conditions to verify.
+	 * @param obj The object to verify the conditions against.
+	 * @returns True if all conditions are met, false otherwise.
 	 * @internal
 	 */
 	private verifyConditions(

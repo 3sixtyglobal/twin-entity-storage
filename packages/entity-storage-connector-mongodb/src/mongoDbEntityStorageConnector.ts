@@ -871,6 +871,7 @@ export class MongoDbEntityStorageConnector<
 	 * @param value The value to compare.
 	 * @param type The type of the property from the schema.
 	 * @returns The MongoDB comparison expression.
+	 * @throws GeneralError if the comparison operator is not supported.
 	 * @internal
 	 */
 	private mapComparisonOperator(

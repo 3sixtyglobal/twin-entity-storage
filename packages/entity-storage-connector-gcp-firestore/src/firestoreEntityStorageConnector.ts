@@ -1004,9 +1004,9 @@ export class FirestoreEntityStorageConnector<
 	/**
 	 * Returns true when the condition tree is guaranteed to match nothing due to empty
 	 * In lists, respecting AND/OR boolean semantics (#141):
-	 *   - AND group: true if ANY child is always-false (false AND x = false)
-	 *   - OR  group: true if ALL children are always-false (false OR false = false)
-	 *   - Leaf:      true only for `In []`
+	 * - AND group: true if ANY child is always-false (false AND x = false)
+	 * - OR  group: true if ALL children are always-false (false OR false = false)
+	 * - Leaf:      true only for `In []`
 	 * @param condition The condition tree to inspect.
 	 * @returns True if a short-circuit to empty results is required.
 	 * @internal
@@ -1114,6 +1114,7 @@ export class FirestoreEntityStorageConnector<
 	 * Only called for native conditions (needsPostFilter must be false).
 	 * @param condition The condition to convert.
 	 * @returns A Firestore Filter.
+	 * @throws GeneralError if the comparison operator is not supported.
 	 * @internal
 	 */
 	private buildFilter(condition: EntityCondition<T>): Filter {
@@ -1158,6 +1159,7 @@ export class FirestoreEntityStorageConnector<
 
 	/**
 	 * Get the collection name based on partition key.
+	 * @param partitionKey The optional partition key to include in the collection name.
 	 * @returns The collection name.
 	 * @internal
 	 */

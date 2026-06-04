@@ -1289,6 +1289,8 @@ export class MySqlEntityStorageConnector<
 	/**
 	 * Verify the conditions for the entity.
 	 * @param conditions The conditions to verify.
+	 * @param obj The object to verify the conditions against.
+	 * @returns True if all conditions are met, false otherwise.
 	 * @internal
 	 */
 	private verifyConditions(
@@ -1305,6 +1307,7 @@ export class MySqlEntityStorageConnector<
 	 * @param schema The schema to use, defaults to the connector's own schema.
 	 * @returns The SQL properties as a string.
 	 * @throws GeneralError if the entity properties do not exist.
+	 * @internal
 	 */
 	private mapMySqlProperties(schema?: IEntitySchema<T>): string {
 		const entitySchema = schema ?? this._entitySchema;

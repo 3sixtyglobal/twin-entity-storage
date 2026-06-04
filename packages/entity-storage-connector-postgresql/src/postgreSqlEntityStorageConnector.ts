@@ -1304,6 +1304,8 @@ export class PostgreSqlEntityStorageConnector<
 	/**
 	 * Verify the conditions for the entity.
 	 * @param conditions The conditions to verify.
+	 * @param obj The object to verify the conditions against.
+	 * @returns True if all conditions are met, false otherwise.
 	 * @internal
 	 */
 	private verifyConditions(
@@ -1320,6 +1322,7 @@ export class PostgreSqlEntityStorageConnector<
 	 * @param entitySchema The schema of the entity.
 	 * @returns The SQL properties as a string.
 	 * @throws GeneralError if the entity properties do not exist.
+	 * @internal
 	 */
 	private mapPostgreSqlProperties(entitySchema: IEntitySchema<T>): string {
 		const sqlTypeMap: { [key in EntitySchemaPropertyType]: string } = {

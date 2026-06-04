@@ -1138,6 +1138,7 @@ export class DynamoDbEntityStorageConnector<
 	 * @param condition The conditions to create the query from.
 	 * @param attributeNames The attribute names to use in the query.
 	 * @param attributeValues The attribute values to use in the query.
+	 * @param secondaryIndex The optional secondary index to use for the query.
 	 * @returns The condition clause.
 	 * @internal
 	 */

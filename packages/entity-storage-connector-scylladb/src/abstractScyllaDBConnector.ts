@@ -372,7 +372,6 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 	/**
 	 * Open a new database connection.
-	 * @param config The config for the connection.
 	 * @param skipKeySpace Don't include the keyspace in the connection.
 	 * @returns The new connection.
 	 * @internal
@@ -407,6 +406,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * can be reused by future operations; call `closePersistentClient()` to
 	 * explicitly shut it down (e.g. from `teardown()`).
 	 * @param connection The connection to close.
+	 * @returns Nothing.
 	 * @internal
 	 */
 	protected async closeConnection(connection?: Client): Promise<void> {
@@ -437,7 +437,8 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @param connection The connection to query.
 	 * @param sql The sql statement to execute.
 	 * @param params The params to use when executing the query.
-	 * @param state The state to use when it comes to pagination.
+	 * @param pageState The page state to use when it comes to pagination.
+	 * @param limit The maximum number of rows to return.
 	 * @returns The rows.
 	 * @internal
 	 */
@@ -479,6 +480,8 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * Execute on the database.
 	 * @param connection The connection to execute.
 	 * @param sql The sql statement to execute.
+	 * @param params The optional params to use when executing the statement.
+	 * @returns The result set.
 	 * @internal
 	 */
 	protected async execute(
@@ -493,6 +496,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * Create keyspace if it doesn't exist.
 	 * @param connection The connection to perform the query with.
 	 * @param keyspaceName The name of the keyspace to create.
+	 * @returns The result set.
 	 * @internal
 	 */
 	protected async createKeyspace(
@@ -566,6 +570,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @param value The value to convert to original form.
 	 * @param fieldDescriptor The descriptor for the field.
 	 * @returns The value as a property for the object.
+	 * @throws GeneralError if parsing JSON fails.
 	 * @internal
 	 */
 	protected dbValueToProperty(value: unknown, fieldDescriptor: IEntitySchemaProperty<T>): unknown {
@@ -614,9 +619,9 @@ export abstract class AbstractScyllaDBConnector<T> {
 	}
 
 	/**
-	 * Format a value for the DB. As the driver takes care of conversion from Javascript
+	 * Format a value for the DB.
 	 * @param value The value to format.
-	 * @param fieldDescriptor The descriptor for the field
+	 * @param fieldDescriptor The descriptor for the field.
 	 * @returns The value after conversion.
 	 * @internal
 	 */
@@ -752,6 +757,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @param conditions The optional conditions to match for the entities.
 	 * @param partitionKey The partition key value to filter by.
 	 * @returns The complete WHERE clause (without the WHERE keyword) and bound params.
+	 * @throws GeneralError if OR conditions, dot-notation paths, null comparisons, NotEquals, or NotIncludes operators are used.
 	 * @internal
 	 */
 	private buildCqlConditions(
