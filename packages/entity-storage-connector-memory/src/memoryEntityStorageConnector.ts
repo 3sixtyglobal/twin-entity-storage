@@ -36,7 +36,7 @@ import type { IMemoryEntityStorageConnectorConstructorOptions } from "./models/I
  * Class for performing entity storage operations in-memory.
  */
 export class MemoryEntityStorageConnector<T = unknown>
-	implements IEntityStorageConnector<T>, IEntityStorageMigrationConnector
+	implements IEntityStorageConnector<T>, IEntityStorageMigrationConnector<T>
 {
 	/**
 	 * Runtime name for the class.

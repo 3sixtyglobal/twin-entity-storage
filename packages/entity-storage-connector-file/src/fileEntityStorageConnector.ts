@@ -29,6 +29,7 @@ import {
 import {
 	EntityStorageHelper,
 	type IEntityStorageConnector,
+	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
 } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
@@ -38,7 +39,9 @@ import type { IFileEntityStorageConnectorConstructorOptions } from "./models/IFi
 /**
  * Class for performing entity storage operations in file.
  */
-export class FileEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
+export class FileEntityStorageConnector<
+	T = unknown
+> implements IEntityStorageMigrationConnector<T> {
 	/**
 	 * Runtime name for the class.
 	 */

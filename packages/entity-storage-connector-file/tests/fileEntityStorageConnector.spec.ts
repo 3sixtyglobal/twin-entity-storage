@@ -518,7 +518,7 @@ describe("FileEntityStorageConnector", () => {
 			comparison: ComparisonOperator.NotEquals
 		});
 		expect(result.entities.length).toEqual(3);
-		expect(result.entities.every(e => (e as TestType).value1 === "even")).toBe(true);
+		expect(result.entities.every((e: Partial<TestType>) => e.value1 === "even")).toBe(true);
 	});
 
 	test("can query with GreaterThan condition", async () => {
@@ -532,7 +532,7 @@ describe("FileEntityStorageConnector", () => {
 			comparison: ComparisonOperator.GreaterThan
 		});
 		expect(result.entities.length).toEqual(2);
-		expect(result.entities.every(e => (e as TestType).value2 > 20)).toBe(true);
+		expect(result.entities.every((e: Partial<TestType>) => (e.value2 ?? 0) > 20)).toBe(true);
 	});
 
 	test("can query with LessThan condition", async () => {
@@ -546,7 +546,7 @@ describe("FileEntityStorageConnector", () => {
 			comparison: ComparisonOperator.LessThan
 		});
 		expect(result.entities.length).toEqual(2);
-		expect(result.entities.every(e => (e as TestType).value2 < 20)).toBe(true);
+		expect(result.entities.every((e: Partial<TestType>) => (e.value2 ?? 0) < 20)).toBe(true);
 	});
 
 	test("can query with GreaterThanOrEqual condition", async () => {
@@ -560,7 +560,7 @@ describe("FileEntityStorageConnector", () => {
 			comparison: ComparisonOperator.GreaterThanOrEqual
 		});
 		expect(result.entities.length).toEqual(3);
-		expect(result.entities.every(e => (e as TestType).value2 >= 20)).toBe(true);
+		expect(result.entities.every((e: Partial<TestType>) => (e.value2 ?? 0) >= 20)).toBe(true);
 	});
 
 	test("can query with LessThanOrEqual condition", async () => {
@@ -574,7 +574,7 @@ describe("FileEntityStorageConnector", () => {
 			comparison: ComparisonOperator.LessThanOrEqual
 		});
 		expect(result.entities.length).toEqual(3);
-		expect(result.entities.every(e => (e as TestType).value2 <= 20)).toBe(true);
+		expect(result.entities.every((e: Partial<TestType>) => (e.value2 ?? 0) <= 20)).toBe(true);
 	});
 
 	test("can query with In operator", async () => {

@@ -4,7 +4,8 @@ import { ContextIdStore, type IContextIds } from "@twin.org/context";
 import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
 import {
 	MigrationHelper,
-	type IEntityStorageMigrationConnector
+	type IEntityStorageMigrationConnector,
+	type IResolvedMigrationStep
 } from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
 import { TEST_MONGODB_CONFIG } from "./setupTestEnv.js";
@@ -325,6 +326,25 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 		});
 	});
 
+	// -----------------------------------------------------------------------
+	// Step builder — creates a single IResolvedMigrationStep from the source
+	// connector's live schema and the named target schema in EntitySchemaFactory.
+	// -----------------------------------------------------------------------
+
+	function makeStep(
+		source: IEntityStorageMigrationConnector,
+		targetSchemaName: string,
+		renames?: { from: string; to: string }[],
+		transformEntityProperty?: IResolvedMigrationStep["transformEntityProperty"]
+	): IResolvedMigrationStep {
+		return {
+			fromProperties: EntitySchemaFactory.get(source.getSchema().type ?? "").properties ?? [],
+			toProperties: EntitySchemaFactory.get(targetSchemaName).properties ?? [],
+			renames,
+			transformEntityProperty
+		};
+	}
+
 	describe("migration using MigrationHelper", () => {
 		// Propagate the context from ContextIdStore.run into the mocked getContextIds so that
 		// partition-scoped queries inside MigrationHelper resolve to the correct partition.
@@ -363,17 +383,18 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "1", legacyField: "hello" });
 			await source.set({ id: "2", legacyField: "world" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV2>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
-				nameof<MigV2>()
+				nameof<MigV2>(),
+				[makeStep(source, nameof<MigV2>())]
 			);
 
 			expect(migrated).toBe(2);
-			const item1 = await finalConnector?.get("1");
+			const item1 = await finalConnector.get("1");
 			expect(item1).toBeDefined();
-			expect((item1 as unknown as { legacyField?: string }).legacyField).toBeUndefined();
+			expect((item1 as { legacyField?: string }).legacyField).toBeUndefined();
 			expect((item1 as MigV2).newField).toBeUndefined();
-			const item2 = await finalConnector?.get("2");
+			const item2 = await finalConnector.get("2");
 			expect(item2).toBeDefined();
 		});
 
@@ -383,13 +404,14 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "2", legacyField: "b" });
 			await source.set({ id: "3", legacyField: "c" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV2>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
-				nameof<MigV2>()
+				nameof<MigV2>(),
+				[makeStep(source, nameof<MigV2>())]
 			);
 
 			expect(migrated).toBe(3);
-			expect(await finalConnector?.count()).toBe(3);
+			expect(await finalConnector.count()).toBe(3);
 		});
 
 		test("migrates with coercible string-to-integer type change", async () => {
@@ -397,14 +419,15 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "1", legacyField: "42" });
 			await source.set({ id: "2", legacyField: "7" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV3TypeChange>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
-				nameof<MigV3TypeChange>()
+				nameof<MigV3TypeChange>(),
+				[makeStep(source, nameof<MigV3TypeChange>())]
 			);
 
 			expect(migrated).toBe(2);
-			expect(((await finalConnector?.get("1")) as MigV3TypeChange).legacyField).toBe(42);
-			expect(((await finalConnector?.get("2")) as MigV3TypeChange).legacyField).toBe(7);
+			expect(((await finalConnector.get("1")) as MigV3TypeChange).legacyField).toBe(42);
+			expect(((await finalConnector.get("2")) as MigV3TypeChange).legacyField).toBe(7);
 		});
 
 		test("throws when type coercion cannot produce a value for a required field", async () => {
@@ -412,7 +435,9 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "1", legacyField: "not-a-number" });
 
 			await expect(
-				MigrationHelper.migrate<MigV1, MigV3TypeChange>(source, nameof<MigV3TypeChange>())
+				MigrationHelper.migrateWithChain(source, nameof<MigV3TypeChange>(), [
+					makeStep(source, nameof<MigV3TypeChange>())
+				])
 			).rejects.toMatchObject({ name: "GeneralError", message: "migrationHelper.migrationFailed" });
 		});
 
@@ -421,29 +446,27 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "1", legacyField: "hello" });
 			await source.set({ id: "2", legacyField: "world" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV2>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
-				[{ from: "legacyField", to: "newField" }]
+				[makeStep(source, nameof<MigV2>(), [{ from: "legacyField", to: "newField" }])]
 			);
 
 			expect(migrated).toBe(2);
-			expect(((await finalConnector?.get("1")) as MigV2).newField).toBe("hello");
-			expect(((await finalConnector?.get("2")) as MigV2).newField).toBe("world");
+			expect(((await finalConnector.get("1")) as MigV2).newField).toBe("hello");
+			expect(((await finalConnector.get("2")) as MigV2).newField).toBe("world");
 		});
 
 		test("rename: old field name is absent on migrated entity", async () => {
 			const source = await makeV1Connector();
 			await source.set({ id: "1", legacyField: "hello" });
 
-			const { finalConnector } = await MigrationHelper.migrate<MigV1, MigV2>(
-				source,
-				nameof<MigV2>(),
-				[{ from: "legacyField", to: "newField" }]
-			);
+			const { finalConnector } = await MigrationHelper.migrateWithChain(source, nameof<MigV2>(), [
+				makeStep(source, nameof<MigV2>(), [{ from: "legacyField", to: "newField" }])
+			]);
 
-			const item = await finalConnector?.get("1");
-			expect((item as unknown as { legacyField?: string }).legacyField).toBeUndefined();
+			const item = await finalConnector.get("1");
+			expect((item as { legacyField?: string }).legacyField).toBeUndefined();
 			expect((item as MigV2).newField).toBe("hello");
 		});
 
@@ -451,25 +474,22 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			const source = await makeV1Connector();
 			await source.set({ id: "1", legacyField: "hello" });
 
-			const { finalConnector } = await MigrationHelper.migrate<MigV1, MigV2>(
-				source,
-				nameof<MigV2>()
-			);
+			const { finalConnector } = await MigrationHelper.migrateWithChain(source, nameof<MigV2>(), [
+				makeStep(source, nameof<MigV2>())
+			]);
 
-			expect(((await finalConnector?.get("1")) as MigV2).newField).toBeUndefined();
+			expect(((await finalConnector.get("1")) as MigV2).newField).toBeUndefined();
 		});
 
 		test("rename: with renames the field value is preserved", async () => {
 			const source = await makeV1Connector();
 			await source.set({ id: "1", legacyField: "hello" });
 
-			const { finalConnector } = await MigrationHelper.migrate<MigV1, MigV2>(
-				source,
-				nameof<MigV2>(),
-				[{ from: "legacyField", to: "newField" }]
-			);
+			const { finalConnector } = await MigrationHelper.migrateWithChain(source, nameof<MigV2>(), [
+				makeStep(source, nameof<MigV2>(), [{ from: "legacyField", to: "newField" }])
+			]);
 
-			expect(((await finalConnector?.get("1")) as MigV2).newField).toBe("hello");
+			expect(((await finalConnector.get("1")) as MigV2).newField).toBe("hello");
 		});
 
 		test("rename: value is carried correctly across multiple partitions", async () => {
@@ -481,19 +501,19 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			currentUser = "userB";
 			await source.set({ id: "1", legacyField: "beta" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV2>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
-				[{ from: "legacyField", to: "newField" }]
+				[makeStep(source, nameof<MigV2>(), [{ from: "legacyField", to: "newField" }])]
 			);
 
 			expect(migrated).toBe(2);
 
 			currentUser = "userA";
-			expect(((await finalConnector?.get("1")) as MigV2).newField).toBe("alpha");
+			expect(((await finalConnector.get("1")) as MigV2).newField).toBe("alpha");
 
 			currentUser = "userB";
-			expect(((await finalConnector?.get("1")) as MigV2).newField).toBe("beta");
+			expect(((await finalConnector.get("1")) as MigV2).newField).toBe("beta");
 		});
 
 		test("migrates entities across all partitions and returns total migrated count", async () => {
@@ -508,25 +528,26 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "b2", legacyField: "delta" });
 
 			currentUser = "userA";
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV2>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
-				nameof<MigV2>()
+				nameof<MigV2>(),
+				[makeStep(source, nameof<MigV2>())]
 			);
 
 			expect(migrated).toBe(4);
 
 			currentUser = "userA";
-			const a1 = await finalConnector?.get("a1");
+			const a1 = await finalConnector.get("a1");
 			expect(a1).toBeDefined();
-			expect((a1 as unknown as { legacyField?: string }).legacyField).toBeUndefined();
-			const a2 = await finalConnector?.get("a2");
+			expect((a1 as { legacyField?: string }).legacyField).toBeUndefined();
+			const a2 = await finalConnector.get("a2");
 			expect(a2).toBeDefined();
 
 			currentUser = "userB";
-			const b1 = await finalConnector?.get("b1");
+			const b1 = await finalConnector.get("b1");
 			expect(b1).toBeDefined();
-			expect((b1 as unknown as { legacyField?: string }).legacyField).toBeUndefined();
-			const b2 = await finalConnector?.get("b2");
+			expect((b1 as { legacyField?: string }).legacyField).toBeUndefined();
+			const b2 = await finalConnector.get("b2");
 			expect(b2).toBeDefined();
 		});
 
@@ -539,57 +560,47 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			currentUser = "bob";
 			await source.set({ id: "1", legacyField: "bobVal" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV2>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
-				nameof<MigV2>()
+				nameof<MigV2>(),
+				[makeStep(source, nameof<MigV2>())]
 			);
 
 			expect(migrated).toBe(2);
 
 			currentUser = "alice";
-			expect(await finalConnector?.get("1")).toBeDefined();
+			expect(await finalConnector.get("1")).toBeDefined();
 
 			currentUser = "bob";
-			expect(await finalConnector?.get("1")).toBeDefined();
+			expect(await finalConnector.get("1")).toBeDefined();
 		});
 
-		test("onPartitionProgress is called with correct row totals for each batch", async () => {
+		test("migrates correctly with a custom batchSize", async () => {
 			const source = await makeV1Connector();
 			for (let i = 0; i < 5; i++) {
 				await source.set({ id: String(i + 1), legacyField: `val${i + 1}` });
 			}
 
-			const progressEvents: { rowTotal: number; rowIndex: number }[] = [];
+			const { migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigV2>(),
+				[makeStep(source, nameof<MigV2>())],
+				undefined,
+				2
+			);
 
-			await MigrationHelper.migrate<MigV1, MigV2>(source, nameof<MigV2>(), undefined, {
-				batchSize: 2,
-				onPartitionProgress: async (rowTotal, rowIndex) => {
-					progressEvents.push({ rowTotal, rowIndex });
-				}
-			});
-
-			expect(progressEvents.length).toBeGreaterThan(0);
-			expect(progressEvents[0].rowTotal).toBe(5);
-			expect(progressEvents[0].rowIndex).toBe(0);
-			expect(progressEvents[progressEvents.length - 1].rowIndex).toBe(5);
+			expect(migrated).toBe(5);
 		});
 
-		test("onStepProgress emits migrationStart, partitionStart, and migrationEnd keys", async () => {
+		test("migrates a single entity end to end", async () => {
 			const source = await makeV1Connector();
 			await source.set({ id: "1", legacyField: "hello" });
 
-			const stepKeys: string[] = [];
+			const { migrated } = await MigrationHelper.migrateWithChain(source, nameof<MigV2>(), [
+				makeStep(source, nameof<MigV2>())
+			]);
 
-			await MigrationHelper.migrate<MigV1, MigV2>(source, nameof<MigV2>(), undefined, {
-				onStepProgress: async stepKey => {
-					stepKeys.push(stepKey);
-				}
-			});
-
-			expect(stepKeys).toContain("migrationStart");
-			expect(stepKeys).toContain("partitionStart");
-			expect(stepKeys).toContain("partitionEnd");
-			expect(stepKeys).toContain("migrationEnd");
+			expect(migrated).toBe(1);
 		});
 
 		test("respects batchSize and migrates all entities regardless of chunk boundaries", async () => {
@@ -598,15 +609,16 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 				await source.set({ id: String(i + 1), legacyField: `val${i + 1}` });
 			}
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV2>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				[makeStep(source, nameof<MigV2>())],
 				undefined,
-				{ batchSize: 3 }
+				3
 			);
 
 			expect(migrated).toBe(10);
-			expect(await finalConnector?.count()).toBe(10);
+			expect(await finalConnector.count()).toBe(10);
 		});
 
 		test("transformEntityProperty: converts a string field to an object using the provided function", async () => {
@@ -616,16 +628,19 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "1", info: "hello" });
 			await source.set({ id: "2", info: "world" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<
-				MigV1WithStr,
-				MigV2WithObj
-			>(source, nameof<MigV2WithObj>(), undefined, {
-				transformEntityProperty: (from, to, value) => ({ label: value as string })
-			});
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigV2WithObj>(),
+				[makeStep(source, nameof<MigV2WithObj>(), undefined, (f, t, v) => ({ label: v as string }))]
+			);
 
 			expect(migrated).toBe(2);
-			expect(((await finalConnector?.get("1")) as MigV2WithObj).info).toEqual({ label: "hello" });
-			expect(((await finalConnector?.get("2")) as MigV2WithObj).info).toEqual({ label: "world" });
+			expect(((await finalConnector.get("1")) as MigV2WithObj).info).toEqual({
+				label: "hello"
+			});
+			expect(((await finalConnector.get("2")) as MigV2WithObj).info).toEqual({
+				label: "world"
+			});
 		});
 
 		test("transformEntityProperty: throws when missing and target property type is object", async () => {
@@ -635,7 +650,9 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "1", info: "hello" });
 
 			await expect(
-				MigrationHelper.migrate<MigV1WithStr, MigV2WithObj>(source, nameof<MigV2WithObj>())
+				MigrationHelper.migrateWithChain(source, nameof<MigV2WithObj>(), [
+					makeStep(source, nameof<MigV2WithObj>())
+				])
 			).rejects.toMatchObject({ name: "GeneralError", message: "migrationHelper.migrationFailed" });
 		});
 
@@ -643,14 +660,15 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			const source = await makeV1Connector();
 			await source.set({ id: "1", legacyField: "not-a-number" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<
-				MigV1,
-				MigV3OptionalTypeChange
-			>(source, nameof<MigV3OptionalTypeChange>());
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigV3OptionalTypeChange>(),
+				[makeStep(source, nameof<MigV3OptionalTypeChange>())]
+			);
 
 			expect(migrated).toBe(1);
 			expect(
-				((await finalConnector?.get("1")) as MigV3OptionalTypeChange).legacyField
+				((await finalConnector.get("1")) as MigV3OptionalTypeChange).legacyField
 			).toBeUndefined();
 		});
 
@@ -661,13 +679,14 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "1" });
 			await source.set({ id: "2" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<
-				MigJustId,
-				MigAllAddedDefaults
-			>(source, nameof<MigAllAddedDefaults>());
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigAllAddedDefaults>(),
+				[makeStep(source, nameof<MigAllAddedDefaults>())]
+			);
 
 			expect(migrated).toBe(2);
-			const item = (await finalConnector?.get("1")) as MigAllAddedDefaults;
+			const item = (await finalConnector.get("1")) as MigAllAddedDefaults;
 			expect(item.boolField).toBe(false);
 			expect(item.intField).toBe(0);
 			expect(item.numField).toBe(0);
@@ -682,15 +701,16 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "2", legacyField: "false" });
 			await source.set({ id: "3", legacyField: "TRUE" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV3BoolChange>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
-				nameof<MigV3BoolChange>()
+				nameof<MigV3BoolChange>(),
+				[makeStep(source, nameof<MigV3BoolChange>())]
 			);
 
 			expect(migrated).toBe(3);
-			expect(((await finalConnector?.get("1")) as MigV3BoolChange).legacyField).toBe(true);
-			expect(((await finalConnector?.get("2")) as MigV3BoolChange).legacyField).toBe(false);
-			expect(((await finalConnector?.get("3")) as MigV3BoolChange).legacyField).toBe(true);
+			expect(((await finalConnector.get("1")) as MigV3BoolChange).legacyField).toBe(true);
+			expect(((await finalConnector.get("2")) as MigV3BoolChange).legacyField).toBe(false);
+			expect(((await finalConnector.get("3")) as MigV3BoolChange).legacyField).toBe(true);
 		});
 
 		test("migrates with coercible integer-to-string type change", async () => {
@@ -700,14 +720,15 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "1", legacyField: 42 });
 			await source.set({ id: "2", legacyField: 0 });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<
-				MigV3TypeChange,
-				MigV3ToStr
-			>(source, nameof<MigV3ToStr>());
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigV3ToStr>(),
+				[makeStep(source, nameof<MigV3ToStr>())]
+			);
 
 			expect(migrated).toBe(2);
-			expect(((await finalConnector?.get("1")) as MigV3ToStr).legacyField).toBe("42");
-			expect(((await finalConnector?.get("2")) as MigV3ToStr).legacyField).toBe("0");
+			expect(((await finalConnector.get("1")) as MigV3ToStr).legacyField).toBe("42");
+			expect(((await finalConnector.get("2")) as MigV3ToStr).legacyField).toBe("0");
 		});
 
 		test("rename: multiple fields can be renamed in a single migration", async () => {
@@ -717,21 +738,24 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "1", fieldA: "alpha", fieldB: "beta" });
 			await source.set({ id: "2", fieldA: "gamma", fieldB: "delta" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<
-				MigMultiFieldA,
-				MigMultiFieldB
-			>(source, nameof<MigMultiFieldB>(), [
-				{ from: "fieldA", to: "renamedA" },
-				{ from: "fieldB", to: "renamedB" }
-			]);
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigMultiFieldB>(),
+				[
+					makeStep(source, nameof<MigMultiFieldB>(), [
+						{ from: "fieldA", to: "renamedA" },
+						{ from: "fieldB", to: "renamedB" }
+					])
+				]
+			);
 
 			expect(migrated).toBe(2);
-			const item1 = (await finalConnector?.get("1")) as MigMultiFieldB;
+			const item1 = (await finalConnector.get("1")) as MigMultiFieldB;
 			expect(item1.renamedA).toBe("alpha");
 			expect(item1.renamedB).toBe("beta");
-			expect((item1 as unknown as { fieldA?: string }).fieldA).toBeUndefined();
-			expect((item1 as unknown as { fieldB?: string }).fieldB).toBeUndefined();
-			const item2 = (await finalConnector?.get("2")) as MigMultiFieldB;
+			expect((item1 as { fieldA?: string }).fieldA).toBeUndefined();
+			expect((item1 as { fieldB?: string }).fieldB).toBeUndefined();
+			const item2 = (await finalConnector.get("2")) as MigMultiFieldB;
 			expect(item2.renamedA).toBe("gamma");
 			expect(item2.renamedB).toBe("delta");
 		});
@@ -739,42 +763,33 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 		test("migrates empty source and returns zero migrated count", async () => {
 			const source = await makeV1Connector();
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV2>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
-				nameof<MigV2>()
+				nameof<MigV2>(),
+				[makeStep(source, nameof<MigV2>())]
 			);
 
 			expect(migrated).toBe(0);
-			expect(await finalConnector?.count()).toBe(0);
+			expect(await finalConnector.count()).toBe(0);
 		});
 
-		test("no schema diffs: returns undefined connector and zero migrated count", async () => {
-			const source = await makeV1Connector();
-
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV1>(
-				source,
-				nameof<MigV1>()
-			);
-
-			expect(migrated).toBe(0);
-			expect(finalConnector).toBeUndefined();
-		});
-
-		test("no schema diffs: returns undefined connector and zero migrated count even when entities exist", async () => {
+		test("schema unchanged: entities are preserved with identical data after migration", async () => {
 			const source = await makeV1Connector();
 			await source.set({ id: "1", legacyField: "hello" });
 			await source.set({ id: "2", legacyField: "world" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV1>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
-				nameof<MigV1>()
+				nameof<MigV1>(),
+				[makeStep(source, nameof<MigV1>())]
 			);
 
-			expect(migrated).toBe(0);
-			expect(finalConnector).toBeUndefined();
+			expect(migrated).toBe(2);
+			expect(((await finalConnector.get("1")) as MigV1).legacyField).toBe("hello");
+			expect(((await finalConnector.get("2")) as MigV1).legacyField).toBe("world");
 		});
 
-		test("onStepProgress reports partitionStart once per partition", async () => {
+		test("migrates entities across multiple partitions", async () => {
 			const source = await makeV1Connector(["user"]);
 
 			currentUser = "userA";
@@ -786,23 +801,12 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			currentUser = "userC";
 			await source.set({ id: "3", legacyField: "c" });
 
-			let partitionStartCount = 0;
-
-			const { migrated } = await MigrationHelper.migrate<MigV1, MigV2>(
-				source,
-				nameof<MigV2>(),
-				undefined,
-				{
-					onStepProgress: async stepKey => {
-						if (stepKey === "partitionStart") {
-							partitionStartCount++;
-						}
-					}
-				}
-			);
+			currentUser = "userA";
+			const { migrated } = await MigrationHelper.migrateWithChain(source, nameof<MigV2>(), [
+				makeStep(source, nameof<MigV2>())
+			]);
 
 			expect(migrated).toBe(3);
-			expect(partitionStartCount).toBe(3);
 		});
 
 		test("finalizeMigration: migrates all entities when connector has no partitionContextIds configured", async () => {
@@ -813,28 +817,30 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "2", legacyField: "b" });
 			await source.set({ id: "3", legacyField: "c" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV2>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
-				nameof<MigV2>()
+				nameof<MigV2>(),
+				[makeStep(source, nameof<MigV2>())]
 			);
 
 			expect(migrated).toBe(3);
-			expect(await finalConnector?.count()).toBe(3);
-			expect(await finalConnector?.get("1")).toBeDefined();
-			expect(await finalConnector?.get("2")).toBeDefined();
-			expect(await finalConnector?.get("3")).toBeDefined();
+			expect(await finalConnector.count()).toBe(3);
+			expect(await finalConnector.get("1")).toBeDefined();
+			expect(await finalConnector.get("2")).toBeDefined();
+			expect(await finalConnector.get("3")).toBeDefined();
 		});
 
 		test("finalizeMigration: skips copy when source is empty and partitionContextIds are configured", async () => {
 			const source = await makeV1Connector(["user"]);
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV2>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
-				nameof<MigV2>()
+				nameof<MigV2>(),
+				[makeStep(source, nameof<MigV2>())]
 			);
 
 			expect(migrated).toBe(0);
-			expect(await finalConnector?.count()).toBe(0);
+			expect(await finalConnector.count()).toBe(0);
 		});
 
 		test("finalizeMigration: migrates all entities across each partition when partitionContextIds are configured", async () => {
@@ -848,21 +854,21 @@ describe("MongoDbEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "1", legacyField: "b1" });
 			await source.set({ id: "2", legacyField: "b2" });
 
-			const { finalConnector, migrated } = await MigrationHelper.migrate<MigV1, MigV2>(
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
-				[{ from: "legacyField", to: "newField" }]
+				[makeStep(source, nameof<MigV2>(), [{ from: "legacyField", to: "newField" }])]
 			);
 
 			expect(migrated).toBe(4);
 
 			currentUser = "alice";
-			expect(((await finalConnector?.get("1")) as MigV2).newField).toBe("a1");
-			expect(((await finalConnector?.get("2")) as MigV2).newField).toBe("a2");
+			expect(((await finalConnector.get("1")) as MigV2).newField).toBe("a1");
+			expect(((await finalConnector.get("2")) as MigV2).newField).toBe("a2");
 
 			currentUser = "bob";
-			expect(((await finalConnector?.get("1")) as MigV2).newField).toBe("b1");
-			expect(((await finalConnector?.get("2")) as MigV2).newField).toBe("b2");
+			expect(((await finalConnector.get("1")) as MigV2).newField).toBe("b1");
+			expect(((await finalConnector.get("2")) as MigV2).newField).toBe("b2");
 		});
 	});
 });
