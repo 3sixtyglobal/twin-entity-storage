@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.22](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-gcp-firestore-v0.0.3-next.21...entity-storage-connector-gcp-firestore-v0.0.3-next.22) (2026-06-08)
+
+
+### Features
+
+* add ISchemaMigration chain, SchemaVersionMigrator runner and version store ([#110](https://github.com/iotaledger/twin-entity-storage/issues/110)) ([2dac924](https://github.com/iotaledger/twin-entity-storage/commit/2dac9244a752cb58304d1649ff03c3a2469783dd))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.21 to 0.0.3-next.22
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.21 to 0.0.3-next.22
+
 ## [0.0.3-next.21](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-gcp-firestore-v0.0.3-next.20...entity-storage-connector-gcp-firestore-v0.0.3-next.21) (2026-06-01)
 
 

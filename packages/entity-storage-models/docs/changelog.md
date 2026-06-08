@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3-next.22](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.0.3-next.21...entity-storage-models-v0.0.3-next.22) (2026-06-08)
+
+
+### Features
+
+* add ISchemaMigration chain, SchemaVersionMigrator runner and version store ([#110](https://github.com/iotaledger/twin-entity-storage/issues/110)) ([2dac924](https://github.com/iotaledger/twin-entity-storage/commit/2dac9244a752cb58304d1649ff03c3a2469783dd))
+
 ## [0.0.3-next.21](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.0.3-next.20...entity-storage-models-v0.0.3-next.21) (2026-06-01)
 
 
