@@ -11,7 +11,7 @@ import type { ISchemaMigration } from "../models/ISchemaMigration.js";
  * SchemaVersionService diffs the two versioned schema classes automatically
  * without needing any factory entry.
  *
- * Keys follow the convention "<BaseSchemaName>_<fromVersion>_<toVersion>",
+ * Keys follow the convention "BaseSchemaName_fromVersion_toVersion",
  * for example "MyEntity_0_1" for the step that migrates MyEntity from version 0 to 1.
  */
 // eslint-disable-next-line @typescript-eslint/naming-convention

@@ -7,7 +7,7 @@ renames or a custom object/array transform. For purely structural changes
 versioned schema classes (e.g. MyEntityV0 vs MyEntityV1) from EntitySchemaFactory
 automatically.
 
-Register under the key "<BaseSchemaName>_<fromVersion>_<toVersion>"
+Register under the key "BaseSchemaName_fromVersion_toVersion"
 e.g. "MyEntity_0_1" for the step that migrates from version 0 to version 1.
 The key itself encodes the version pair; no version field is needed on the object.
 
