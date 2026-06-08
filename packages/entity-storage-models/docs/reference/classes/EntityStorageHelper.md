@@ -107,6 +107,80 @@ The entity with undefined and null values handled.
 
 ***
 
+### validateSortProperties() {#validatesortproperties}
+
+> `static` **validateSortProperties**\<`T`\>(`schema`, `sortProperties?`): `void`
+
+Validate that every sort property in the list is indexed in the schema (isPrimary, isSecondary,
+or has a default sortDirection), throwing sortNotIndexed for the first violation found.
+
+#### Type Parameters
+
+##### T
+
+`T`
+
+#### Parameters
+
+##### schema
+
+`IEntitySchema`\<`T`\>
+
+The entity schema to validate against.
+
+##### sortProperties?
+
+`object`[]
+
+The sort properties to check.
+
+#### Returns
+
+`void`
+
+#### Throws
+
+GeneralError If a sort property is not indexed in the schema.
+
+***
+
+### validateProperties() {#validateproperties}
+
+> `static` **validateProperties**\<`T`\>(`schema`, `properties?`): `void`
+
+Validate that every property in the list exists in the schema, throwing propertyNotInSchema
+for the first property that is not found.
+
+#### Type Parameters
+
+##### T
+
+`T`
+
+#### Parameters
+
+##### schema
+
+`IEntitySchema`\<`T`\>
+
+The entity schema to validate against.
+
+##### properties?
+
+keyof `T`[]
+
+The properties to check.
+
+#### Returns
+
+`void`
+
+#### Throws
+
+GeneralError If a property does not exist in the schema.
+
+***
+
 ### normalizeConditionValues() {#normalizeconditionvalues}
 
 > `static` **normalizeConditionValues**\<`T`\>(`condition`): `EntityCondition`\<`T`\>
