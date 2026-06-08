@@ -1479,6 +1479,12 @@ export class DynamoDbEntityStorageConnector<
 			return { BOOL: Coerce.boolean(value) ?? false };
 		}
 
+		if (Is.boolean(value)) {
+			return { BOOL: value };
+		} else if (Is.number(value)) {
+			return { N: value.toString() };
+		}
+
 		return { S: Coerce.string(value) ?? "" };
 	}
 
