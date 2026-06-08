@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.24](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-dynamodb-v0.0.3-next.23...entity-storage-connector-dynamodb-v0.0.3-next.24) (2026-06-08)
+
+
+### Bug Fixes
+
+* dynamodb includes operator ([a003a0f](https://github.com/iotaledger/twin-entity-storage/commit/a003a0f7b949e48c3af40f996fdf071899f382d8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.23 to 0.0.3-next.24
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.23 to 0.0.3-next.24
+
 ## [0.0.3-next.23](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-dynamodb-v0.0.3-next.22...entity-storage-connector-dynamodb-v0.0.3-next.23) (2026-06-08)
 
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.24](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.0.3-next.23...entity-storage-service-v0.0.3-next.24) (2026-06-08)
+
+
+### Features
+
+* add SchemaVersionService for automatic schema migrations ([#118](https://github.com/iotaledger/twin-entity-storage/issues/118)) ([b2ad843](https://github.com/iotaledger/twin-entity-storage/commit/b2ad8435185c53304aca99eb4d98582009b3902d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.23 to 0.0.3-next.24
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.23 to 0.0.3-next.24
+
 ## [0.0.3-next.23](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.0.3-next.22...entity-storage-service-v0.0.3-next.23) (2026-06-08)
 
 
