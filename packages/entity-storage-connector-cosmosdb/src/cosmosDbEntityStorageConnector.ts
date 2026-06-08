@@ -1152,10 +1152,20 @@ export class CosmosDbEntityStorageConnector<
 		} else if (comparator.comparison === ComparisonOperator.LessThanOrEqual) {
 			return `c.${attributeName} <= @${propName}`;
 		} else if (
-			typeof attributeValues[propName] === "object" &&
+			Is.object(attributeValues[propName]) &&
 			comparator.comparison === ComparisonOperator.Includes
 		) {
 			return `ARRAY_CONTAINS(c.${attributeName}, @${propName}, true)`;
+		} else if (
+			(type === "array" || type === "object") &&
+			comparator.comparison === ComparisonOperator.Includes
+		) {
+			return `ARRAY_CONTAINS(c.${attributeName}, @${propName})`;
+		} else if (
+			(type === "array" || type === "object") &&
+			comparator.comparison === ComparisonOperator.NotIncludes
+		) {
+			return `NOT ARRAY_CONTAINS(c.${attributeName}, @${propName})`;
 		} else if (comparator.comparison === ComparisonOperator.Includes) {
 			return `CONTAINS(c.${attributeName}, @${propName})`;
 		} else if (comparator.comparison === ComparisonOperator.NotIncludes) {
@@ -1188,7 +1198,7 @@ export class CosmosDbEntityStorageConnector<
 		if (type === "string") {
 			return `${Coerce.string(value)}`;
 		} else if (type === "integer" || type === "number") {
-			return Coerce.string(value) ?? "";
+			return Coerce.number(value) ?? 0;
 		} else if (type === "boolean") {
 			return Coerce.boolean(value) ?? false;
 		}
