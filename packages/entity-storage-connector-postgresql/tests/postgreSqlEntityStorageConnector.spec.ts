@@ -1087,9 +1087,8 @@ describe("PostgreSqlEntityStorageConnector", () => {
 	});
 
 	test("can query with Includes scalar string in object-typed JSON array column", async () => {
-		const connector = await createConnector<ObjectJsonArrayTestType>(
-			nameof<ObjectJsonArrayTestType>()
-		);
+		const connector =
+			await createConnector<ObjectJsonArrayTestType>(nameof<ObjectJsonArrayTestType>());
 		await connector.set({ id: "1", keywords: ["BorderAgency", "Trade"] });
 		await connector.set({ id: "2", keywords: ["Customs", "Trade"] });
 		await connector.set({ id: "3", keywords: ["Finance"] });
