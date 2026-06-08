@@ -1,26 +1,25 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { GeneralError, Is, type IComponent } from "@twin.org/core";
+import { GeneralError, Guards, Is, type IComponent } from "@twin.org/core";
 import { EntitySchemaFactory, EntitySchemaHelper, type IEntitySchema } from "@twin.org/entity";
-import {
-	EntityStorageConnectorFactory,
-	MigrationHelper,
-	SchemaMigrationFactory,
-	type IEntityStorageConnector,
-	type IEntityStorageMigrationConnector,
-	type IResolvedMigrationStep
-} from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
-import { SchemaVersion } from "./entities/schemaVersion.js";
-import type { ISchemaVersionServiceConstructorOptions } from "./models/ISchemaVersionServiceConstructorOptions.js";
+import { SchemaVersion } from "../entities/schemaVersion.js";
+import { EntityStorageConnectorFactory } from "../factories/entityStorageConnectorFactory.js";
+import { SchemaMigrationFactory } from "../factories/schemaMigrationFactory.js";
+import { MigrationHelper } from "../helpers/migrationHelper.js";
+import type { IEntityStorageConnector } from "../models/IEntityStorageConnector.js";
+import type { IEntityStorageMigrationConnector } from "../models/IEntityStorageMigrationConnector.js";
+import type { IResolvedMigrationStep } from "../models/IResolvedMigrationStep.js";
 
 /**
- * Service that checks and applies entity schema migrations at every node start-up.
+ * IComponent service that checks and applies entity schema migrations at every node start-up.
  *
- * This service should be registered as the first component so that its start() runs before
- * any other service. By the time start() is called, all component bootstraps have completed
- * (every table already exists) and EntitySchemaFactory / EntityStorageConnectorFactory are
- * fully populated with every registered schema and connector.
+ * This service must be the first entry in coreTypeInitialisers.json. The engine iterates that
+ * array in order to determine start sequence — there is no engine-level priority mechanism, so
+ * registration position is the only guarantee that start() runs before any other service.
+ * By the time start() is called, all component bootstraps have completed (every table already
+ * exists) and EntitySchemaFactory / EntityStorageConnectorFactory are fully populated with every
+ * registered schema and connector.
  *
  * Migration mechanics: old schema versions are registered in EntitySchemaFactory by naming
  * convention — current schema = "MyEntity", first history = "MyEntityV0", second = "MyEntityV1".
@@ -52,16 +51,40 @@ export class SchemaVersionService implements IComponent {
 	 * The connector used to read and write SchemaVersion records.
 	 * @internal
 	 */
-	private readonly _schemaVersionConnector: IEntityStorageConnector<SchemaVersion>;
+	private readonly _versionConnector: IEntityStorageConnector<SchemaVersion>;
 
 	/**
 	 * Create a new SchemaVersionService.
-	 * @param options The constructor options.
+	 * @param versionConnector Entity-storage connector backed by the schemaVersion table.
 	 */
-	constructor(options: ISchemaVersionServiceConstructorOptions) {
-		this._schemaVersionConnector = EntityStorageConnectorFactory.get(
-			options.schemaVersionStorageType ?? "schema-version"
+	constructor(versionConnector: IEntityStorageConnector<SchemaVersion>) {
+		Guards.object<IEntityStorageConnector<SchemaVersion>>(
+			SchemaVersionService.CLASS_NAME,
+			nameof(versionConnector),
+			versionConnector
 		);
+		this._versionConnector = versionConnector;
+	}
+
+	/**
+	 * Searches EntityStorageConnectorFactory for the connector whose registered schema type
+	 * matches the given schema name.
+	 * @param schemaName The entity type name to look up.
+	 * @returns The matching connector, or undefined if none is registered.
+	 * @internal
+	 */
+	private static findConnector(schemaName: string): IEntityStorageConnector | undefined {
+		for (const name of EntityStorageConnectorFactory.names()) {
+			try {
+				const connector = EntityStorageConnectorFactory.get(name);
+				if (connector.getSchema?.().type === schemaName) {
+					return connector;
+				}
+			} catch {
+				// Connector not yet created or registration issue — skip.
+			}
+		}
+		return undefined;
 	}
 
 	/**
@@ -70,6 +93,20 @@ export class SchemaVersionService implements IComponent {
 	 */
 	public className(): string {
 		return SchemaVersionService.CLASS_NAME;
+	}
+
+	/**
+	 * Bootstraps the version-store connector so the schemaVersion table exists
+	 * before start() attempts to read or write version records.
+	 * @param nodeLoggingComponentType An optional logging component type.
+	 * @returns True on success.
+	 */
+	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
+		const bootstrapFn = this._versionConnector.bootstrap?.bind(this._versionConnector);
+		if (Is.function(bootstrapFn)) {
+			return bootstrapFn(nodeLoggingComponentType);
+		}
+		return true;
 	}
 
 	/**
@@ -105,14 +142,23 @@ export class SchemaVersionService implements IComponent {
 			}
 		}
 
-		// 2. Read ALL stored version records in one query.
-		const queryResult = await this._schemaVersionConnector.query();
+		// 2. Read ALL stored version records, paging through the full table.
 		const storedVersions = new Map<string, number>();
-		for (const record of queryResult.entities ?? []) {
-			if (Is.object<SchemaVersion>(record)) {
-				storedVersions.set(record.schemaName, record.version);
+		let cursor: string | undefined;
+		do {
+			const queryResult = await this._versionConnector.query(
+				undefined,
+				undefined,
+				undefined,
+				cursor
+			);
+			for (const record of queryResult.entities ?? []) {
+				if (Is.object<SchemaVersion>(record)) {
+					storedVersions.set(record.schemaName, record.version);
+				}
 			}
-		}
+			cursor = queryResult.cursor;
+		} while (Is.stringValue(cursor));
 
 		// 3. Process SchemaVersion first so the version store itself is fully migrated
 		//    before any version records are written for other schemas.
@@ -161,7 +207,12 @@ export class SchemaVersionService implements IComponent {
 		const currentVersion = EntitySchemaHelper.getVersion(schema);
 
 		// Find the entity-storage connector whose schema type matches this schema name.
-		const connector = this.findConnector(schemaName);
+		// For SchemaVersion itself, use the injected connector directly rather than re-discovering
+		// it through the factory, which could resolve a different instance than _versionConnector.
+		const connector =
+			schemaName === nameof(SchemaVersion)
+				? this._versionConnector
+				: SchemaVersionService.findConnector(schemaName);
 		if (!connector) {
 			// No connector registered for this schema — nothing to migrate.
 			return;
@@ -267,31 +318,10 @@ export class SchemaVersionService implements IComponent {
 	 * @internal
 	 */
 	private async writeVersion(schemaName: string, version: number): Promise<void> {
-		await this._schemaVersionConnector.set({
+		await this._versionConnector.set({
 			schemaName,
 			version,
 			updatedAt: new Date().toISOString()
 		});
-	}
-
-	/**
-	 * Searches EntityStorageConnectorFactory for the connector whose registered schema type
-	 * matches the given schema name.
-	 * @param schemaName The entity type name to look up.
-	 * @returns The matching connector, or undefined if none is registered.
-	 * @internal
-	 */
-	private findConnector(schemaName: string): IEntityStorageConnector | undefined {
-		for (const name of EntityStorageConnectorFactory.names()) {
-			try {
-				const connector = EntityStorageConnectorFactory.get(name);
-				if (connector.getSchema?.().type === schemaName) {
-					return connector;
-				}
-			} catch {
-				// Connector not yet created or registration issue — skip.
-			}
-		}
-		return undefined;
 	}
 }

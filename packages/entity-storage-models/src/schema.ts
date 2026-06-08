@@ -5,7 +5,7 @@ import { nameof } from "@twin.org/nameof";
 import { SchemaVersion } from "./entities/schemaVersion.js";
 
 /**
- * Initialize the schema for the entity storage.
+ * Initialize the schema for the entity storage models.
  */
 export function initSchema(): void {
 	EntitySchemaFactory.register(nameof<SchemaVersion>(), () =>

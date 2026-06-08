@@ -1,10 +1,1 @@
-{
-	"error": {
-		"schemaVersionService": {
-			"storedVersionNewer": "Stored schema version ({stored}) for \"{schemaName}\" is newer than the current version ({current}). Downgrade is not supported.",
-			"noMigrationStep": "No migration step from version {missingFromVersion} to {missingToVersion} found for \"{schemaName}\". Cannot complete migration from {stored} to {current}. Register the versioned schema class \"{schemaName}V{missingFromVersion}\" in EntitySchemaFactory.",
-			"noMigrationStepTarget": "No target schema for migration step {missingFromVersion} to {missingToVersion} found for \"{schemaName}\". Cannot complete migration from {stored} to {current}. Register the versioned schema class \"{schemaName}V{missingToVersion}\" in EntitySchemaFactory.",
-			"connectorNotMigrationCapable": "Schema \"{schemaName}\" needs migration from version {stored} to {current} but its connector does not support automatic migration. Please migrate the schema manually before starting the node."
-		}
-	}
-}
+{}
