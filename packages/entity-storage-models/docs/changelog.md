@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3-next.23](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.0.3-next.22...entity-storage-models-v0.0.3-next.23) (2026-06-08)
+
+
+### Features
+
+* entity storage conditions ([#115](https://github.com/iotaledger/twin-entity-storage/issues/115)) ([7a53884](https://github.com/iotaledger/twin-entity-storage/commit/7a53884f6acb856d77733e4e0f23ec1c00b74cb4))
+
 ## [0.0.3-next.22](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.0.3-next.21...entity-storage-models-v0.0.3-next.22) (2026-06-08)
 
 
