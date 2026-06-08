@@ -34,9 +34,9 @@
 		"@twin.org/nameof": "next",
 		"@twin.org/entity-storage-models": "0.0.3-next.22",
 		"@twin.org/logging-models": "next",
-		"@aws-sdk/client-dynamodb": "3.1050",
-		"@aws-sdk/lib-dynamodb": "3.1050",
-		"@aws-sdk/util-dynamodb": "3.996"
+		"@aws-sdk/client-dynamodb": "3.1063.0",
+		"@aws-sdk/lib-dynamodb": "3.1063.0",
+		"@aws-sdk/util-dynamodb": "3.1063.0"
 	},
 	"devDependencies": {
 		"@twin.org/entity-storage-connector-memory": "0.0.3-next.22",
