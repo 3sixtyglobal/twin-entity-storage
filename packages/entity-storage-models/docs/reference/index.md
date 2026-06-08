@@ -2,8 +2,10 @@
 
 ## Classes
 
+- [SchemaVersion](classes/SchemaVersion.md)
 - [EntityStorageHelper](classes/EntityStorageHelper.md)
 - [MigrationHelper](classes/MigrationHelper.md)
+- [SchemaVersionService](classes/SchemaVersionService.md)
 
 ## Interfaces
 
@@ -29,3 +31,7 @@
 
 - [EntityStorageConnectorFactory](variables/EntityStorageConnectorFactory.md)
 - [SchemaMigrationFactory](variables/SchemaMigrationFactory.md)
+
+## Functions
+
+- [initSchema](functions/initSchema.md)

@@ -1,11 +1,13 @@
 # Class: SchemaVersionService
 
-Service that checks and applies entity schema migrations at every node start-up.
+IComponent service that checks and applies entity schema migrations at every node start-up.
 
-This service should be registered as the first component so that its start() runs before
-any other service. By the time start() is called, all component bootstraps have completed
-(every table already exists) and EntitySchemaFactory / EntityStorageConnectorFactory are
-fully populated with every registered schema and connector.
+This service must be the first entry in coreTypeInitialisers.json. The engine iterates that
+array in order to determine start sequence — there is no engine-level priority mechanism, so
+registration position is the only guarantee that start() runs before any other service.
+By the time start() is called, all component bootstraps have completed (every table already
+exists) and EntitySchemaFactory / EntityStorageConnectorFactory are fully populated with every
+registered schema and connector.
 
 Migration mechanics: old schema versions are registered in EntitySchemaFactory by naming
 convention — current schema = "MyEntity", first history = "MyEntityV0", second = "MyEntityV1".
@@ -28,17 +30,17 @@ writes is a precondition for production; track this in the concurrency follow-up
 
 ### Constructor
 
-> **new SchemaVersionService**(`options`): `SchemaVersionService`
+> **new SchemaVersionService**(`versionConnector`): `SchemaVersionService`
 
 Create a new SchemaVersionService.
 
 #### Parameters
 
-##### options
+##### versionConnector
 
-[`ISchemaVersionServiceConstructorOptions`](../interfaces/ISchemaVersionServiceConstructorOptions.md)
+[`IEntityStorageConnector`](../interfaces/IEntityStorageConnector.md)\<[`SchemaVersion`](SchemaVersion.md)\>
 
-The constructor options.
+Entity-storage connector backed by the schemaVersion table.
 
 #### Returns
 
@@ -69,6 +71,33 @@ The class name.
 #### Implementation of
 
 `IComponent.className`
+
+***
+
+### bootstrap() {#bootstrap}
+
+> **bootstrap**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+
+Bootstraps the version-store connector so the schemaVersion table exists
+before start() attempts to read or write version records.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+An optional logging component type.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True on success.
+
+#### Implementation of
+
+`IComponent.bootstrap`
 
 ***
 

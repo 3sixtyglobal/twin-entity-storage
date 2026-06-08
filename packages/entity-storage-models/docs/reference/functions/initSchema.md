@@ -2,7 +2,7 @@
 
 > **initSchema**(): `void`
 
-Initialize the schema for the entity storage.
+Initialize the schema for the entity storage models.
 
 ## Returns
 
