@@ -17,7 +17,9 @@ import {
 	HealthStatus,
 	type IHealth,
 	Is,
-	ObjectHelper
+	type IValidationFailure,
+	ObjectHelper,
+	Validation
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
@@ -743,6 +745,19 @@ export class FirestoreEntityStorageConnector<
 		);
 
 		const finalLimit = limit ?? FirestoreEntityStorageConnector._DEFAULT_LIMIT;
+
+		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
+		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+
+		if (!Is.empty(limit)) {
+			const validationFailures: IValidationFailure[] = [];
+			Validation.integer(nameof(limit), limit, validationFailures, undefined, { minValue: 1 });
+			Validation.asValidationError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"query",
+				validationFailures
+			);
+		}
 
 		try {
 			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));

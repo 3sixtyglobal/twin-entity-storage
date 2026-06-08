@@ -31,6 +31,8 @@ const SUPPORT_NOT_EQUALS = true;
 const SUPPORT_NOT_INCLUDES = true;
 // Does the connector support optional secondary index fields being null or undefined.
 const SUPPORT_NULLABLE_SECONDARY_INDEX = true;
+// Does the connector support sorting by secondary index properties.
+const SUPPORT_SECONDARY_INDEX_SORT = true;
 
 @entity()
 class SubType {
@@ -70,6 +72,9 @@ class TestType {
 
 	@property({ type: "integer", format: "int32", optional: true })
 	public counter?: number;
+
+	@property({ type: "string", optional: true })
+	public role?: string;
 }
 
 @entity()
@@ -108,6 +113,27 @@ class NullableIndexType {
 	public otherField!: string;
 }
 
+@entity()
+class ScalarArrayTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "array", optional: true })
+	public tags?: string[];
+
+	@property({ type: "array", optional: true })
+	public scores?: number[];
+}
+
+@entity()
+class ObjectJsonArrayTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "object", optional: true })
+	public keywords?: string[];
+}
+
 let currentUser = "user";
 let currentConnector: IEntityStorageConnector | undefined;
 
@@ -133,6 +159,12 @@ describe("DynamoDbEntityStorageConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<NullableIndexType>(), () =>
 			EntitySchemaHelper.getSchema(NullableIndexType)
+		);
+		EntitySchemaFactory.register(nameof<ScalarArrayTestType>(), () =>
+			EntitySchemaHelper.getSchema(ScalarArrayTestType)
+		);
+		EntitySchemaFactory.register(nameof<ObjectJsonArrayTestType>(), () =>
+			EntitySchemaHelper.getSchema(ObjectJsonArrayTestType)
 		);
 
 		createConnector = async <T>(entitySchema: string, partitionContextIds?: string[]) => {
@@ -495,6 +527,49 @@ describe("DynamoDbEntityStorageConnector", () => {
 		expect(result2.cursor).toBeUndefined();
 	});
 
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"can paginate with cursor when sorted by an indexed property",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			for (let i = 0; i < 15; i++) {
+				await connector.set({
+					id: (i + 1).toString(),
+					value1: `val${String(i).padStart(3, "0")}`,
+					value2: i
+				});
+			}
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+			const result = await connector.query(undefined, sort, undefined, undefined, 10);
+			expect(result.entities.length).toEqual(10);
+			expect(result.cursor).toBeDefined();
+			const result2 = await connector.query(undefined, sort, undefined, result.cursor, 10);
+			expect(result2.entities.length).toEqual(5);
+			expect(result2.cursor).toBeUndefined();
+		}
+	);
+
+	test("can fail to query with an invalid limit", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await expect(
+			connector.query(undefined, undefined, undefined, undefined, 0)
+		).rejects.toMatchObject({
+			name: "ValidationError",
+			message: "common.validation"
+		});
+	});
+
+	test("can fail to query with an invalid property", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await expect(
+			connector.query(undefined, undefined, ["nonExistent" as keyof TestType])
+		).rejects.toMatchObject({
+			name: "GeneralError",
+			message: "entityStorageHelper.propertyNotInSchema"
+		});
+	});
+
 	test("can query with Equals condition", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());
 		for (let i = 0; i < 20; i++) {
@@ -583,6 +658,46 @@ describe("DynamoDbEntityStorageConnector", () => {
 		expect(result.entities.every((e: Partial<TestType>) => (e.value2 ?? 0) <= 20)).toBe(true);
 	});
 
+	test("can query with Equals on number field", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i * 10 });
+		}
+		const result = await connector.query({
+			property: "value2",
+			value: 20,
+			comparison: ComparisonOperator.Equals
+		});
+		expect(result.entities.length).toEqual(1);
+		expect((result.entities[0] as TestType).value2).toEqual(20);
+	});
+
+	test("can query with Equals on boolean field", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 1, isActive: true });
+		await connector.set({ id: "2", value1: "bbb", value2: 2, isActive: false });
+		await connector.set({ id: "3", value1: "ccc", value2: 3, isActive: true });
+		const result = await connector.query({
+			conditions: [{ property: "isActive", value: true, comparison: ComparisonOperator.Equals }]
+		});
+		expect(result.entities.length).toEqual(2);
+		expect(result.entities.map(e => (e as TestType).id).sort()).toEqual(["1", "3"]);
+	});
+
+	test.skipIf(!SUPPORT_NOT_EQUALS)("can query with NotEquals on number field", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i * 10 });
+		}
+		const result = await connector.query({
+			property: "value2",
+			value: 20,
+			comparison: ComparisonOperator.NotEquals
+		});
+		expect(result.entities.length).toEqual(4);
+		expect(result.entities.every((e: Partial<TestType>) => e.value2 !== 20)).toBe(true);
+	});
+
 	test("can query with In operator", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());
 		for (let i = 0; i < 10; i++) {
@@ -603,6 +718,26 @@ describe("DynamoDbEntityStorageConnector", () => {
 		expect(result.entities.length).toEqual(2);
 		expect((result.entities[0] as TestType).value1).toEqual("3");
 		expect((result.entities[1] as TestType).value1).toEqual("7");
+	});
+
+	test("can query with In operator on number field", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 5; i++) {
+			await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i * 10 });
+		}
+		const result = await connector.query({
+			conditions: [
+				{
+					property: "value2",
+					value: [0, 20, 40],
+					comparison: ComparisonOperator.In
+				}
+			]
+		});
+		expect(result.entities.length).toEqual(3);
+		expect(
+			result.entities.every((e: Partial<TestType>) => [0, 20, 40].includes(e.value2 ?? -1))
+		).toBe(true);
 	});
 
 	test("can query with empty In list returns no results without error", async () => {
@@ -756,6 +891,13 @@ describe("DynamoDbEntityStorageConnector", () => {
 		expect((result.entities[4] as TestType).id).toEqual("1");
 	});
 
+	test("throws if query sort property is not indexed", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await expect(
+			connector.query(undefined, [{ property: "value2", sortDirection: SortDirection.Ascending }])
+		).rejects.toMatchObject({ message: "entityStorageHelper.sortNotIndexed" });
+	});
+
 	test("can query with property projection", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());
 		for (let i = 0; i < 5; i++) {
@@ -766,6 +908,49 @@ describe("DynamoDbEntityStorageConnector", () => {
 		expect(result.entities[0].id).toBeDefined();
 		expect(result.entities[0].value1).toBeDefined();
 		expect(result.entities[0].value2).toBeUndefined();
+	});
+
+	test("can set and get entity with a reserved-word property", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 0, role: "admin" });
+		const result = await connector.get("1");
+		expect(result?.role).toEqual("admin");
+	});
+
+	test("can query with projection including a reserved-word property", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 0, role: "admin" });
+		const result = await connector.query(undefined, undefined, ["id", "role"]);
+		expect(result.entities.length).toEqual(1);
+		expect(result.entities[0].id).toBeDefined();
+		expect(result.entities[0].role).toEqual("admin");
+		expect(result.entities[0].value1).toBeUndefined();
+	});
+
+	test("can query filtering by a reserved-word property", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 0, role: "admin" });
+		await connector.set({ id: "2", value1: "aaa", value2: 1, role: "viewer" });
+		const result = await connector.query({
+			property: "role",
+			comparison: ComparisonOperator.Equals,
+			value: "admin"
+		});
+		expect(result.entities.length).toEqual(1);
+		expect(result.entities[0].role).toEqual("admin");
+	});
+
+	test("can count entities filtering by a reserved-word property", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "aaa", value2: 0, role: "admin" });
+		await connector.set({ id: "2", value1: "aaa", value2: 1, role: "viewer" });
+		await connector.set({ id: "3", value1: "aaa", value2: 2, role: "admin" });
+		const count = await connector.count({
+			property: "role",
+			comparison: ComparisonOperator.Equals,
+			value: "admin"
+		});
+		expect(count).toEqual(2);
 	});
 
 	test("can query with object condition", async () => {
@@ -882,6 +1067,121 @@ describe("DynamoDbEntityStorageConnector", () => {
 		});
 		expect(result.entities.length).toEqual(5);
 	});
+
+	test("can query with Includes scalar string in array-typed column", async () => {
+		const connector = await createConnector<ScalarArrayTestType>(nameof<ScalarArrayTestType>());
+		await connector.set({ id: "1", tags: ["BorderAgency", "Trade"] });
+		await connector.set({ id: "2", tags: ["Customs", "Trade"] });
+		await connector.set({ id: "3", tags: ["Finance"] });
+		const result = await connector.query({
+			conditions: [
+				{
+					property: "tags",
+					value: "BorderAgency",
+					comparison: ComparisonOperator.Includes
+				}
+			]
+		});
+		expect(result.entities.length).toEqual(1);
+		expect((result.entities[0] as ScalarArrayTestType).id).toEqual("1");
+	});
+
+	test("can query with Includes scalar string in object-typed JSON array column", async () => {
+		const connector =
+			await createConnector<ObjectJsonArrayTestType>(nameof<ObjectJsonArrayTestType>());
+		await connector.set({ id: "1", keywords: ["BorderAgency", "Trade"] });
+		await connector.set({ id: "2", keywords: ["Customs", "Trade"] });
+		await connector.set({ id: "3", keywords: ["Finance"] });
+		const result = await connector.query({
+			conditions: [
+				{
+					property: "keywords",
+					value: "BorderAgency",
+					comparison: ComparisonOperator.Includes
+				}
+			]
+		});
+		expect(result.entities.length).toEqual(1);
+		expect((result.entities[0] as ObjectJsonArrayTestType).id).toEqual("1");
+	});
+
+	test("can query with Includes scalar string matching multiple results in array-typed column", async () => {
+		const connector = await createConnector<ScalarArrayTestType>(nameof<ScalarArrayTestType>());
+		await connector.set({ id: "1", tags: ["BorderAgency", "Trade"] });
+		await connector.set({ id: "2", tags: ["Customs", "Trade"] });
+		await connector.set({ id: "3", tags: ["Finance"] });
+		const result = await connector.query({
+			conditions: [
+				{
+					property: "tags",
+					value: "Trade",
+					comparison: ComparisonOperator.Includes
+				}
+			]
+		});
+		expect(result.entities.length).toEqual(2);
+		expect(result.entities.map(e => (e as ScalarArrayTestType).id).sort()).toEqual(["1", "2"]);
+	});
+
+	test.skipIf(!SUPPORT_NOT_INCLUDES)(
+		"can query with NotIncludes scalar string in array-typed column",
+		async () => {
+			const connector = await createConnector<ScalarArrayTestType>(nameof<ScalarArrayTestType>());
+			await connector.set({ id: "1", tags: ["BorderAgency", "Trade"] });
+			await connector.set({ id: "2", tags: ["Customs", "Trade"] });
+			await connector.set({ id: "3", tags: ["Finance"] });
+			const result = await connector.query({
+				conditions: [
+					{
+						property: "tags",
+						value: "BorderAgency",
+						comparison: ComparisonOperator.NotIncludes
+					}
+				]
+			});
+			expect(result.entities.length).toEqual(2);
+			expect(result.entities.map(e => (e as ScalarArrayTestType).id).sort()).toEqual(["2", "3"]);
+		}
+	);
+
+	test("can query with Includes scalar number in array-typed column", async () => {
+		const connector = await createConnector<ScalarArrayTestType>(nameof<ScalarArrayTestType>());
+		await connector.set({ id: "1", scores: [10, 20, 30] });
+		await connector.set({ id: "2", scores: [20, 40] });
+		await connector.set({ id: "3", scores: [50, 60] });
+		const result = await connector.query({
+			conditions: [
+				{
+					property: "scores",
+					value: 20,
+					comparison: ComparisonOperator.Includes
+				}
+			]
+		});
+		expect(result.entities.length).toEqual(2);
+		expect(result.entities.map(e => (e as ScalarArrayTestType).id).sort()).toEqual(["1", "2"]);
+	});
+
+	test.skipIf(!SUPPORT_NOT_INCLUDES)(
+		"can query with NotIncludes scalar number in array-typed column",
+		async () => {
+			const connector = await createConnector<ScalarArrayTestType>(nameof<ScalarArrayTestType>());
+			await connector.set({ id: "1", scores: [10, 20, 30] });
+			await connector.set({ id: "2", scores: [20, 40] });
+			await connector.set({ id: "3", scores: [50, 60] });
+			const result = await connector.query({
+				conditions: [
+					{
+						property: "scores",
+						value: 20,
+						comparison: ComparisonOperator.NotIncludes
+					}
+				]
+			});
+			expect(result.entities.length).toEqual(1);
+			expect((result.entities[0] as ScalarArrayTestType).id).toEqual("3");
+		}
+	);
 
 	test.skipIf(!SUPPORT_DOT_NOTATION)("can query sub items in object", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());

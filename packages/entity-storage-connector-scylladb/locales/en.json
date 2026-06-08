@@ -43,7 +43,8 @@
 			"notEqualsNotSupported": "The NotEquals operator is not supported in CQL queries for property \"{property}\"",
 			"notIncludesNotSupported": "The NotIncludes operator is not supported in CQL queries for property \"{property}\"",
 			"orConditionNotSupported": "OR logical operators are not supported in CQL queries",
-			"countFailed": "Unable to count entities"
+			"countFailed": "Unable to count entities",
+			"sortOnlyPrimaryKey": "ScyllaDB only supports ORDER BY on clustering (primary key) columns; \"{property}\" is a secondary index and cannot be used for sorting"
 		}
 	},
 	"health": {

@@ -1,11 +1,12 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { Is, ObjectHelper } from "@twin.org/core";
+import { GeneralError, Is, ObjectHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	type EntityCondition,
 	EntitySchemaHelper,
-	type IEntitySchema
+	type IEntitySchema,
+	type SortDirection
 } from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
 
@@ -81,6 +82,54 @@ export class EntityStorageHelper {
 		}
 
 		return nonNullEntity as T;
+	}
+
+	/**
+	 * Validate that every sort property in the list is indexed in the schema (isPrimary, isSecondary,
+	 * or has a default sortDirection), throwing sortNotIndexed for the first violation found.
+	 * @param schema The entity schema to validate against.
+	 * @param sortProperties The sort properties to check.
+	 * @throws GeneralError If a sort property is not indexed in the schema.
+	 */
+	public static validateSortProperties<T>(
+		schema: IEntitySchema<T>,
+		sortProperties?: { property: keyof T; sortDirection: SortDirection }[]
+	): void {
+		if (Is.arrayValue(sortProperties)) {
+			for (const sortProperty of sortProperties) {
+				const propertySchema = schema.properties?.find(p => p.property === sortProperty.property);
+				if (
+					Is.undefined(propertySchema) ||
+					(!propertySchema.isPrimary &&
+						!propertySchema.isSecondary &&
+						Is.empty(propertySchema.sortDirection))
+				) {
+					throw new GeneralError(EntityStorageHelper.CLASS_NAME, "sortNotIndexed", {
+						property: sortProperty.property
+					});
+				}
+			}
+		}
+	}
+
+	/**
+	 * Validate that every property in the list exists in the schema, throwing propertyNotInSchema
+	 * for the first property that is not found.
+	 * @param schema The entity schema to validate against.
+	 * @param properties The properties to check.
+	 * @throws GeneralError If a property does not exist in the schema.
+	 */
+	public static validateProperties<T>(schema: IEntitySchema<T>, properties?: (keyof T)[]): void {
+		if (Is.arrayValue(properties)) {
+			for (const property of properties) {
+				const propertySchema = schema.properties?.find(p => p.property === property);
+				if (Is.undefined(propertySchema)) {
+					throw new GeneralError(EntityStorageHelper.CLASS_NAME, "propertyNotInSchema", {
+						property
+					});
+				}
+			}
+		}
 	}
 
 	/**

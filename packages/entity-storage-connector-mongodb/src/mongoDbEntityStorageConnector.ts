@@ -9,7 +9,9 @@ import {
 	HealthStatus,
 	type IHealth,
 	Is,
-	ObjectHelper
+	type IValidationFailure,
+	ObjectHelper,
+	Validation
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
@@ -566,6 +568,19 @@ export class MongoDbEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
+		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
+		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+
+		if (!Is.empty(limit)) {
+			const validationFailures: IValidationFailure[] = [];
+			Validation.integer(nameof(limit), limit, validationFailures, undefined, { minValue: 1 });
+			Validation.asValidationError(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				"query",
+				validationFailures
+			);
+		}
+
 		const returnSize = limit ?? MongoDbEntityStorageConnector._DEFAULT_LIMIT;
 
 		const filter = this.buildFilter(conditions, partitionKey);
@@ -913,8 +928,10 @@ export class MongoDbEntityStorageConnector<
 					const escapedValue = String(value).replace(/[$()*+.?[\\\]^{|}]/g, "\\$&");
 					return { $not: { $regex: escapedValue } };
 				}
-				// For arrays, use $elemMatch with $ne
-				return { $elemMatch: { $ne: value } };
+				// For array/object fields: $ne on an array field matches documents where
+				// none of the array elements equal the value (MongoDB element-wise semantics).
+				// $elemMatch: { $ne: value } is wrong — it matches if *any* element ≠ value.
+				return { $ne: value };
 			default:
 				throw new GeneralError(
 					MongoDbEntityStorageConnector.CLASS_NAME,

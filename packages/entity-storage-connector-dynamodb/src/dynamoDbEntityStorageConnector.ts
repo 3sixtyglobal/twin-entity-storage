@@ -32,7 +32,9 @@ import {
 	HealthStatus,
 	type IHealth,
 	Is,
-	ObjectHelper
+	type IValidationFailure,
+	ObjectHelper,
+	Validation
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
@@ -853,6 +855,19 @@ export class DynamoDbEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
+		if (!Is.empty(limit)) {
+			const validationFailures: IValidationFailure[] = [];
+			Validation.integer(nameof(limit), limit, validationFailures, undefined, { minValue: 1 });
+			Validation.asValidationError(
+				DynamoDbEntityStorageConnector.CLASS_NAME,
+				"query",
+				validationFailures
+			);
+		}
+
+		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
+		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+
 		return this.internalQuery(
 			conditions,
 			sortProperties,
@@ -1589,6 +1604,8 @@ export class DynamoDbEntityStorageConnector<
 			let indexName: string | undefined = Is.stringValue(secondaryIndex)
 				? `${secondaryIndex}Index`
 				: undefined;
+			// The attribute whose value must appear in ExclusiveStartKey when querying a GSI
+			let gsiAttribute: string | undefined = secondaryIndex;
 
 			// If we have a sortable property defined in the descriptor then we must use
 			// the secondary index for the query
@@ -1602,20 +1619,13 @@ export class DynamoDbEntityStorageConnector<
 					const propertySchema = this._entitySchema.properties?.find(
 						e => e.property === sortProperty.property
 					);
-					if (
-						Is.undefined(propertySchema) ||
-						(!propertySchema.isPrimary &&
-							!propertySchema.isSecondary &&
-							Is.empty(propertySchema.sortDirection))
-					) {
-						throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "sortNotIndexed", {
-							property: sortProperty.property
-						});
+					if (propertySchema?.isPrimary) {
+						indexName = undefined;
+						gsiAttribute = undefined;
+					} else {
+						indexName = `${sortProperty.property as string}Index`;
+						gsiAttribute = sortProperty.property as string;
 					}
-
-					indexName = propertySchema.isPrimary
-						? undefined
-						: `${sortProperty.property as string}Index`;
 					scanAscending = sortProperty.sortDirection === SortDirection.Ascending;
 				}
 			}
@@ -1652,6 +1662,7 @@ export class DynamoDbEntityStorageConnector<
 				let scanStartKey: { [id: string]: AttributeValue } | undefined = Is.empty(cursor)
 					? undefined
 					: ObjectHelper.fromBytes(Converter.base64ToBytes(cursor));
+				const scanProjection = this.buildProjectionExpression(properties, attributeNames);
 
 				do {
 					const scanResult = await dbConnection.send(
@@ -1660,7 +1671,7 @@ export class DynamoDbEntityStorageConnector<
 							FilterExpression: scanFilter,
 							ExpressionAttributeNames: attributeNames,
 							ExpressionAttributeValues: attributeValues,
-							ProjectionExpression: properties?.map(p => p as string).join(", "),
+							ProjectionExpression: scanProjection,
 							ExclusiveStartKey: scanStartKey
 						})
 					);
@@ -1697,6 +1708,7 @@ export class DynamoDbEntityStorageConnector<
 				keyExpression += ` AND ${expressions.keyCondition}`;
 			}
 
+			const queryProjection = this.buildProjectionExpression(properties, attributeNames);
 			const query = new QueryCommand({
 				TableName: this._config.tableName,
 				IndexName: indexName,
@@ -1706,7 +1718,7 @@ export class DynamoDbEntityStorageConnector<
 					: undefined,
 				ExpressionAttributeNames: attributeNames,
 				ExpressionAttributeValues: attributeValues,
-				ProjectionExpression: properties?.map(p => p as string).join(", "),
+				ProjectionExpression: queryProjection,
 				Limit: returnSize + 1,
 				ScanIndexForward: scanAscending,
 				ExclusiveStartKey: Is.empty(cursor)
@@ -1732,8 +1744,8 @@ export class DynamoDbEntityStorageConnector<
 						lastRawItem[DynamoDbEntityStorageConnector._PARTITION_KEY],
 					[this._primaryKey.property as string]: lastRawItem[this._primaryKey.property as string]
 				};
-				if (Is.stringValue(secondaryIndex)) {
-					syntheticKey[secondaryIndex] = lastRawItem[secondaryIndex];
+				if (Is.stringValue(gsiAttribute)) {
+					syntheticKey[gsiAttribute] = lastRawItem[gsiAttribute];
 				}
 				resultCursor = Converter.bytesToBase64(ObjectHelper.toBytes(syntheticKey));
 			}
@@ -1806,5 +1818,30 @@ export class DynamoDbEntityStorageConnector<
 			conditionExpression = expressions.join(" AND ");
 		}
 		return { conditionExpression, attributeNames, attributeValues };
+	}
+
+	/**
+	 * Build a ProjectionExpression string and register a safe alias in attributeNames for every
+	 * projected property, preventing ValidationException when a property name is a DynamoDB
+	 * reserved word (e.g. "role", "name", "status").
+	 * @param properties The properties to project, or undefined to return all attributes.
+	 * @param attributeNames The expression attribute names map to mutate with the aliases.
+	 * @returns The ProjectionExpression string, or undefined when no projection is needed.
+	 * @internal
+	 */
+	private buildProjectionExpression(
+		properties: (keyof T)[] | undefined,
+		attributeNames: { [id: string]: string }
+	): string | undefined {
+		if (!Is.arrayValue(properties)) {
+			return undefined;
+		}
+		return properties
+			.map(p => {
+				const alias = `#p_${p as string}`;
+				attributeNames[alias] = p as string;
+				return alias;
+			})
+			.join(", ");
 	}
 }

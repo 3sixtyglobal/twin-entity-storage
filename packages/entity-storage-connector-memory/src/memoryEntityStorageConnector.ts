@@ -8,7 +8,9 @@ import {
 	HealthStatus,
 	type IHealth,
 	Is,
-	ObjectHelper
+	type IValidationFailure,
+	ObjectHelper,
+	Validation
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
@@ -310,6 +312,19 @@ export class MemoryEntityStorageConnector<T = unknown>
 	}> {
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
+		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+
+		if (!Is.empty(limit)) {
+			const validationFailures: IValidationFailure[] = [];
+			Validation.integer(nameof(limit), limit, validationFailures, undefined, { minValue: 1 });
+			Validation.asValidationError(
+				MemoryEntityStorageConnector.CLASS_NAME,
+				"query",
+				validationFailures
+			);
+		}
 
 		let allEntities = this._store.slice();
 

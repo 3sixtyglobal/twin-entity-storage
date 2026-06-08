@@ -10,8 +10,10 @@ import {
 	HealthStatus,
 	type IHealth,
 	Is,
+	type IValidationFailure,
 	ObjectHelper,
-	SharedStore
+	SharedStore,
+	Validation
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
@@ -678,6 +680,19 @@ export class MySqlEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
+		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
+		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+
+		if (!Is.empty(limit)) {
+			const validationFailures: IValidationFailure[] = [];
+			Validation.integer(nameof(limit), limit, validationFailures, undefined, { minValue: 1 });
+			Validation.asValidationError(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				"query",
+				validationFailures
+			);
+		}
+
 		let sql = "";
 		try {
 			const returnSize = limit ?? MySqlEntityStorageConnector._DEFAULT_LIMIT;
@@ -1227,6 +1242,8 @@ export class MySqlEntityStorageConnector<
 					values.push(`%${String(comparator.value).toLowerCase()}%`);
 					return `LOWER(\`${prop}\`) LIKE ?`;
 				}
+				values.pop();
+				values.push(JSON.stringify(comparator.value));
 				return `JSON_CONTAINS(\`${prop}\`, ?)`;
 			}
 			case ComparisonOperator.NotIncludes: {
@@ -1235,6 +1252,8 @@ export class MySqlEntityStorageConnector<
 					values.push(`%${String(comparator.value).toLowerCase()}%`);
 					return `LOWER(\`${prop}\`) NOT LIKE ?`;
 				}
+				values.pop();
+				values.push(JSON.stringify(comparator.value));
 				return `NOT JSON_CONTAINS(\`${prop}\`, ?)`;
 			}
 			default:

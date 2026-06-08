@@ -1,7 +1,15 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdHelper, ContextIdStore } from "@twin.org/context";
-import { Coerce, ComponentFactory, GeneralError, Guards, Is } from "@twin.org/core";
+import {
+	Coerce,
+	ComponentFactory,
+	GeneralError,
+	Guards,
+	Is,
+	type IValidationFailure,
+	Validation
+} from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -260,6 +268,35 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
+		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+
+		if (!Is.empty(limit)) {
+			const validationFailures: IValidationFailure[] = [];
+			Validation.integer(nameof(limit), limit, validationFailures, undefined, { minValue: 1 });
+			Validation.asValidationError(
+				AbstractScyllaDBConnector.CLASS_NAME,
+				"query",
+				validationFailures
+			);
+		}
+
+		// CQL ORDER BY is only valid on clustering columns (isPrimary). Secondary-index
+		// properties cannot be used; throw before reaching the try-catch so the error
+		// surfaces directly to the caller without being wrapped as findFailed.
+		if (Is.arrayValue(sortProperties)) {
+			for (const sortProperty of sortProperties) {
+				const propertySchema = this._entitySchema.properties?.find(
+					p => p.property === sortProperty.property
+				);
+				if (!propertySchema?.isPrimary) {
+					throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "sortOnlyPrimaryKey", {
+						property: sortProperty.property
+					});
+				}
+			}
+		}
 
 		// Validates and throws for unsupported conditions before entering the try-catch
 		// so that comparisonNotSupported errors surface directly to the caller.

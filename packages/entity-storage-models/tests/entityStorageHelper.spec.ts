@@ -1,16 +1,33 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import { BaseError, GeneralError } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
 	LogicalOperator,
+	SortDirection,
 	entity,
 	property
 } from "@twin.org/entity";
 import type { EntityCondition, IComparator } from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
 import { EntityStorageHelper } from "../src/helpers/entityStorageHelper.js";
+
+@entity()
+class SortTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", isSecondary: true })
+	public tenant!: string;
+
+	@property({ type: "string", sortDirection: SortDirection.Ascending })
+	public name!: string;
+
+	@property({ type: "string" })
+	public plain!: string;
+}
 
 @entity()
 class RequiredOnlyType {
@@ -49,6 +66,9 @@ describe("EntityStorageHelper.prepareEntity", () => {
 		);
 		EntitySchemaFactory.register(nameof<MixedType>(), () =>
 			EntitySchemaHelper.getSchema(MixedType)
+		);
+		EntitySchemaFactory.register(nameof<SortTestType>(), () =>
+			EntitySchemaHelper.getSchema(SortTestType)
 		);
 	});
 
@@ -287,5 +307,127 @@ describe("EntityStorageHelper.normalizeConditionValues", () => {
 		};
 		EntityStorageHelper.normalizeConditionValues(condition);
 		expect(leaf.value).toBeUndefined();
+	});
+});
+
+describe("EntityStorageHelper.validateSortProperties", () => {
+	let schema: ReturnType<typeof EntitySchemaHelper.getSchema<SortTestType>>;
+
+	beforeAll(() => {
+		schema = EntitySchemaFactory.get(nameof<SortTestType>());
+	});
+
+	test("does not throw when sortProperties is undefined", () => {
+		expect(() => EntityStorageHelper.validateSortProperties(schema, undefined)).not.toThrow();
+	});
+
+	test("does not throw when sortProperties is an empty array", () => {
+		expect(() => EntityStorageHelper.validateSortProperties(schema, [])).not.toThrow();
+	});
+
+	test("does not throw for a primary key property", () => {
+		expect(() =>
+			EntityStorageHelper.validateSortProperties(schema, [
+				{ property: "id", sortDirection: SortDirection.Ascending }
+			])
+		).not.toThrow();
+	});
+
+	test("does not throw for a secondary index property", () => {
+		expect(() =>
+			EntityStorageHelper.validateSortProperties(schema, [
+				{ property: "tenant", sortDirection: SortDirection.Ascending }
+			])
+		).not.toThrow();
+	});
+
+	test("does not throw for a property with a default sortDirection", () => {
+		expect(() =>
+			EntityStorageHelper.validateSortProperties(schema, [
+				{ property: "name", sortDirection: SortDirection.Descending }
+			])
+		).not.toThrow();
+	});
+
+	test("throws GeneralError for a plain non-indexed property", () => {
+		expect(() =>
+			EntityStorageHelper.validateSortProperties(schema, [
+				{ property: "plain", sortDirection: SortDirection.Ascending }
+			])
+		).toThrow(GeneralError);
+	});
+
+	test("throws GeneralError for a property not present in the schema", () => {
+		expect(() =>
+			EntityStorageHelper.validateSortProperties(schema, [
+				{ property: "nonExistent" as keyof SortTestType, sortDirection: SortDirection.Ascending }
+			])
+		).toThrow(GeneralError);
+	});
+
+	test("error message is sortNotIndexed for a plain non-indexed property", () => {
+		expect.assertions(1);
+		try {
+			EntityStorageHelper.validateSortProperties(schema, [
+				{ property: "plain", sortDirection: SortDirection.Ascending }
+			]);
+		} catch (err) {
+			expect(BaseError.isErrorMessage(err, "entityStorageHelper.sortNotIndexed")).toBe(true);
+		}
+	});
+
+	test("error message is sortNotIndexed for a property not in schema", () => {
+		expect.assertions(1);
+		try {
+			EntityStorageHelper.validateSortProperties(schema, [
+				{
+					property: "nonExistent" as keyof SortTestType,
+					sortDirection: SortDirection.Ascending
+				}
+			]);
+		} catch (err) {
+			expect(BaseError.isErrorMessage(err, "entityStorageHelper.sortNotIndexed")).toBe(true);
+		}
+	});
+});
+
+describe("EntityStorageHelper.validateProperties", () => {
+	let schema: ReturnType<typeof EntitySchemaHelper.getSchema<SortTestType>>;
+
+	beforeAll(() => {
+		schema = EntitySchemaFactory.get(nameof<SortTestType>());
+	});
+
+	test("does not throw when properties is undefined", () => {
+		expect(() => EntityStorageHelper.validateProperties(schema, undefined)).not.toThrow();
+	});
+
+	test("does not throw when properties is an empty array", () => {
+		expect(() => EntityStorageHelper.validateProperties(schema, [])).not.toThrow();
+	});
+
+	test("does not throw for a valid property in the schema", () => {
+		expect(() => EntityStorageHelper.validateProperties(schema, ["id"])).not.toThrow();
+	});
+
+	test("does not throw for multiple valid properties", () => {
+		expect(() =>
+			EntityStorageHelper.validateProperties(schema, ["id", "tenant", "name", "plain"])
+		).not.toThrow();
+	});
+
+	test("throws GeneralError for a property not present in the schema", () => {
+		expect(() =>
+			EntityStorageHelper.validateProperties(schema, ["nonExistent" as keyof SortTestType])
+		).toThrow(GeneralError);
+	});
+
+	test("error message is propertyNotInSchema for a property not in the schema", () => {
+		expect.assertions(1);
+		try {
+			EntityStorageHelper.validateProperties(schema, ["nonExistent" as keyof SortTestType]);
+		} catch (err) {
+			expect(BaseError.isErrorMessage(err, "entityStorageHelper.propertyNotInSchema")).toBe(true);
+		}
 	});
 });

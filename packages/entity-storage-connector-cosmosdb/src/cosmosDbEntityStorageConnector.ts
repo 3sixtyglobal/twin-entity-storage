@@ -23,7 +23,9 @@ import {
 	HealthStatus,
 	type IHealth,
 	Is,
-	ObjectHelper
+	type IValidationFailure,
+	ObjectHelper,
+	Validation
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
@@ -710,6 +712,19 @@ export class CosmosDbEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
+		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
+		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+
+		if (!Is.empty(limit)) {
+			const validationFailures: IValidationFailure[] = [];
+			Validation.integer(nameof(limit), limit, validationFailures, undefined, { minValue: 1 });
+			Validation.asValidationError(
+				CosmosDbEntityStorageConnector.CLASS_NAME,
+				"query",
+				validationFailures
+			);
+		}
+
 		try {
 			const returnSize = limit ?? CosmosDbEntityStorageConnector._DEFAULT_LIMIT;
 
@@ -719,19 +734,6 @@ export class CosmosDbEntityStorageConnector<
 					throw new GeneralError(CosmosDbEntityStorageConnector.CLASS_NAME, "sortSingle");
 				}
 				for (const sortProperty of sortProperties) {
-					const propertySchema = this._entitySchema.properties?.find(
-						e => e.property === sortProperty.property
-					);
-					if (
-						!propertySchema ||
-						(!propertySchema.isPrimary &&
-							!propertySchema.isSecondary &&
-							!propertySchema.sortDirection)
-					) {
-						throw new GeneralError(CosmosDbEntityStorageConnector.CLASS_NAME, "sortNotIndexed", {
-							property: sortProperty.property
-						});
-					}
 					const direction = sortProperty.sortDirection === SortDirection.Ascending ? "asc" : "desc";
 					orderByClause = `ORDER BY c.${String(sortProperty.property)} ${direction}`;
 				}
@@ -745,45 +747,38 @@ export class CosmosDbEntityStorageConnector<
 				queryClause = ` AND ${queryClause}`;
 			}
 
-			sql = `SELECT ${properties ? properties.map(p => `c.${p as string}`).join(", ") : "*"} FROM c WHERE c.${CosmosDbEntityStorageConnector._PARTITION_KEY} = @partitionId ${queryClause} ${orderByClause}`;
-			const querySpecs: SqlQuerySpec = {
-				query: sql,
-				parameters: [
-					{
-						name: "@partitionId",
-						value: partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
-					},
-					...Object.keys(attributeValues).map(
-						key => ({ name: `@${key}`, value: attributeValues[key] }) as SqlParameter
-					)
-				]
-			};
+			const selectClause = properties ? properties.map(p => `c.${p as string}`).join(", ") : "*";
+			const baseQuery = `SELECT ${selectClause} FROM c WHERE c.${CosmosDbEntityStorageConnector._PARTITION_KEY} = @partitionId${queryClause}`;
+			const queryParameters: SqlParameter[] = [
+				{
+					name: "@partitionId",
+					value: partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
+				},
+				...Object.keys(attributeValues).map(
+					key => ({ name: `@${key}`, value: attributeValues[key] }) as SqlParameter
+				)
+			];
+			const queryPartitionKey = partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE;
 
-			const feedOptions: FeedOptions = {
-				maxItemCount: returnSize,
-				continuationToken: cursor
-			};
-
-			const feedResponse = await this._container.items.query(querySpecs, feedOptions).fetchNext();
-
-			// CosmosDB returns a continuation token even on the last page, so peek ahead
-			// to confirm there are actually more results before exposing the cursor.
-			let resultCursor: string | undefined;
-			if (feedResponse.resources.length >= returnSize && feedResponse.continuationToken) {
-				const peekResponse = await this._container.items
-					.query(querySpecs, {
-						maxItemCount: 1,
-						continuationToken: feedResponse.continuationToken
-					})
-					.fetchNext();
-				if (peekResponse.resources.length > 0) {
-					resultCursor = feedResponse.continuationToken;
-				}
-			}
-
+			// For sorted queries use OFFSET LIMIT — CosmosDB continuation tokens are
+			// not reliably returned for ORDER BY queries across all service versions.
+			// The cursor is a numeric offset encoded as a string (same as SQL connectors).
+			const startIndex = Coerce.number(cursor) ?? 0;
+			sql = `${baseQuery} ${orderByClause} OFFSET ${startIndex} LIMIT ${returnSize + 1}`;
+			const sortedQuerySpecs: SqlQuerySpec = { query: sql, parameters: queryParameters };
+			const sortedResponse = await this._container.items
+				.query(sortedQuerySpecs, {
+					partitionKey: queryPartitionKey,
+					maxItemCount: returnSize + 1
+				})
+				.fetchNext();
+			const allItems = sortedResponse.resources;
+			const hasMore = allItems.length > returnSize;
 			return {
-				entities: feedResponse.resources.map(i => this.itemToEntity(i)),
-				cursor: resultCursor
+				entities: (hasMore ? allItems.slice(0, returnSize) : allItems).map(i =>
+					this.itemToEntity(i)
+				),
+				cursor: hasMore ? Coerce.string(startIndex + returnSize) : undefined
 			};
 		} catch (err) {
 			throw new GeneralError(
