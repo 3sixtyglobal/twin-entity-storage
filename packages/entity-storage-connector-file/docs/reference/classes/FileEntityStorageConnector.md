@@ -10,7 +10,7 @@ Class for performing entity storage operations in file.
 
 ## Implements
 
-- `IEntityStorageConnector`\<`T`\>
+- `IEntityStorageMigrationConnector`\<`T`\>
 
 ## Constructors
 
@@ -64,7 +64,7 @@ True if the bootstrapping process was successful.
 
 #### Implementation of
 
-`IEntityStorageConnector.bootstrap`
+`IEntityStorageMigrationConnector.bootstrap`
 
 ***
 
@@ -82,7 +82,7 @@ The class name of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.className`
+`IEntityStorageMigrationConnector.className`
 
 ***
 
@@ -100,7 +100,7 @@ The health status of the component, can return multiple entries for elements wit
 
 #### Implementation of
 
-`IEntityStorageConnector.health`
+`IEntityStorageMigrationConnector.health`
 
 ***
 
@@ -118,7 +118,7 @@ The schema for the entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.getSchema`
+`IEntityStorageMigrationConnector.getSchema`
 
 ***
 
@@ -156,7 +156,7 @@ The object if it can be found or undefined.
 
 #### Implementation of
 
-`IEntityStorageConnector.get`
+`IEntityStorageMigrationConnector.get`
 
 ***
 
@@ -188,7 +188,7 @@ The id of the entity.
 
 #### Implementation of
 
-`IEntityStorageConnector.set`
+`IEntityStorageMigrationConnector.set`
 
 ***
 
@@ -214,7 +214,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.setBatch`
+`IEntityStorageMigrationConnector.setBatch`
 
 ***
 
@@ -232,7 +232,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.empty`
+`IEntityStorageMigrationConnector.empty`
 
 ***
 
@@ -258,7 +258,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.removeBatch`
+`IEntityStorageMigrationConnector.removeBatch`
 
 ***
 
@@ -284,7 +284,7 @@ True if the teardown process was successful.
 
 #### Implementation of
 
-`IEntityStorageConnector.teardown`
+`IEntityStorageMigrationConnector.teardown`
 
 ***
 
@@ -316,7 +316,7 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.remove`
+`IEntityStorageMigrationConnector.remove`
 
 ***
 
@@ -367,7 +367,7 @@ and a cursor which can be used to request more entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.query`
+`IEntityStorageMigrationConnector.query`
 
 ***
 
@@ -393,7 +393,7 @@ The total count of entities in the storage.
 
 #### Implementation of
 
-`IEntityStorageConnector.count`
+`IEntityStorageMigrationConnector.count`
 
 ***
 
@@ -408,6 +408,10 @@ Get a unique list of all the context ids from the storage.
 `Promise`\<`IContextIds`[]\>
 
 The list of unique context ids.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.getPartitionContextIds`
 
 ***
 
@@ -436,6 +440,10 @@ The name of the new entity schema to create the connector for.
 `Promise`\<`IEntityStorageConnector`\<`U`\>\>
 
 Connector for performing the migration.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.createTargetConnector`
 
 ***
 
@@ -477,6 +485,10 @@ The optional component type to use for logging the migration progress.
 
 A promise that resolves when the migration is finalized.
 
+#### Implementation of
+
+`IEntityStorageMigrationConnector.finalizeMigration`
+
 ***
 
 ### cleanupMigration() {#cleanupmigration}
@@ -516,3 +528,7 @@ The optional component type to use for logging the migration progress.
 `Promise`\<`void`\>
 
 A promise that resolves when the migration is cleaned up.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.cleanupMigration`

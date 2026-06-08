@@ -11,7 +11,7 @@ Class for performing entity storage operations in-memory.
 ## Implements
 
 - `IEntityStorageConnector`\<`T`\>
-- `IEntityStorageMigrationConnector`
+- `IEntityStorageMigrationConnector`\<`T`\>
 
 ## Constructors
 
