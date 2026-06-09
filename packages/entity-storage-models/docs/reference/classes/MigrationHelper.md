@@ -24,56 +24,93 @@ Runtime name for the class.
 
 ## Methods
 
-### applyEntityTransform() {#applyentitytransform}
+### migrateWithChain() {#migratewithchain}
 
-> `static` **applyEntityTransform**\<`T`, `U`\>(`entity`, `schemaDiff`, `transformEntityProperty?`): `U`
+> `static` **migrateWithChain**(`sourceConnector`, `targetSchemaName`, `steps`, `options?`, `loggingComponentType?`): `Promise`\<\{ `finalConnector`: [`IEntityStorageConnector`](../interfaces/IEntityStorageConnector.md); `migrated`: `number`; \}\>
 
-Applies the entity transformation for a single diff, handling added, removed, and
-modified properties according to the provided schema diff and optional transform hook.
-
-#### Type Parameters
-
-##### T
-
-`T` = `unknown`
-
-##### U
-
-`U` = `unknown`
+Performs a chain migration in a single connector swap, regardless of how many version
+steps the chain spans. Creates one target connector, reads all source entities, applies
+applyEntityChain to each, writes them to the target, then finalizes the migration.
+A chain of one step is equivalent to a traditional single-step migration.
 
 #### Parameters
 
-##### entity
+##### sourceConnector
 
-`Partial`\<`T`\>
+[`IEntityStorageMigrationConnector`](../interfaces/IEntityStorageMigrationConnector.md)
 
-The entity to transform.
+The connector holding data at the stored schema version.
 
-##### schemaDiff
+##### targetSchemaName
 
-`IEntitySchemaDiff`\<`T`, `U`\>
+`string`
 
-The schema diff between the old and new schemas.
+The schema name for the current version (used to create the target connector).
 
-##### transformEntityProperty?
+##### steps
 
-(`schema1Property`, `schemaProperty2`, `value`) => `unknown`
+[`IResolvedMigrationStep`](../interfaces/IResolvedMigrationStep.md)\<`unknown`, `unknown`\>[]
 
-Optional per-property transform hook for object/array properties.
+Ordered, fully-resolved migration steps from stored to current version.
+
+##### options?
+
+[`IMigrationOptions`](../interfaces/IMigrationOptions.md)
+
+Optional migration options.
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging the migration progress.
 
 #### Returns
 
-`U`
+`Promise`\<\{ `finalConnector`: [`IEntityStorageConnector`](../interfaces/IEntityStorageConnector.md); `migrated`: `number`; \}\>
 
-The transformed entity ready to be written to the new schema.
+The finalized connector and the count of migrated entities.
 
-#### Throws
+***
 
-GeneralError if a transformation is required for an object or array property but no transformEntityProperty function is provided.
+### migratePartitionWithChain() {#migratepartitionwithchain}
 
-#### Throws
+> `static` **migratePartitionWithChain**(`source`, `target`, `steps`, `options?`): `Promise`\<`number`\>
 
-GeneralError if coercion of a modified property results in undefined for a non-optional target property.
+Reads all entities from one partition of the source connector, applies the migration
+chain to each entity, and writes the results to the target connector.
+
+#### Parameters
+
+##### source
+
+[`IEntityStorageMigrationConnector`](../interfaces/IEntityStorageMigrationConnector.md)
+
+The connector to read from (already bootstrapped).
+
+##### target
+
+[`IEntityStorageConnector`](../interfaces/IEntityStorageConnector.md)
+
+The connector to write to (already bootstrapped).
+
+##### steps
+
+[`IResolvedMigrationStep`](../interfaces/IResolvedMigrationStep.md)\<`unknown`, `unknown`\>[]
+
+Ordered, fully-resolved migration steps.
+
+##### options?
+
+[`IMigrationOptions`](../interfaces/IMigrationOptions.md)
+
+Optional migration options (batchSize, progress callbacks, transformEntityProperty).
+
+#### Returns
+
+`Promise`\<`number`\>
+
+The number of entities migrated.
 
 ***
 
@@ -109,49 +146,53 @@ The entity transformed to the shape described by steps[last].toProperties.
 
 ***
 
-### migrateWithChain() {#migratewithchain}
+### applyEntityTransform() {#applyentitytransform}
 
-> `static` **migrateWithChain**(`sourceConnector`, `targetSchemaName`, `steps`, `loggingComponentType?`, `batchSize?`): `Promise`\<\{ `finalConnector`: [`IEntityStorageConnector`](../interfaces/IEntityStorageConnector.md); `migrated`: `number`; \}\>
+> `static` **applyEntityTransform**\<`T`, `U`\>(`entity`, `schemaDiff`, `transformEntityProperty?`): `U`
 
-Performs a chain migration in a single connector swap, regardless of how many version
-steps the chain spans. Creates one target connector, reads all source entities, applies
-applyEntityChain to each, writes them to the target, then finalizes the migration.
-A chain of one step is equivalent to a traditional single-step migration.
+Applies the entity transformation for a single diff, handling added, removed, and
+modified properties according to the provided schema diff and optional transform hook.
+
+#### Type Parameters
+
+##### T
+
+`T` = `unknown`
+
+##### U
+
+`U` = `unknown`
 
 #### Parameters
 
-##### sourceConnector
+##### entity
 
-[`IEntityStorageMigrationConnector`](../interfaces/IEntityStorageMigrationConnector.md)
+`Partial`\<`T`\>
 
-The connector holding data at the stored schema version.
+The entity to transform.
 
-##### targetSchemaName
+##### schemaDiff
 
-`string`
+`IEntitySchemaDiff`\<`T`, `U`\>
 
-The schema name for the current version (used to create the target connector).
+The schema diff between the old and new schemas.
 
-##### steps
+##### transformEntityProperty?
 
-[`IResolvedMigrationStep`](../interfaces/IResolvedMigrationStep.md)\<`unknown`, `unknown`\>[]
+[`EntityPropertyTransformer`](../type-aliases/EntityPropertyTransformer.md)\<`T`, `U`\>
 
-Ordered, fully-resolved migration steps from stored to current version.
-
-##### loggingComponentType?
-
-`string`
-
-An optional logging component type for connector startup.
-
-##### batchSize?
-
-`number` = `100`
-
-Number of entities to read and write per batch. Defaults to 100.
+Optional per-property transform hook for object/array properties.
 
 #### Returns
 
-`Promise`\<\{ `finalConnector`: [`IEntityStorageConnector`](../interfaces/IEntityStorageConnector.md); `migrated`: `number`; \}\>
+`U`
 
-The finalized connector and the count of migrated entities.
+The transformed entity ready to be written to the new schema.
+
+#### Throws
+
+GeneralError if a transformation is required for an object or array property but no transformEntityProperty function is provided.
+
+#### Throws
+
+GeneralError if coercion of a modified property results in undefined for a non-optional target property.

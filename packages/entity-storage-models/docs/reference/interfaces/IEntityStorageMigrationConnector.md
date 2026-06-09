@@ -345,7 +345,7 @@ The target connector to finalize the migration with.
 
 ##### options?
 
-[`IMigrationOptions`](IMigrationOptions.md)\<`T`, `U`\>
+[`IMigrationOptions`](IMigrationOptions.md)
 
 The options to control how the migration is finalized.
 
@@ -385,7 +385,7 @@ The target connector to cleanup the migration with.
 
 ##### options?
 
-[`IMigrationOptions`](IMigrationOptions.md)\<`T`, `U`\>
+[`IMigrationOptions`](IMigrationOptions.md)
 
 The options to control how the migration is cleaned up.
 

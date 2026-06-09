@@ -41,25 +41,22 @@ Optional property renames to apply during this step.
 
 ### transformEntityProperty? {#transformentityproperty}
 
-> `optional` **transformEntityProperty?**: (`schema1Property`, `schemaProperty2`, `value`) => `unknown`
+> `optional` **transformEntityProperty?**: [`EntityPropertyTransformer`](../type-aliases/EntityPropertyTransformer.md)\<`T`, `U`\>
 
-Optional per-property transformer for object/array properties that cannot be
-automatically coerced. T is the source entity type, U is the target entity type.
+Optional transformation for properties, usually only called for object and array types.
 
-#### Parameters
+#### Param
 
-##### schema1Property
+The property schema in the old schema.
 
-`IEntitySchemaProperty`\<`T`\>
+#### Param
 
-##### schemaProperty2
+The property schema in the new schema.
 
-`IEntitySchemaProperty`\<`U`\>
+#### Param
 
-##### value
-
-`unknown`
+The value of the property in the old schema.
 
 #### Returns
 
-`unknown`
+The transformed value to match the new schema.

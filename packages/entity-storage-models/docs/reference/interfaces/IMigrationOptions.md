@@ -1,16 +1,6 @@
-# Interface: IMigrationOptions\<T, U\>
+# Interface: IMigrationOptions
 
 Options controlling how a schema migration is executed.
-
-## Type Parameters
-
-### T
-
-`T`
-
-### U
-
-`U`
 
 ## Properties
 
@@ -28,91 +18,31 @@ Number of entities to read and write per batch.
 
 ***
 
-### transformEntityProperty? {#transformentityproperty}
+### onProgress? {#onprogress}
 
-> `optional` **transformEntityProperty?**: (`schema1Property`, `schemaProperty2`, `value`) => `unknown`
+> `optional` **onProgress?**: (`progressItem`, `itemTotal`, `itemIndex`) => `Promise`\<`void`\>
 
-Optional transformation for properties, usually only called for object and array types.
-
-#### Parameters
-
-##### schema1Property
-
-`IEntitySchemaProperty`\<`T`\>
-
-The property schema in the old schema.
-
-##### schemaProperty2
-
-`IEntitySchemaProperty`\<`U`\>
-
-The property schema in the new schema.
-
-##### value
-
-`unknown`
-
-The value of the property in the old schema.
-
-#### Returns
-
-`unknown`
-
-The transformed value to match the new schema.
-
-***
-
-### onPartitionProgress? {#onpartitionprogress}
-
-> `optional` **onPartitionProgress?**: (`rowTotal`, `rowIndex`) => `Promise`\<`void`\>
-
-Called for each partition for progress tracking.
+Called for progress tracking.
 
 #### Parameters
 
-##### rowTotal
+##### progressItem
 
-`number`
+`"partitionStart"` \| `"partitionProgress"` \| `"partitionEnd"` \| `"partitionItemsStart"` \| `"partitionItemsProgress"` \| `"partitionItemsEnd"`
 
-The total number of rows to migrate.
-
-##### rowIndex
-
-`number`
-
-The number of rows migrated so far.
-
-#### Returns
-
-`Promise`\<`void`\>
-
-***
-
-### onStepProgress? {#onstepprogress}
-
-> `optional` **onStepProgress?**: (`stepKey`, `itemTotal`, `itemIndex`) => `Promise`\<`void`\>
-
-Called for overall progress tracking.
-
-#### Parameters
-
-##### stepKey
-
-`string`
-
-The key representing the current step in the migration.
+The item progress being updated.
 
 ##### itemTotal
 
 `number`
 
-The total number of items in this progress.
+The total number of rows to migrate.
 
 ##### itemIndex
 
 `number`
 
-The number of items processed so far.
+The number of rows migrated so far.
 
 #### Returns
 

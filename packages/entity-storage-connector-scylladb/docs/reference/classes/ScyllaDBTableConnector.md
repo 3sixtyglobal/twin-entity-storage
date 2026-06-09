@@ -527,7 +527,7 @@ The connector pointing to the migration table.
 
 ##### options?
 
-`IMigrationOptions`\<`T`, `U`\>
+`IMigrationOptions`
 
 The optional migration options.
 
@@ -571,7 +571,7 @@ The connector pointing to the migration table.
 
 ##### options?
 
-`IMigrationOptions`\<`T`, `U`\>
+`IMigrationOptions`
 
 The optional migration options.
 

@@ -1,6 +1,6 @@
 # Class: SchemaVersionService
 
-IComponent service that checks and applies entity schema migrations at every node start-up.
+Service that checks and applies entity schema migrations at every node start-up.
 
 This service must be the first entry in coreTypeInitialisers.json. The engine iterates that
 array in order to determine start sequence — there is no engine-level priority mechanism, so
@@ -30,17 +30,17 @@ writes is a precondition for production; track this in the concurrency follow-up
 
 ### Constructor
 
-> **new SchemaVersionService**(`versionConnector`): `SchemaVersionService`
+> **new SchemaVersionService**(`options?`): `SchemaVersionService`
 
 Create a new SchemaVersionService.
 
 #### Parameters
 
-##### versionConnector
+##### options?
 
-[`IEntityStorageConnector`](../interfaces/IEntityStorageConnector.md)\<[`SchemaVersion`](SchemaVersion.md)\>
+[`ISchemaVersionServiceConstructorOptions`](../interfaces/ISchemaVersionServiceConstructorOptions.md)
 
-Entity-storage connector backed by the schemaVersion table.
+Optional constructor options.
 
 #### Returns
 
@@ -71,33 +71,6 @@ The class name.
 #### Implementation of
 
 `IComponent.className`
-
-***
-
-### bootstrap() {#bootstrap}
-
-> **bootstrap**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
-
-Bootstraps the version-store connector so the schemaVersion table exists
-before start() attempts to read or write version records.
-
-#### Parameters
-
-##### nodeLoggingComponentType?
-
-`string`
-
-An optional logging component type.
-
-#### Returns
-
-`Promise`\<`boolean`\>
-
-True on success.
-
-#### Implementation of
-
-`IComponent.bootstrap`
 
 ***
 

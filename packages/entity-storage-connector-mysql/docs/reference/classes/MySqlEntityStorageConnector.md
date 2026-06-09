@@ -495,7 +495,7 @@ The connector holding the migrated data in a temporary table.
 
 ##### options?
 
-`IMigrationOptions`\<`T`, `U`\>
+`IMigrationOptions`
 
 The options to control how the migration is finalized.
 
@@ -539,7 +539,7 @@ The target connector to cleanup.
 
 ##### options?
 
-`IMigrationOptions`\<`T`, `U`\>
+`IMigrationOptions`
 
 The options to control how the migration is cleaned up.
 

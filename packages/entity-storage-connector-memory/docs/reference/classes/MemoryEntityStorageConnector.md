@@ -458,7 +458,7 @@ The target connector to finalize the migration with.
 
 ##### options?
 
-`IMigrationOptions`\<`T`, `U`\>
+`IMigrationOptions`
 
 The options to control how the migration is finalized.
 
@@ -502,7 +502,7 @@ The target connector to cleanup the migration with.
 
 ##### options?
 
-`IMigrationOptions`\<`T`, `U`\>
+`IMigrationOptions`
 
 The options to control how the migration is cleaned up.
 

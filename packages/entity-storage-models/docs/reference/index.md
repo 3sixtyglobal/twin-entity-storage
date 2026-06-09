@@ -2,10 +2,8 @@
 
 ## Classes
 
-- [SchemaVersion](classes/SchemaVersion.md)
 - [EntityStorageHelper](classes/EntityStorageHelper.md)
 - [MigrationHelper](classes/MigrationHelper.md)
-- [SchemaVersionService](classes/SchemaVersionService.md)
 
 ## Interfaces
 
@@ -27,11 +25,11 @@
 - [IEntityStorageSetBatchRequest](interfaces/IEntityStorageSetBatchRequest.md)
 - [IEntityStorageSetRequest](interfaces/IEntityStorageSetRequest.md)
 
+## Type Aliases
+
+- [EntityPropertyTransformer](type-aliases/EntityPropertyTransformer.md)
+
 ## Variables
 
 - [EntityStorageConnectorFactory](variables/EntityStorageConnectorFactory.md)
 - [SchemaMigrationFactory](variables/SchemaMigrationFactory.md)
-
-## Functions
-
-- [initSchema](functions/initSchema.md)
