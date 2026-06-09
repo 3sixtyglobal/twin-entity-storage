@@ -31,6 +31,7 @@
 		"@twin.org/context": "next",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
+		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next"
 	},
 	"devDependencies": {
