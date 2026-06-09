@@ -696,7 +696,7 @@ export class ScyllaDBTableConnector<T = unknown>
 	 */
 	public async finalizeMigration<U>(
 		targetConnector: ScyllaDBTableConnector<U>,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<ScyllaDBTableConnector<U>> {
 		// There is no rename operation in ScyllaDB, so we have to create a new table with the original name and copy the data over
@@ -735,7 +735,7 @@ export class ScyllaDBTableConnector<T = unknown>
 	 */
 	public async cleanupMigration<U>(
 		targetConnector?: ScyllaDBTableConnector<U>,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<void> {
 		// If something failed the only thing to cleanup is the migration table

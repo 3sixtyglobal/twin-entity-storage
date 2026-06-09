@@ -6,10 +6,11 @@ import {
 	type IEntitySchemaDiff,
 	type IEntitySchemaProperty
 } from "@twin.org/entity";
-import { vi } from "vitest";
+import type {
+	IEntityStorageConnector,
+	IEntityStorageMigrationConnector
+} from "@twin.org/entity-storage-models";
 import { MigrationHelper } from "../src/helpers/migrationHelper.js";
-import type { IEntityStorageConnector } from "../src/models/IEntityStorageConnector.js";
-import type { IEntityStorageMigrationConnector } from "../src/models/IEntityStorageMigrationConnector.js";
 import type { IResolvedMigrationStep } from "../src/models/IResolvedMigrationStep.js";
 
 // ---------------------------------------------------------------------------
@@ -456,7 +457,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 	function makeTargetConnector(): IEntityStorageConnector<{ [key: string]: unknown }> {
 		const written: { [key: string]: unknown }[] = [];
 		return {
-			CLASS_NAME: "TargetStub",
+			className: () => "TargetStub",
 			getSchema: vi.fn().mockReturnValue({ type: "TargetSchema", properties: v1Props }),
 			bootstrap: vi.fn().mockResolvedValue(undefined),
 			start: vi.fn().mockResolvedValue(undefined),
@@ -470,7 +471,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 			remove: vi.fn(),
 			removeBatch: vi.fn(),
 			empty: vi.fn()
-		} as unknown as IEntityStorageConnector<{ [key: string]: unknown }>;
+		};
 	}
 
 	function makeSourceConnector(
@@ -478,7 +479,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 		targetConnector: IEntityStorageConnector<{ [key: string]: unknown }>
 	): IEntityStorageMigrationConnector<{ [key: string]: unknown }> {
 		return {
-			CLASS_NAME: "SourceStub",
+			className: () => "SourceStub",
 			getSchema: vi.fn().mockReturnValue({ type: "SourceSchema", properties: v0Props }),
 			bootstrap: vi.fn().mockResolvedValue(undefined),
 			start: vi.fn().mockResolvedValue(undefined),
@@ -494,7 +495,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 			createTargetConnector: vi.fn().mockResolvedValue(targetConnector),
 			finalizeMigration: vi.fn().mockResolvedValue(targetConnector),
 			cleanupMigration: vi.fn().mockResolvedValue(undefined)
-		} as unknown as IEntityStorageMigrationConnector<{ [key: string]: unknown }>;
+		};
 	}
 
 	test("migrates entities through a single step and returns the final connector", async () => {

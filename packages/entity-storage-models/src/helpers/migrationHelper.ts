@@ -1,16 +1,27 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
-import { Coerce, GeneralError, Is, ObjectHelper } from "@twin.org/core";
+import {
+	BaseError,
+	Coerce,
+	ComponentFactory,
+	GeneralError,
+	Is,
+	ObjectHelper
+} from "@twin.org/core";
 import {
 	EntitySchemaDiffHelper,
 	EntitySchemaPropertyType,
 	type IEntitySchemaDiff
 } from "@twin.org/entity";
+import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import type { IEntityStorageConnector } from "../models/IEntityStorageConnector.js";
-import type { IEntityStorageMigrationConnector } from "../models/IEntityStorageMigrationConnector.js";
-import type { IMigrationOptions } from "../models/IMigrationOptions.js";
+import type {
+	IEntityStorageMigrationConnector,
+	IEntityStorageConnector,
+	IMigrationOptions,
+	EntityPropertyTransformer
+} from "@twin.org/entity-storage-models";
 import type { IResolvedMigrationStep } from "../models/IResolvedMigrationStep.js";
 
 /**
@@ -25,6 +36,199 @@ export class MigrationHelper {
 	public static readonly CLASS_NAME: string = nameof<MigrationHelper>();
 
 	/**
+	 * Performs a chain migration in a single connector swap, regardless of how many version
+	 * steps the chain spans. Creates one target connector, reads all source entities, applies
+	 * applyEntityChain to each, writes them to the target, then finalizes the migration.
+	 * A chain of one step is equivalent to a traditional single-step migration.
+	 * @param sourceConnector The connector holding data at the stored schema version.
+	 * @param targetSchemaName The schema name for the current version (used to create the target connector).
+	 * @param steps Ordered, fully-resolved migration steps from stored to current version.
+	 * @param options Optional migration options.
+	 * @param loggingComponentType The optional component type to use for logging the migration progress.
+	 * @returns The finalized connector and the count of migrated entities.
+	 */
+	public static async migrateWithChain(
+		sourceConnector: IEntityStorageMigrationConnector,
+		targetSchemaName: string,
+		steps: IResolvedMigrationStep[],
+		options?: IMigrationOptions,
+		loggingComponentType?: string
+	): Promise<{
+		finalConnector: IEntityStorageConnector;
+		migrated: number;
+	}> {
+		let targetConnector: IEntityStorageConnector | undefined;
+		const logging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+
+		try {
+			await logging?.log({
+				source: MigrationHelper.CLASS_NAME,
+				level: "info",
+				message: "migrateSchemaStarting",
+				data: {
+					schemaName: targetSchemaName
+				}
+			});
+
+			targetConnector = await sourceConnector.createTargetConnector(targetSchemaName);
+
+			await MigrationHelper.startupConnector(sourceConnector, loggingComponentType);
+			await MigrationHelper.startupConnector(targetConnector, loggingComponentType);
+
+			let partitionContextIds = await sourceConnector.getPartitionContextIds();
+			if (!Is.arrayValue(partitionContextIds)) {
+				partitionContextIds ??= [];
+				partitionContextIds.push({});
+			}
+
+			let migrated = 0;
+			const effectivePartitions = partitionContextIds.length > 0 ? partitionContextIds : [{}];
+
+			await options?.onProgress?.("partitionStart", effectivePartitions.length, 0);
+
+			const resolvedTarget = targetConnector;
+			for (let i = 0; i < effectivePartitions.length; i++) {
+				await options?.onProgress?.("partitionProgress", effectivePartitions.length, i);
+
+				await ContextIdStore.run(effectivePartitions[i], async () => {
+					migrated += await MigrationHelper.migratePartitionWithChain(
+						sourceConnector,
+						resolvedTarget,
+						steps,
+						options
+					);
+				});
+			}
+
+			await options?.onProgress?.(
+				"partitionEnd",
+				effectivePartitions.length,
+				effectivePartitions.length
+			);
+
+			await logging?.log({
+				source: MigrationHelper.CLASS_NAME,
+				level: "info",
+				message: "migrateSchemaFinalizing",
+				data: {
+					schemaName: targetSchemaName
+				}
+			});
+
+			const finalConnector = await sourceConnector.finalizeMigration(
+				targetConnector,
+				options,
+				loggingComponentType
+			);
+
+			await logging?.log({
+				source: MigrationHelper.CLASS_NAME,
+				level: "info",
+				message: "migrateSchemaComplete",
+				data: {
+					schemaName: targetSchemaName
+				}
+			});
+
+			return { finalConnector, migrated };
+		} catch (error) {
+			await sourceConnector.cleanupMigration(targetConnector, options, loggingComponentType);
+
+			await logging?.log({
+				source: MigrationHelper.CLASS_NAME,
+				level: "error",
+				message: "migrateSchemaFailed",
+				data: {
+					schemaName: targetSchemaName
+				},
+				error: BaseError.fromError(error)
+			});
+			throw new GeneralError(
+				MigrationHelper.CLASS_NAME,
+				"migrateSchemaFailed",
+				{ schemaName: targetSchemaName },
+				error
+			);
+		}
+	}
+
+	/**
+	 * Reads all entities from one partition of the source connector, applies the migration
+	 * chain to each entity, and writes the results to the target connector.
+	 * @param source The connector to read from (already bootstrapped).
+	 * @param target The connector to write to (already bootstrapped).
+	 * @param steps Ordered, fully-resolved migration steps.
+	 * @param options Optional migration options (batchSize, progress callbacks, transformEntityProperty).
+	 * @returns The number of entities migrated.
+	 */
+	public static async migratePartitionWithChain(
+		source: IEntityStorageMigrationConnector,
+		target: IEntityStorageConnector,
+		steps: IResolvedMigrationStep[],
+		options?: IMigrationOptions
+	): Promise<number> {
+		let migrated = 0;
+		let cursor: string | undefined;
+		const totalEntities = await source.count();
+
+		if (totalEntities > 0) {
+			await options?.onProgress?.("partitionItemsStart", totalEntities, 0);
+
+			do {
+				const page = await source.query(
+					undefined,
+					undefined,
+					undefined,
+					cursor,
+					options?.batchSize
+				);
+				cursor = page.cursor;
+
+				if (Is.arrayValue(page.entities)) {
+					const transformedBatch: unknown[] = page.entities.map(entity =>
+						MigrationHelper.applyEntityChain(entity, steps)
+					);
+					await target.setBatch(transformedBatch);
+					migrated += transformedBatch.length;
+				}
+
+				await options?.onProgress?.("partitionItemsProgress", totalEntities, migrated);
+			} while (Is.stringValue(cursor));
+
+			await options?.onProgress?.("partitionItemsEnd", totalEntities, totalEntities);
+		}
+
+		return migrated;
+	}
+
+	/**
+	 * Transforms a single entity through an ordered chain of fully-resolved migration steps.
+	 * For each step the method diffs fromProperties against toProperties, then applies
+	 * applyEntityTransform. Each step's output feeds the next step's input so that
+	 * per-step transformEntityProperty hooks are honoured throughout the chain.
+	 * @param entity The entity to transform (at the shape described by steps[0].fromProperties).
+	 * @param steps Ordered, fully-resolved migration steps from stored version to current version.
+	 * Each step's fromProperties and toProperties are resolved by the caller before invocation.
+	 * @returns The entity transformed to the shape described by steps[last].toProperties.
+	 */
+	public static applyEntityChain(entity: unknown, steps: IResolvedMigrationStep[]): unknown {
+		let current: unknown = entity;
+		for (const step of steps) {
+			const diff = EntitySchemaDiffHelper.diff(
+				step.fromProperties,
+				step.toProperties,
+				step.renames
+			);
+			current = MigrationHelper.applyEntityTransform(
+				current as Partial<unknown>,
+				diff,
+				step.transformEntityProperty
+			);
+		}
+		return current;
+	}
+
+	/**
 	 * Applies the entity transformation for a single diff, handling added, removed, and
 	 * modified properties according to the provided schema diff and optional transform hook.
 	 * @param entity The entity to transform.
@@ -37,7 +241,7 @@ export class MigrationHelper {
 	public static applyEntityTransform<T = unknown, U = unknown>(
 		entity: Partial<T>,
 		schemaDiff: IEntitySchemaDiff<T, U>,
-		transformEntityProperty?: IMigrationOptions<T, U>["transformEntityProperty"]
+		transformEntityProperty?: EntityPropertyTransformer<T, U>
 	): U {
 		const newEntity = {} as U;
 
@@ -120,142 +324,14 @@ export class MigrationHelper {
 	}
 
 	/**
-	 * Transforms a single entity through an ordered chain of fully-resolved migration steps.
-	 * For each step the method diffs fromProperties against toProperties, then applies
-	 * applyEntityTransform. Each step's output feeds the next step's input so that
-	 * per-step transformEntityProperty hooks are honoured throughout the chain.
-	 * @param entity The entity to transform (at the shape described by steps[0].fromProperties).
-	 * @param steps Ordered, fully-resolved migration steps from stored version to current version.
-	 * Each step's fromProperties and toProperties are resolved by the caller before invocation.
-	 * @returns The entity transformed to the shape described by steps[last].toProperties.
-	 */
-	public static applyEntityChain(entity: unknown, steps: IResolvedMigrationStep[]): unknown {
-		let current: unknown = entity;
-		for (const step of steps) {
-			const diff = EntitySchemaDiffHelper.diff(
-				step.fromProperties,
-				step.toProperties,
-				step.renames
-			);
-			current = MigrationHelper.applyEntityTransform(
-				current as Partial<unknown>,
-				diff,
-				step.transformEntityProperty
-			);
-		}
-		return current;
-	}
-
-	/**
-	 * Performs a chain migration in a single connector swap, regardless of how many version
-	 * steps the chain spans. Creates one target connector, reads all source entities, applies
-	 * applyEntityChain to each, writes them to the target, then finalizes the migration.
-	 * A chain of one step is equivalent to a traditional single-step migration.
-	 * @param sourceConnector The connector holding data at the stored schema version.
-	 * @param targetSchemaName The schema name for the current version (used to create the target connector).
-	 * @param steps Ordered, fully-resolved migration steps from stored to current version.
-	 * @param loggingComponentType An optional logging component type for connector startup.
-	 * @param batchSize Number of entities to read and write per batch. Defaults to 100.
-	 * @returns The finalized connector and the count of migrated entities.
-	 */
-	public static async migrateWithChain(
-		sourceConnector: IEntityStorageMigrationConnector,
-		targetSchemaName: string,
-		steps: IResolvedMigrationStep[],
-		loggingComponentType?: string,
-		batchSize = 100
-	): Promise<{
-		finalConnector: IEntityStorageConnector;
-		migrated: number;
-	}> {
-		let targetConnector: IEntityStorageConnector | undefined;
-		try {
-			targetConnector = await sourceConnector.createTargetConnector(targetSchemaName);
-
-			await MigrationHelper.startupConnector(sourceConnector, loggingComponentType);
-			await MigrationHelper.startupConnector(targetConnector, loggingComponentType);
-
-			let partitionContextIds = await sourceConnector.getPartitionContextIds();
-			if (!Is.arrayValue(partitionContextIds)) {
-				partitionContextIds ??= [];
-				partitionContextIds.push({});
-			}
-
-			let migrated = 0;
-			const effectivePartitions = partitionContextIds.length > 0 ? partitionContextIds : [{}];
-
-			const resolvedTarget = targetConnector;
-			for (const contextIds of effectivePartitions) {
-				await ContextIdStore.run(contextIds, async () => {
-					migrated += await MigrationHelper.migratePartitionWithChain(
-						sourceConnector,
-						resolvedTarget,
-						steps,
-						batchSize
-					);
-				});
-			}
-
-			const finalConnector = await sourceConnector.finalizeMigration(
-				targetConnector,
-				undefined,
-				loggingComponentType
-			);
-
-			return { finalConnector, migrated };
-		} catch (error) {
-			await sourceConnector.cleanupMigration(targetConnector, undefined, loggingComponentType);
-			throw new GeneralError(MigrationHelper.CLASS_NAME, "migrationFailed", undefined, error);
-		}
-	}
-
-	/**
-	 * Reads all entities from one partition of the source connector, applies the migration
-	 * chain to each entity, and writes the results to the target connector.
-	 * @param source The connector to read from (already bootstrapped).
-	 * @param target The connector to write to (already bootstrapped).
-	 * @param steps Ordered, fully-resolved migration steps.
-	 * @param batchSize Number of entities to read and write per batch.
-	 * @returns The number of entities migrated.
-	 * @internal
-	 */
-	private static async migratePartitionWithChain(
-		source: IEntityStorageMigrationConnector,
-		target: IEntityStorageConnector,
-		steps: IResolvedMigrationStep[],
-		batchSize: number
-	): Promise<number> {
-		let migrated = 0;
-		let cursor: string | undefined;
-		const totalEntities = await source.count();
-
-		if (totalEntities > 0) {
-			do {
-				const page = await source.query(undefined, undefined, undefined, cursor, batchSize);
-				cursor = page.cursor;
-
-				if (Is.arrayValue(page.entities)) {
-					const transformedBatch: unknown[] = page.entities.map(entity =>
-						MigrationHelper.applyEntityChain(entity, steps)
-					);
-					await target.setBatch(transformedBatch);
-					migrated += transformedBatch.length;
-				}
-			} while (Is.stringValue(cursor));
-		}
-
-		return migrated;
-	}
-
-	/**
 	 * Starts the connector by calling bootstrap and start if they are defined.
 	 * @param connector The connector to start.
-	 * @param loggingComponentType An optional logging component type.
+	 * @param loggingComponentType The optional component type to use for logging the migration progress.
 	 * @internal
 	 */
 	private static async startupConnector<T>(
 		connector: IEntityStorageConnector<T>,
-		loggingComponentType: string | undefined
+		loggingComponentType?: string
 	): Promise<void> {
 		const bootstrap = connector.bootstrap?.bind(connector);
 		if (Is.function(bootstrap)) {

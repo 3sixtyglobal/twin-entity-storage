@@ -553,7 +553,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 */
 	public async finalizeMigration<U>(
 		targetConnector: IEntityStorageConnector<U>,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<IEntityStorageConnector<U>> {
 		// Nothing to do for in-memory as the new connector is already using the correct store and schema.
@@ -571,7 +571,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 */
 	public async cleanupMigration<U>(
 		targetConnector: IEntityStorageConnector<U> | undefined,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<void> {
 		// Nothing to do for in-memory as there are no resources to cleanup.

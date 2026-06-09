@@ -435,7 +435,10 @@ describe("DynamoDbEntityStorageConnector — partitioning and migration", () => 
 				MigrationHelper.migrateWithChain(source, nameof<MigV3TypeChange>(), [
 					makeStep(source, nameof<MigV3TypeChange>())
 				])
-			).rejects.toMatchObject({ name: "GeneralError", message: "migrationHelper.migrationFailed" });
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "migrationHelper.migrateSchemaFailed"
+			});
 		});
 
 		test("rename: value is carried to the new field name", async () => {
@@ -582,8 +585,7 @@ describe("DynamoDbEntityStorageConnector — partitioning and migration", () => 
 				source,
 				nameof<MigV2>(),
 				[makeStep(source, nameof<MigV2>())],
-				undefined,
-				2
+				{ batchSize: 2 }
 			);
 
 			expect(migrated).toBe(5);
@@ -610,8 +612,7 @@ describe("DynamoDbEntityStorageConnector — partitioning and migration", () => 
 				source,
 				nameof<MigV2>(),
 				[makeStep(source, nameof<MigV2>())],
-				undefined,
-				3
+				{ batchSize: 3 }
 			);
 
 			expect(migrated).toBe(10);
@@ -650,7 +651,10 @@ describe("DynamoDbEntityStorageConnector — partitioning and migration", () => 
 				MigrationHelper.migrateWithChain(source, nameof<MigV2WithObj>(), [
 					makeStep(source, nameof<MigV2WithObj>())
 				])
-			).rejects.toMatchObject({ name: "GeneralError", message: "migrationHelper.migrationFailed" });
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "migrationHelper.migrateSchemaFailed"
+			});
 		});
 
 		test("coercion: optional field silently becomes undefined when value is not coercible", async () => {

@@ -825,7 +825,7 @@ export class MySqlEntityStorageConnector<
 	 */
 	public async finalizeMigration<U>(
 		targetConnector: MySqlEntityStorageConnector<U>,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<MySqlEntityStorageConnector<U>> {
 		// Teardown the existing table with the original name to free up the name for the new table
@@ -864,7 +864,7 @@ export class MySqlEntityStorageConnector<
 	 */
 	public async cleanupMigration<U>(
 		targetConnector: IEntityStorageConnector<U> | undefined,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<void> {
 		// If something failed the only thing to cleanup is the migration table

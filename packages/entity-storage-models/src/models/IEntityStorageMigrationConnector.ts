@@ -30,7 +30,7 @@ export interface IEntityStorageMigrationConnector<T = unknown> extends IEntitySt
 	 */
 	finalizeMigration<U>(
 		targetConnector: IEntityStorageConnector<U>,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<IEntityStorageConnector<U>>;
 
@@ -43,7 +43,7 @@ export interface IEntityStorageMigrationConnector<T = unknown> extends IEntitySt
 	 */
 	cleanupMigration<U>(
 		targetConnector: IEntityStorageConnector<U> | undefined,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<void>;
 }

@@ -714,7 +714,7 @@ export class MongoDbEntityStorageConnector<
 	 */
 	public async finalizeMigration<U>(
 		targetConnector: MongoDbEntityStorageConnector<U>,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<MongoDbEntityStorageConnector<U>> {
 		// Only rename if the migration collection was actually created (it won't exist if no
@@ -760,7 +760,7 @@ export class MongoDbEntityStorageConnector<
 	 */
 	public async cleanupMigration<U>(
 		targetConnector: IEntityStorageConnector<U> | undefined,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<void> {
 		await targetConnector?.teardown?.(loggingComponentType);

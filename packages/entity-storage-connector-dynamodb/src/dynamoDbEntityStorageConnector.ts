@@ -1026,7 +1026,7 @@ export class DynamoDbEntityStorageConnector<
 	 */
 	public async finalizeMigration<U>(
 		targetConnector: DynamoDbEntityStorageConnector<U>,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<DynamoDbEntityStorageConnector<U>> {
 		// There is no rename operation in DynamoDB so we have to create a new table with the original name and copy the data over
@@ -1069,7 +1069,7 @@ export class DynamoDbEntityStorageConnector<
 	 */
 	public async cleanupMigration<U>(
 		targetConnector: IEntityStorageConnector<U> | undefined,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<void> {
 		// If something failed the only thing to cleanup is the migration table

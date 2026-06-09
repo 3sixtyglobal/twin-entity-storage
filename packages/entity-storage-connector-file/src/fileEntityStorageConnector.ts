@@ -734,7 +734,7 @@ export class FileEntityStorageConnector<
 	 */
 	public async finalizeMigration<U>(
 		targetConnector: FileEntityStorageConnector<U>,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<IEntityStorageConnector<U>> {
 		const originalDir = this._directory;
@@ -766,7 +766,7 @@ export class FileEntityStorageConnector<
 	 */
 	public async cleanupMigration<U>(
 		targetConnector: IEntityStorageConnector<U> | undefined,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<void> {
 		await targetConnector?.teardown?.(loggingComponentType);

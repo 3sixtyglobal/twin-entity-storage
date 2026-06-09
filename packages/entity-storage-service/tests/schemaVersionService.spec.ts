@@ -1,16 +1,18 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { GuardError, GeneralError } from "@twin.org/core";
+import { GeneralError } from "@twin.org/core";
 import { EntitySchemaFactory, type IEntitySchema } from "@twin.org/entity";
+import {
+	EntityStorageConnectorFactory,
+	type IEntityStorageConnector,
+	type IEntityStorageMigrationConnector,
+	type IResolvedMigrationStep,
+	MigrationHelper,
+	SchemaMigrationFactory
+} from "@twin.org/entity-storage-models";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import type { SchemaVersion } from "../src/entities/schemaVersion.js";
-import { EntityStorageConnectorFactory } from "../src/factories/entityStorageConnectorFactory.js";
-import { SchemaMigrationFactory } from "../src/factories/schemaMigrationFactory.js";
-import { MigrationHelper } from "../src/helpers/migrationHelper.js";
-import type { IEntityStorageConnector } from "../src/models/IEntityStorageConnector.js";
-import type { IEntityStorageMigrationConnector } from "../src/models/IEntityStorageMigrationConnector.js";
-import type { IResolvedMigrationStep } from "../src/models/IResolvedMigrationStep.js";
-import { SchemaVersionService } from "../src/services/schemaVersionService.js";
+import { SchemaVersionService } from "../src/schemaVersionService.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -25,7 +27,7 @@ function makeVersionConnector(
 	bootstrapResult = true
 ): IEntityStorageConnector<SchemaVersion> {
 	return {
-		CLASS_NAME: "VersionConnectorStub",
+		className: () => "VersionConnectorStub",
 		getSchema: vi.fn().mockReturnValue(makeSchema("SchemaVersion", 0)),
 		bootstrap: vi.fn().mockResolvedValue(bootstrapResult),
 		start: vi.fn().mockResolvedValue(undefined),
@@ -37,12 +39,12 @@ function makeVersionConnector(
 		setBatch: vi.fn(),
 		count: vi.fn(),
 		empty: vi.fn()
-	} as unknown as IEntityStorageConnector<SchemaVersion>;
+	};
 }
 
 function makeMigConnector(schemaName: string, version = 0): IEntityStorageMigrationConnector {
 	return {
-		CLASS_NAME: "MigConnectorStub",
+		className: () => "MigConnectorStub",
 		getSchema: vi.fn().mockReturnValue(makeSchema(schemaName, version)),
 		bootstrap: vi.fn(),
 		start: vi.fn(),
@@ -58,12 +60,12 @@ function makeMigConnector(schemaName: string, version = 0): IEntityStorageMigrat
 		createTargetConnector: vi.fn().mockResolvedValue(undefined),
 		finalizeMigration: vi.fn().mockResolvedValue(undefined),
 		cleanupMigration: vi.fn().mockResolvedValue(undefined)
-	} as unknown as IEntityStorageMigrationConnector;
+	};
 }
 
 function makeNonMigConnector(schemaName: string, version = 0): IEntityStorageConnector {
 	return {
-		CLASS_NAME: "NonMigConnectorStub",
+		className: () => "NonMigConnectorStub",
 		getSchema: vi.fn().mockReturnValue(makeSchema(schemaName, version)),
 		bootstrap: vi.fn(),
 		start: vi.fn(),
@@ -75,7 +77,7 @@ function makeNonMigConnector(schemaName: string, version = 0): IEntityStorageCon
 		setBatch: vi.fn(),
 		count: vi.fn(),
 		empty: vi.fn()
-	} as unknown as IEntityStorageConnector;
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +97,12 @@ describe("SchemaVersionService", () => {
 		connectorNamesSpy = vi.spyOn(EntityStorageConnectorFactory, "names").mockReturnValue([]);
 		connectorGetSpy = vi
 			.spyOn(EntityStorageConnectorFactory, "get")
-			.mockReturnValue(makeNonMigConnector("Unknown"));
+			.mockImplementation((name: string) => {
+				if (name === "schema-version") {
+					return makeVersionConnector([]);
+				}
+				return makeNonMigConnector("Unknown");
+			});
 		migrateWithChainSpy = vi.spyOn(MigrationHelper, "migrateWithChain").mockResolvedValue({
 			finalConnector: undefined as unknown,
 			migrated: 0
@@ -111,30 +118,12 @@ describe("SchemaVersionService", () => {
 	// -------------------------------------------------------------------------
 
 	test("throws when constructed without a version connector", () => {
-		expect(
-			() => new SchemaVersionService(null as unknown as IEntityStorageConnector<SchemaVersion>)
-		).toThrow(GuardError);
-	});
-
-	// -------------------------------------------------------------------------
-	// bootstrap
-	// -------------------------------------------------------------------------
-
-	test("bootstrap() delegates to the version connector's bootstrap", async () => {
-		const vc = makeVersionConnector();
-		const svc = new SchemaVersionService(vc);
-		await svc.bootstrap();
-		expect(vc.bootstrap).toHaveBeenCalledOnce();
-	});
-
-	test("bootstrap() returns true when the version connector's bootstrap succeeds", async () => {
-		const result = await new SchemaVersionService(makeVersionConnector([], true)).bootstrap();
-		expect(result).toBe(true);
-	});
-
-	test("bootstrap() returns false when the version connector's bootstrap fails", async () => {
-		const result = await new SchemaVersionService(makeVersionConnector([], false)).bootstrap();
-		expect(result).toBe(false);
+		connectorGetSpy.mockImplementation(() => {
+			throw new GeneralError("EntityStorageConnectorFactory", "notFound", {
+				name: "schema-version"
+			});
+		});
+		expect(() => new SchemaVersionService()).toThrow(GeneralError);
 	});
 
 	// -------------------------------------------------------------------------
@@ -149,10 +138,16 @@ describe("SchemaVersionService", () => {
 		schemaNamesSpy.mockReturnValue([schemaName]);
 		schemaGetSpy.mockReturnValue(makeSchema(schemaName, currentVersion));
 		connectorNamesSpy.mockReturnValue([schemaName]);
-		connectorGetSpy.mockReturnValue(connector);
 
 		const vc = makeVersionConnector([{ schemaName, version: currentVersion, updatedAt: "" }]);
-		await new SchemaVersionService(vc).start();
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
 
 		expect(migrateWithChainSpy).not.toHaveBeenCalled();
 	});
@@ -175,15 +170,22 @@ describe("SchemaVersionService", () => {
 			return currentSchema;
 		});
 		connectorNamesSpy.mockReturnValue([schemaName]);
-		connectorGetSpy.mockReturnValue(connector);
 
 		const vc = makeVersionConnector([]); // no stored version record
-		await new SchemaVersionService(vc).start();
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
 
 		expect(migrateWithChainSpy).toHaveBeenCalledWith(
 			connector,
 			schemaName,
 			expect.any(Array) as IResolvedMigrationStep[],
+			expect.any(Object),
 			undefined
 		);
 		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
@@ -207,11 +209,16 @@ describe("SchemaVersionService", () => {
 			return currentSchema;
 		});
 		connectorNamesSpy.mockReturnValue([schemaName]);
-		connectorGetSpy.mockReturnValue(connector);
 
-		// No version record in the store — service must treat stored as v0
 		const vc = makeVersionConnector([]);
-		await new SchemaVersionService(vc).start();
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
 
 		expect(migrateWithChainSpy).toHaveBeenCalled();
 		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
@@ -236,14 +243,21 @@ describe("SchemaVersionService", () => {
 			return currentSchema;
 		});
 		connectorNamesSpy.mockReturnValue([schemaName]);
-		connectorGetSpy.mockReturnValue(connector);
+
+		const vc = makeVersionConnector([]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
 
 		SchemaMigrationFactory.register(overrideKey, () => ({
 			renames: [{ from: "oldField", to: "newField" }]
 		}));
 
 		try {
-			await new SchemaVersionService(makeVersionConnector([])).start();
+			await new SchemaVersionService().start();
 
 			expect(migrateWithChainSpy).toHaveBeenCalledWith(
 				connector,
@@ -251,6 +265,7 @@ describe("SchemaVersionService", () => {
 				expect.arrayContaining([
 					expect.objectContaining({ renames: [{ from: "oldField", to: "newField" }] })
 				]),
+				expect.any(Object),
 				undefined
 			);
 		} finally {
@@ -273,10 +288,16 @@ describe("SchemaVersionService", () => {
 		schemaNamesSpy.mockReturnValue([schemaName]);
 		schemaGetSpy.mockReturnValue(makeSchema(schemaName, 1));
 		connectorNamesSpy.mockReturnValue([schemaName]);
-		connectorGetSpy.mockReturnValue(connector);
 
 		const vc = makeVersionConnector([{ schemaName, version: 5, updatedAt: "" }]);
-		await expect(new SchemaVersionService(vc).start()).rejects.toThrow(GeneralError);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await expect(new SchemaVersionService().start()).rejects.toThrow(GeneralError);
 	});
 
 	// -------------------------------------------------------------------------
@@ -291,12 +312,17 @@ describe("SchemaVersionService", () => {
 		schemaNamesSpy.mockReturnValue([schemaName]);
 		schemaGetSpy.mockReturnValue(makeSchema(schemaName, 1));
 		connectorNamesSpy.mockReturnValue([schemaName]);
-		connectorGetSpy.mockReturnValue(connector);
+
+		const vc = makeVersionConnector([]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
 
 		// No stored record → treated as v0 → needs V0 schema to build step
-		await expect(new SchemaVersionService(makeVersionConnector([])).start()).rejects.toThrow(
-			GeneralError
-		);
+		await expect(new SchemaVersionService().start()).rejects.toThrow(GeneralError);
 	});
 
 	// -------------------------------------------------------------------------
@@ -317,11 +343,16 @@ describe("SchemaVersionService", () => {
 			return currentSchema;
 		});
 		connectorNamesSpy.mockReturnValue([schemaName]);
-		connectorGetSpy.mockReturnValue(connector);
 
-		await expect(new SchemaVersionService(makeVersionConnector([])).start()).rejects.toThrow(
-			GeneralError
-		);
+		const vc = makeVersionConnector([]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await expect(new SchemaVersionService().start()).rejects.toThrow(GeneralError);
 	});
 
 	// -------------------------------------------------------------------------
@@ -342,10 +373,15 @@ describe("SchemaVersionService", () => {
 			return currentSchema;
 		});
 		connectorNamesSpy.mockReturnValue([schemaName]);
-		connectorGetSpy.mockReturnValue(connector);
 
-		await expect(new SchemaVersionService(makeVersionConnector([])).start()).rejects.toThrow(
-			GeneralError
-		);
+		const vc = makeVersionConnector([]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await expect(new SchemaVersionService().start()).rejects.toThrow(GeneralError);
 	});
 });

@@ -890,7 +890,7 @@ export class CosmosDbEntityStorageConnector<
 	 */
 	public async finalizeMigration<U>(
 		targetConnector: CosmosDbEntityStorageConnector<U>,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<CosmosDbEntityStorageConnector<U>> {
 		// There is no rename operation in DynamoDB so we have to create a new table with the original name and copy the data over
@@ -930,7 +930,7 @@ export class CosmosDbEntityStorageConnector<
 	 */
 	public async cleanupMigration<U>(
 		targetConnector: IEntityStorageConnector<U> | undefined,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<void> {
 		// If something failed the only thing to cleanup is the migration table

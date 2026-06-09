@@ -1,6 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import type { IMigrationOptions } from "./IMigrationOptions.js";
+import type { EntityPropertyTransformer } from "./entityPropertyTransformer.js";
 
 /**
  * Optional per-step override for a single version-to-version migration.
@@ -21,8 +21,11 @@ export interface ISchemaMigration<T = unknown, U = unknown> {
 	renames?: { from: string; to: string }[];
 
 	/**
-	 * Optional per-property transformer for object/array properties that cannot be
-	 * automatically coerced. T is the source entity type, U is the target entity type.
+	 * Optional transformation for properties, usually only called for object and array types.
+	 * @param schema1Property The property schema in the old schema.
+	 * @param schemaProperty2 The property schema in the new schema.
+	 * @param value The value of the property in the old schema.
+	 * @returns The transformed value to match the new schema.
 	 */
-	transformEntityProperty?: IMigrationOptions<T, U>["transformEntityProperty"];
+	transformEntityProperty?: EntityPropertyTransformer<T, U>;
 }

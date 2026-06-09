@@ -660,7 +660,7 @@ export class FirestoreEntityStorageConnector<
 	 */
 	public async finalizeMigration<U>(
 		targetConnector: FirestoreEntityStorageConnector<U>,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<FirestoreEntityStorageConnector<U>> {
 		// Firestore has no collection-rename operation, so we create fresh collections under
@@ -703,7 +703,7 @@ export class FirestoreEntityStorageConnector<
 	 */
 	public async cleanupMigration<U>(
 		targetConnector: IEntityStorageConnector<U> | undefined,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<void> {
 		// If something failed the only thing to cleanup is the migration table

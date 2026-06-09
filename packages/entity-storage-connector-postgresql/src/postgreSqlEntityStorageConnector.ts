@@ -719,7 +719,7 @@ export class PostgreSqlEntityStorageConnector<
 	 */
 	public async finalizeMigration<U>(
 		targetConnector: PostgreSqlEntityStorageConnector<U>,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<PostgreSqlEntityStorageConnector<U>> {
 		// Teardown the existing table with the original name to free up the name for the new table
@@ -753,7 +753,7 @@ export class PostgreSqlEntityStorageConnector<
 	 */
 	public async cleanupMigration<U>(
 		targetConnector?: PostgreSqlEntityStorageConnector<U>,
-		options?: IMigrationOptions<T, U>,
+		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<void> {
 		// If something failed the only thing to cleanup is the migration table

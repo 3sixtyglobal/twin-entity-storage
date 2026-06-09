@@ -1,18 +1,24 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { GeneralError, Guards, Is, type IComponent } from "@twin.org/core";
+import { ComponentFactory, GeneralError, Is, type IComponent } from "@twin.org/core";
 import { EntitySchemaFactory, EntitySchemaHelper, type IEntitySchema } from "@twin.org/entity";
+import {
+	EntityStorageConnectorFactory,
+	type IEntityStorageConnector,
+	type IEntityStorageMigrationConnector,
+	type IMigrationOptions,
+	type IResolvedMigrationStep,
+	MigrationHelper,
+	SchemaMigrationFactory
+} from "@twin.org/entity-storage-models";
+import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import { SchemaVersion } from "../entities/schemaVersion.js";
-import { EntityStorageConnectorFactory } from "../factories/entityStorageConnectorFactory.js";
-import { SchemaMigrationFactory } from "../factories/schemaMigrationFactory.js";
-import { MigrationHelper } from "../helpers/migrationHelper.js";
-import type { IEntityStorageConnector } from "../models/IEntityStorageConnector.js";
-import type { IEntityStorageMigrationConnector } from "../models/IEntityStorageMigrationConnector.js";
-import type { IResolvedMigrationStep } from "../models/IResolvedMigrationStep.js";
+import { SchemaVersion } from "./entities/schemaVersion.js";
+import type { ISchemaVersionServiceConfig } from "./models/ISchemaVersionServiceConfig.js";
+import type { ISchemaVersionServiceConstructorOptions } from "./models/ISchemaVersionServiceConstructorOptions.js";
 
 /**
- * IComponent service that checks and applies entity schema migrations at every node start-up.
+ * Service that checks and applies entity schema migrations at every node start-up.
  *
  * This service must be the first entry in coreTypeInitialisers.json. The engine iterates that
  * array in order to determine start sequence — there is no engine-level priority mechanism, so
@@ -49,42 +55,26 @@ export class SchemaVersionService implements IComponent {
 
 	/**
 	 * The connector used to read and write SchemaVersion records.
+	 * Not readonly because finalizeMigration may return a replacement connector object.
 	 * @internal
 	 */
-	private readonly _versionConnector: IEntityStorageConnector<SchemaVersion>;
+	private _versionConnector: IEntityStorageConnector<SchemaVersion>;
+
+	/**
+	 * Optional config passed through constructor options.
+	 * @internal
+	 */
+	private readonly _config?: ISchemaVersionServiceConfig;
 
 	/**
 	 * Create a new SchemaVersionService.
-	 * @param versionConnector Entity-storage connector backed by the schemaVersion table.
+	 * @param options Optional constructor options.
 	 */
-	constructor(versionConnector: IEntityStorageConnector<SchemaVersion>) {
-		Guards.object<IEntityStorageConnector<SchemaVersion>>(
-			SchemaVersionService.CLASS_NAME,
-			nameof(versionConnector),
-			versionConnector
+	constructor(options?: ISchemaVersionServiceConstructorOptions) {
+		this._versionConnector = EntityStorageConnectorFactory.get(
+			options?.schemaVersionStorageType ?? "schema-version"
 		);
-		this._versionConnector = versionConnector;
-	}
-
-	/**
-	 * Searches EntityStorageConnectorFactory for the connector whose registered schema type
-	 * matches the given schema name.
-	 * @param schemaName The entity type name to look up.
-	 * @returns The matching connector, or undefined if none is registered.
-	 * @internal
-	 */
-	private static findConnector(schemaName: string): IEntityStorageConnector | undefined {
-		for (const name of EntityStorageConnectorFactory.names()) {
-			try {
-				const connector = EntityStorageConnectorFactory.get(name);
-				if (connector.getSchema?.().type === schemaName) {
-					return connector;
-				}
-			} catch {
-				// Connector not yet created or registration issue — skip.
-			}
-		}
-		return undefined;
+		this._config = options?.config;
 	}
 
 	/**
@@ -93,20 +83,6 @@ export class SchemaVersionService implements IComponent {
 	 */
 	public className(): string {
 		return SchemaVersionService.CLASS_NAME;
-	}
-
-	/**
-	 * Bootstraps the version-store connector so the schemaVersion table exists
-	 * before start() attempts to read or write version records.
-	 * @param nodeLoggingComponentType An optional logging component type.
-	 * @returns True on success.
-	 */
-	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
-		const bootstrapFn = this._versionConnector.bootstrap?.bind(this._versionConnector);
-		if (Is.function(bootstrapFn)) {
-			return bootstrapFn(nodeLoggingComponentType);
-		}
-		return true;
 	}
 
 	/**
@@ -120,6 +96,15 @@ export class SchemaVersionService implements IComponent {
 	 * @param nodeLoggingComponentType An optional logging component type.
 	 */
 	public async start(nodeLoggingComponentType?: string): Promise<void> {
+		const logging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+
+		const migrationOptions: IMigrationOptions = {
+			batchSize: this._config?.batchSize,
+			onProgress: async (progressItem, itemTotal, itemIndex) => {
+				await this.logProgress(logging, progressItem, itemTotal, itemIndex);
+			}
+		};
+
 		// 1. Collect all registered schema names and partition into current vs historical.
 		const allNames = EntitySchemaFactory.names();
 
@@ -171,7 +156,9 @@ export class SchemaVersionService implements IComponent {
 				schemaVersionSchema,
 				storedVersions,
 				historicalByBase.get(schemaVersionName),
-				nodeLoggingComponentType
+				migrationOptions,
+				nodeLoggingComponentType,
+				logging
 			);
 		}
 
@@ -182,7 +169,9 @@ export class SchemaVersionService implements IComponent {
 				schema,
 				storedVersions,
 				historicalByBase.get(schemaName),
-				nodeLoggingComponentType
+				migrationOptions,
+				nodeLoggingComponentType,
+				logging
 			);
 		}
 	}
@@ -194,7 +183,9 @@ export class SchemaVersionService implements IComponent {
 	 * @param schema The current schema definition.
 	 * @param storedVersions The full map of stored version records.
 	 * @param history The versioned-schema map for this schema (historicalByBase.get(schemaName)), or undefined if none exist.
-	 * @param nodeLoggingComponentType An optional logging component type.
+	 * @param migrationOptions The migration options to pass through to MigrationHelper.
+	 * @param loggingComponentType The optional component type to use for logging the migration progress.
+	 * @param logging An optional logging component to pass through to MigrationHelper for migration progress logging.
 	 * @internal
 	 */
 	private async processSchema(
@@ -202,25 +193,28 @@ export class SchemaVersionService implements IComponent {
 		schema: IEntitySchema,
 		storedVersions: Map<string, number>,
 		history: Map<number, IEntitySchema> | undefined,
-		nodeLoggingComponentType: string | undefined
+		migrationOptions: IMigrationOptions,
+		loggingComponentType: string | undefined,
+		logging: ILoggingComponent | undefined
 	): Promise<void> {
 		const currentVersion = EntitySchemaHelper.getVersion(schema);
 
 		// Find the entity-storage connector whose schema type matches this schema name.
 		// For SchemaVersion itself, use the injected connector directly rather than re-discovering
 		// it through the factory, which could resolve a different instance than _versionConnector.
-		const connector =
+		const connectorEntry =
 			schemaName === nameof(SchemaVersion)
-				? this._versionConnector
-				: SchemaVersionService.findConnector(schemaName);
-		if (!connector) {
+				? { connector: this._versionConnector as IEntityStorageConnector, factoryKey: undefined }
+				: this.findConnector(schemaName);
+		if (!connectorEntry) {
 			// No connector registered for this schema — nothing to migrate.
 			return;
 		}
+		const { connector, factoryKey } = connectorEntry;
 
 		// Resolve the stored version, applying the backwards-compat baseline when no record exists.
 		const stored = storedVersions.get(schemaName);
-		let resolvedStored: number;
+		let resolvedStoredVersion: number;
 
 		if (stored === undefined) {
 			// No version record: treat as v0 regardless of whether the table has data.
@@ -230,22 +224,42 @@ export class SchemaVersionService implements IComponent {
 			// Deployment precondition: any pre-existing data is genuinely at v0. A deployment
 			// that hand-applied a later schema before this service was introduced would be
 			// incorrectly replayed v0→…→current and should be seeded with an explicit record.
-			resolvedStored = 0;
+			resolvedStoredVersion = 0;
 			await this.writeVersion(schemaName, 0);
 		} else {
-			resolvedStored = stored;
+			resolvedStoredVersion = stored;
 		}
 
 		// No-op: stored version already matches current.
-		if (resolvedStored === currentVersion) {
+		if (resolvedStoredVersion === currentVersion) {
+			await logging?.log({
+				source: SchemaVersionService.CLASS_NAME,
+				level: "info",
+				message: "noMigrationRequired",
+				data: {
+					schemaName,
+					version: resolvedStoredVersion
+				}
+			});
 			return;
 		}
 
+		await logging?.log({
+			source: SchemaVersionService.CLASS_NAME,
+			level: "info",
+			message: "migrationRequired",
+			data: {
+				schemaName,
+				from: currentVersion,
+				to: resolvedStoredVersion
+			}
+		});
+
 		// Downgrade — not supported.
-		if (resolvedStored > currentVersion) {
+		if (resolvedStoredVersion > currentVersion) {
 			throw new GeneralError(SchemaVersionService.CLASS_NAME, "storedVersionNewer", {
 				schemaName,
-				stored: resolvedStored,
+				stored: resolvedStoredVersion,
 				current: currentVersion
 			});
 		}
@@ -255,7 +269,7 @@ export class SchemaVersionService implements IComponent {
 		if (!("createTargetConnector" in connector)) {
 			throw new GeneralError(SchemaVersionService.CLASS_NAME, "connectorNotMigrationCapable", {
 				schemaName,
-				stored: resolvedStored,
+				stored: resolvedStoredVersion,
 				current: currentVersion
 			});
 		}
@@ -265,12 +279,12 @@ export class SchemaVersionService implements IComponent {
 		// Upgrade — resolve and run the chain.
 		const steps: IResolvedMigrationStep[] = [];
 
-		for (let v = resolvedStored; v < currentVersion; v++) {
+		for (let v = resolvedStoredVersion; v < currentVersion; v++) {
 			const fromSchema = history?.get(v);
 			if (!fromSchema) {
 				throw new GeneralError(SchemaVersionService.CLASS_NAME, "noMigrationStep", {
 					schemaName,
-					stored: resolvedStored,
+					stored: resolvedStoredVersion,
 					current: currentVersion,
 					missingFromVersion: v,
 					missingToVersion: v + 1
@@ -281,7 +295,7 @@ export class SchemaVersionService implements IComponent {
 			if (!toSchema) {
 				throw new GeneralError(SchemaVersionService.CLASS_NAME, "noMigrationStepTarget", {
 					schemaName,
-					stored: resolvedStored,
+					stored: resolvedStoredVersion,
 					current: currentVersion,
 					missingFromVersion: v,
 					missingToVersion: v + 1
@@ -299,12 +313,27 @@ export class SchemaVersionService implements IComponent {
 			});
 		}
 
-		await MigrationHelper.migrateWithChain(
+		const { finalConnector } = await MigrationHelper.migrateWithChain(
 			migrationConnector,
 			schemaName,
 			steps,
-			nodeLoggingComponentType
+			migrationOptions,
+			loggingComponentType
 		);
+
+		// Some connectors (e.g. in-memory) return a brand-new object from finalizeMigration
+		// rather than mutating the source in place.  Re-register the factory entry so that any
+		// subsequent EntityStorageConnectorFactory.get() call returns the migrated instance.
+		if (finalConnector !== connector) {
+			if (factoryKey) {
+				EntityStorageConnectorFactory.register(factoryKey, () => finalConnector);
+			}
+			// For SchemaVersion keep _versionConnector in sync so writeVersion below uses
+			// the migrated instance.
+			if (schemaName === nameof(SchemaVersion)) {
+				this._versionConnector = finalConnector as IEntityStorageConnector<SchemaVersion>;
+			}
+		}
 
 		// Advance the stored version only after finalizeMigration has succeeded.
 		// See crash-window note in the class comment.
@@ -323,5 +352,87 @@ export class SchemaVersionService implements IComponent {
 			version,
 			updatedAt: new Date().toISOString()
 		});
+	}
+
+	/**
+	 * Searches EntityStorageConnectorFactory for the connector whose registered schema type
+	 * matches the given schema name.
+	 * @param schemaName The entity type name to look up.
+	 * @returns The matching connector and its factory key, or undefined if none is registered.
+	 * @internal
+	 */
+	private findConnector(
+		schemaName: string
+	): { connector: IEntityStorageConnector; factoryKey: string } | undefined {
+		for (const name of EntityStorageConnectorFactory.names()) {
+			try {
+				const connector = EntityStorageConnectorFactory.get(name);
+				if (connector.getSchema?.().type === schemaName) {
+					return { connector, factoryKey: name };
+				}
+			} catch {
+				// Connector not yet created or registration issue — skip.
+			}
+		}
+		return undefined;
+	}
+
+	/**
+	 * Logs migration progress using the provided logging component, if available.
+	 * @param logging The logging component to use for logging progress, if available.
+	 * @param progressItem The progress item being updated.
+	 * @param itemTotal The total number of items to process for this progress item.
+	 * @param itemIndex The index of the current item being processed for this progress item.
+	 * @internal
+	 */
+	private async logProgress(
+		logging: ILoggingComponent | undefined,
+		progressItem: string,
+		itemTotal: number,
+		itemIndex: number
+	): Promise<void> {
+		if (progressItem === "partitionStart") {
+			await logging?.log({
+				source: SchemaVersionService.CLASS_NAME,
+				level: "info",
+				message: "partitionStart",
+				data: { progressItem, itemTotal, itemIndex }
+			});
+		} else if (progressItem === "partitionProgress") {
+			await logging?.log({
+				source: SchemaVersionService.CLASS_NAME,
+				level: "info",
+				message: "partitionProgress",
+				data: { progressItem, itemTotal, itemIndex }
+			});
+		} else if (progressItem === "partitionEnd") {
+			await logging?.log({
+				source: SchemaVersionService.CLASS_NAME,
+				level: "info",
+				message: "partitionEnd",
+				data: { progressItem, itemTotal, itemIndex }
+			});
+		} else if (progressItem === "partitionItemsStart") {
+			await logging?.log({
+				source: SchemaVersionService.CLASS_NAME,
+				level: "info",
+				message: "partitionItemsStart",
+				data: { progressItem, itemTotal, itemIndex }
+			});
+		} else if (progressItem === "partitionItemsProgress") {
+			await logging?.log({
+				source: SchemaVersionService.CLASS_NAME,
+				level: "info",
+				message: "partitionItemsProgress",
+				data: { progressItem, itemTotal, itemIndex }
+			});
+		} else if (progressItem === "partitionItemsEnd") {
+			await logging?.log({
+				source: SchemaVersionService.CLASS_NAME,
+				level: "info",
+				message: "partitionItemsEnd",
+				data: { progressItem, itemTotal, itemIndex }
+			});
+		}
 	}
 }

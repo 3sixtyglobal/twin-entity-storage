@@ -33,6 +33,7 @@
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
 		"@twin.org/entity-storage-models": "0.0.3-next.24",
+		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next",
 		"@twin.org/web": "next"
 	},

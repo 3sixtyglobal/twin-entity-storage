@@ -1,7 +1,7 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import type { IEntitySchemaProperty } from "@twin.org/entity";
-import type { IMigrationOptions } from "./IMigrationOptions.js";
+import type { EntityPropertyTransformer } from "@twin.org/entity-storage-models";
 
 /**
  * A fully-resolved single migration step used by MigrationHelper.
@@ -31,9 +31,11 @@ export interface IResolvedMigrationStep<T = unknown, U = unknown> {
 	renames?: { from: string; to: string }[];
 
 	/**
-	 * Optional per-property transformer for object/array properties that the structural
-	 * diff cannot handle automatically. Sourced from an ISchemaMigration override when
-	 * one is registered in SchemaMigrationFactory for this step.
+	 * Optional transformation for properties, usually only called for object and array types.
+	 * @param schema1Property The property schema in the old schema.
+	 * @param schemaProperty2 The property schema in the new schema.
+	 * @param value The value of the property in the old schema.
+	 * @returns The transformed value to match the new schema.
 	 */
-	transformEntityProperty?: IMigrationOptions<T, U>["transformEntityProperty"];
+	transformEntityProperty?: EntityPropertyTransformer<T, U>;
 }
