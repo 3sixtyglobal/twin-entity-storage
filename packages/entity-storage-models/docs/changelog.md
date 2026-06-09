@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.0.3-next.25](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.0.3-next.24...entity-storage-models-v0.0.3-next.25) (2026-06-09)
+
+
+### Features
+
+* migration progress ([#121](https://github.com/iotaledger/twin-entity-storage/issues/121)) ([d032162](https://github.com/iotaledger/twin-entity-storage/commit/d032162768b6b7d4ccca7e39b80f8bc3ba46440e))
+
 ## [0.0.3-next.24](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.0.3-next.23...entity-storage-models-v0.0.3-next.24) (2026-06-08)
 
 
