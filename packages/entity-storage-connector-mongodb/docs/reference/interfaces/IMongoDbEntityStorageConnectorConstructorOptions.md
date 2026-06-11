@@ -26,12 +26,6 @@ The keys to use from the context ids to create partitions.
 
 The type of logging component to use.
 
-#### Default
-
-```ts
-logging
-```
-
 ***
 
 ### config {#config}
