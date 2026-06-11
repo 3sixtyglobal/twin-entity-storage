@@ -231,10 +231,13 @@ runs:
         fi
 
     # Approval must come from a second identity because the PR author cannot self-approve.
-    - name: Add reviewer to PR
+    # If the approval token is rate-limited, continue and let the reviewer approve manually.
+    - name: Attempt PR approval
       if: ${{ steps.release-please.outputs.pr_number != '' }}
       shell: bash
       run: |
-        gh pr review ${{ steps.release-please.outputs.pr_number }} --approve
+        if ! gh pr review ${{ steps.release-please.outputs.pr_number }} --approve; then
+          echo "::warning title=Release PR auto-approval skipped::Automatic approval failed. This is usually caused by API rate limiting or missing review permissions. Approve the PR manually to continue: ${{ steps.release-please.outputs.pr_url }}"
+        fi
       env:
         GH_TOKEN: ${{ inputs.release_token }}
