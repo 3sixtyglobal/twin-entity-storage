@@ -16,12 +16,10 @@ import {
 } from "@twin.org/entity";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import type {
-	IEntityStorageMigrationConnector,
-	IEntityStorageConnector,
-	IMigrationOptions,
-	EntityPropertyTransformer
-} from "@twin.org/entity-storage-models";
+import type { EntityPropertyTransformer } from "../models/entityPropertyTransformer.js";
+import type { IEntityStorageConnector } from "../models/IEntityStorageConnector.js";
+import type { IEntityStorageMigrationConnector } from "../models/IEntityStorageMigrationConnector.js";
+import type { IMigrationOptions } from "../models/IMigrationOptions.js";
 import type { IResolvedMigrationStep } from "../models/IResolvedMigrationStep.js";
 
 /**

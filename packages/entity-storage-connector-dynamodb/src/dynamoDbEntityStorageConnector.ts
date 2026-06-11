@@ -1648,7 +1648,7 @@ export class DynamoDbEntityStorageConnector<
 				conditions,
 				attributeNames,
 				attributeValues,
-				secondaryIndex
+				gsiAttribute
 			);
 
 			if (expressions.noResults) {

@@ -1,7 +1,7 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import type { IEntitySchemaProperty } from "@twin.org/entity";
-import type { EntityPropertyTransformer } from "@twin.org/entity-storage-models";
+import type { EntityPropertyTransformer } from "./entityPropertyTransformer.js";
 
 /**
  * A fully-resolved single migration step used by MigrationHelper.

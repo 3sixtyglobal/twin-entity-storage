@@ -550,6 +550,67 @@ describe("MongoDbEntityStorageConnector", () => {
 		}
 	);
 
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"paginated cursor walk over a GSI sorted query has no skips or duplicates",
+		async () => {
+			const BATCH = 20;
+			const PAGE = 5;
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			const seeded = [...new Array(BATCH).keys()].map(i => ({
+				id: String(i + 1).padStart(3, "0"),
+				value1: `val${String(i).padStart(3, "0")}`,
+				value2: i
+			}));
+			await connector.setBatch(seeded);
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+			const seen = new Set<string>();
+			let cursor: string | undefined;
+			let pages = 0;
+			do {
+				const page = await connector.query(undefined, sort, undefined, cursor, PAGE);
+				for (const e of page.entities) {
+					expect(seen.has(e.id as string), `duplicate id ${e.id}`).toBe(false);
+					seen.add(e.id as string);
+				}
+				cursor = page.cursor;
+				expect(++pages).toBeLessThan(100);
+			} while (cursor !== undefined);
+
+			for (const item of seeded) {
+				expect(seen.has(item.id), `id ${item.id} missing from cursor walk`).toBe(true);
+			}
+			expect(seen.size).toBe(BATCH);
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"can filter on secondary index property when also sorting by it",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			for (let i = 0; i < 10; i++) {
+				await connector.set({
+					id: String(i + 1).padStart(3, "0"),
+					value1: `val${String(i).padStart(3, "0")}`,
+					value2: i
+				});
+			}
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+			const condition = {
+				property: "value1" as keyof TestType,
+				comparison: ComparisonOperator.GreaterThanOrEqual,
+				value: "val003"
+			};
+			const result = await connector.query(condition, sort);
+			expect(result.entities.length).toBe(7);
+			expect(result.entities.every(e => (e.value1 as string) >= "val003")).toBe(true);
+		}
+	);
+
 	test("can fail to query with an invalid limit", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());
 		await expect(
