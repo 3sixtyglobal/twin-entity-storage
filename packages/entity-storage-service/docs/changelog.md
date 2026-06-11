@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.27](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.0.3-next.26...entity-storage-service-v0.0.3-next.27) (2026-06-11)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-service:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.26 to 0.0.3-next.27
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.26 to 0.0.3-next.27
+
 ## [0.0.3-next.26](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.0.3-next.25...entity-storage-service-v0.0.3-next.26) (2026-06-11)
 
 

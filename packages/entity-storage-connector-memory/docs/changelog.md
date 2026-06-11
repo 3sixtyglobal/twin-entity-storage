@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.3-next.27](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-memory-v0.0.3-next.26...entity-storage-connector-memory-v0.0.3-next.27) (2026-06-11)
+
+
+### Bug Fixes
+
+* route GSI sort-key conditions to KeyConditionExpression and cross-connector cursor-walk tests ([#127](https://github.com/iotaledger/twin-entity-storage/issues/127)) ([6a24e1b](https://github.com/iotaledger/twin-entity-storage/commit/6a24e1b5f3b8b426987e43da3af6766d8cb68afb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.26 to 0.0.3-next.27
+
 ## [0.0.3-next.26](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-memory-v0.0.3-next.25...entity-storage-connector-memory-v0.0.3-next.26) (2026-06-11)
 
 
