@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.26](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-cosmosdb-v0.0.3-next.25...entity-storage-connector-cosmosdb-v0.0.3-next.26) (2026-06-11)
+
+
+### Features
+
+* remove default loggers ([7c8c7b1](https://github.com/iotaledger/twin-entity-storage/commit/7c8c7b132c23e95abd465c0ca3bad5ec8d95f91e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.25 to 0.0.3-next.26
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.25 to 0.0.3-next.26
+
 ## [0.0.3-next.25](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-cosmosdb-v0.0.3-next.24...entity-storage-connector-cosmosdb-v0.0.3-next.25) (2026-06-09)
 
 
