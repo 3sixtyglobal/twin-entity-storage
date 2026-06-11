@@ -18,7 +18,6 @@ export interface IMongoDbEntityStorageConnectorConstructorOptions {
 
 	/**
 	 * The type of logging component to use.
-	 * @default logging
 	 */
 	loggingComponentType?: string;
 

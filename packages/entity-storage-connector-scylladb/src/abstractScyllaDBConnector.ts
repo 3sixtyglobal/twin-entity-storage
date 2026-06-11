@@ -141,7 +141,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 			options.config.keyspace
 		);
 
-		this._logging = ComponentFactory.getIfExists(options.loggingComponentType ?? "logging");
+		this._logging = ComponentFactory.getIfExists(options.loggingComponentType);
 
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
