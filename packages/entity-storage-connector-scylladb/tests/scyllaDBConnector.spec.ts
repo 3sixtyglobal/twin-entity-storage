@@ -125,6 +125,15 @@ class ScalarArrayTestType {
 	public scores?: number[];
 }
 
+@entity()
+class ObjectJsonArrayTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "object", optional: true })
+	public keywords?: string[];
+}
+
 let currentUser = "user";
 let currentConnector: IEntityStorageConnector | undefined;
 
@@ -153,6 +162,9 @@ describe("ScyllaDBTableConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<ScalarArrayTestType>(), () =>
 			EntitySchemaHelper.getSchema(ScalarArrayTestType)
+		);
+		EntitySchemaFactory.register(nameof<ObjectJsonArrayTestType>(), () =>
+			EntitySchemaHelper.getSchema(ObjectJsonArrayTestType)
 		);
 
 		createConnector = async <T>(entitySchema: string, partitionContextIds?: string[]) => {
@@ -1133,6 +1145,25 @@ describe("ScyllaDBTableConnector", () => {
 		});
 		expect(result.entities.length).toEqual(1);
 		expect((result.entities[0] as ScalarArrayTestType).id).toEqual("1");
+	});
+
+	test("can query with Includes scalar string in object-typed JSON array column", async () => {
+		const connector =
+			await createConnector<ObjectJsonArrayTestType>(nameof<ObjectJsonArrayTestType>());
+		await connector.set({ id: "1", keywords: ["BorderAgency", "Trade"] });
+		await connector.set({ id: "2", keywords: ["Customs", "Trade"] });
+		await connector.set({ id: "3", keywords: ["Finance"] });
+		const result = await connector.query({
+			conditions: [
+				{
+					property: "keywords",
+					value: "BorderAgency",
+					comparison: ComparisonOperator.Includes
+				}
+			]
+		});
+		expect(result.entities.length).toEqual(1);
+		expect((result.entities[0] as ObjectJsonArrayTestType).id).toEqual("1");
 	});
 
 	test("can query with Includes scalar string matching multiple results in array-typed column", async () => {
