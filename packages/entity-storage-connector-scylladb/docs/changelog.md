@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.28](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-scylladb-v0.0.3-next.27...entity-storage-connector-scylladb-v0.0.3-next.28) (2026-06-12)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-connector-scylladb:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.27 to 0.0.3-next.28
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.27 to 0.0.3-next.28
+
 ## [0.0.3-next.27](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-scylladb-v0.0.3-next.26...entity-storage-connector-scylladb-v0.0.3-next.27) (2026-06-11)
 
 

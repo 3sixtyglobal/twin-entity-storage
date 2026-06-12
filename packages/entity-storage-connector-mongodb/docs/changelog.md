@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.28](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mongodb-v0.0.3-next.27...entity-storage-connector-mongodb-v0.0.3-next.28) (2026-06-12)
+
+
+### Features
+
+* mongodb collection partitioning ([#129](https://github.com/iotaledger/twin-entity-storage/issues/129)) ([027cd16](https://github.com/iotaledger/twin-entity-storage/commit/027cd16b40c107ae73c445082b29eb0926d6d1f8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.27 to 0.0.3-next.28
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.27 to 0.0.3-next.28
+
 ## [0.0.3-next.27](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mongodb-v0.0.3-next.26...entity-storage-connector-mongodb-v0.0.3-next.27) (2026-06-11)
 
 
