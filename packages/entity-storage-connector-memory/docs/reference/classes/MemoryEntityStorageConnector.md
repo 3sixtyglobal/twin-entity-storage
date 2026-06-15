@@ -1,6 +1,14 @@
 # Class: MemoryEntityStorageConnector\<T\>
 
-Class for performing entity storage operations in-memory.
+Class for performing entity storage operations in-memory backed by a shared object buffer.
+
+All reads and writes are serialised with a per-schema lock so that concurrent async
+access, including across worker threads, never produces torn or lost updates.
+
+All connector instances that share the same entity schema name share the same underlying
+buffer, making data written in one instance immediately visible in another, including
+across worker threads when the main thread forwards worker messages to the lock and
+buffer handlers.
 
 ## Type Parameters
 
@@ -97,6 +105,32 @@ The schema for the entities.
 
 ***
 
+### bootstrap() {#bootstrap}
+
+> **bootstrap**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+
+Bootstrap the component by creating and initializing any resources it needs.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True if the bootstrapping process was successful.
+
+#### Implementation of
+
+`IEntityStorageConnector.bootstrap`
+
+***
+
 ### get() {#get}
 
 > **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
@@ -159,7 +193,7 @@ The optional conditions to match for the entities.
 
 `Promise`\<`void`\>
 
-The id of the entity.
+Resolves when the entity has been stored.
 
 #### Implementation of
 
@@ -324,7 +358,7 @@ Nothing.
 
 > **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
 
-Teardown the storage by clearing the underlying store.
+Teardown the storage by clearing the underlying shared buffer for this schema.
 
 #### Parameters
 
@@ -374,15 +408,15 @@ The total count of entities in the storage.
 
 ### getStore() {#getstore}
 
-> **getStore**(): `T`[]
+> **getStore**(): `Promise`\<`T`[]\>
 
-Get the memory store.
+Get all entities in the memory store.
 
 #### Returns
 
-`T`[]
+`Promise`\<`T`[]\>
 
-The store.
+All stored entities with partition keys removed.
 
 ***
 
