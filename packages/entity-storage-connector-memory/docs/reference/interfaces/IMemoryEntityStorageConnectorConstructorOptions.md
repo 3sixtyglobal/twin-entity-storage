@@ -20,28 +20,8 @@ The keys to use from the context ids to create partitions.
 
 ***
 
-### initialCapacityBytes? {#initialcapacitybytes}
+### config {#config}
 
-> `optional` **initialCapacityBytes?**: `number`
+> **config**: [`IMemoryEntityStorageConnectorConfig`](IMemoryEntityStorageConnectorConfig.md)
 
-Initial capacity in bytes for the shared entity buffer.
-
-#### Default
-
-```ts
-16 MiB.
-```
-
-***
-
-### maxCapacityBytes? {#maxcapacitybytes}
-
-> `optional` **maxCapacityBytes?**: `number`
-
-Maximum JSON payload size in bytes for the shared entity buffer.
-
-#### Default
-
-```ts
-256 MiB.
-```
+Configuration for storage key and capacity settings.

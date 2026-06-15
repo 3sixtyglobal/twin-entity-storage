@@ -6,4 +6,5 @@
 
 ## Interfaces
 
+- [IMemoryEntityStorageConnectorConfig](interfaces/IMemoryEntityStorageConnectorConfig.md)
 - [IMemoryEntityStorageConnectorConstructorOptions](interfaces/IMemoryEntityStorageConnectorConstructorOptions.md)
