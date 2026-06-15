@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-mysql",
-	"version": "0.0.3-next.30",
+	"version": "0.0.3-next.31",
 	"description": "MySQL connector for relational persistence with SQL querying.",
 	"repository": {
 		"type": "git",
@@ -32,13 +32,13 @@
 		"@twin.org/core": "next",
 		"@twin.org/data-json-ld": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.0.3-next.30",
+		"@twin.org/entity-storage-models": "0.0.3-next.31",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next",
 		"mysql2": "3.22.3"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.0.3-next.30",
+		"@twin.org/entity-storage-connector-memory": "0.0.3-next.31",
 		"@twin.org/logging-connector-entity-storage": "next",
 		"@twin.org/logging-service": "next",
 		"@twin.org/nameof-transformer": "next",
