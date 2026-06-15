@@ -13,6 +13,7 @@ import {
 	type IHealth,
 	Is,
 	type IValidationFailure,
+	Mutex,
 	ObjectHelper,
 	Validation
 } from "@twin.org/core";
@@ -74,6 +75,12 @@ export class FileEntityStorageConnector<
 	private static readonly _DEFAULT_DISK_ERROR_THRESHOLD_BYTES: number = 100 * 1024 * 1024;
 
 	/**
+	 * Maximum time to wait for the store update lock.
+	 * @internal
+	 */
+	private static readonly _UPDATE_LOCK_TIMEOUT_MS: number = 60000;
+
+	/**
 	 * The name for the schema.
 	 * @internal
 	 */
@@ -116,6 +123,12 @@ export class FileEntityStorageConnector<
 	private readonly _diskWarningThresholdBytes: number;
 
 	/**
+	 * Milliseconds to wait for the directory lock before throwing.
+	 * @internal
+	 */
+	private readonly _lockTimeoutMs: number;
+
+	/**
 	 * Create a new instance of FileEntityStorageConnector.
 	 * @param options The options for the connector.
 	 */
@@ -143,6 +156,8 @@ export class FileEntityStorageConnector<
 		this._diskWarningThresholdBytes =
 			options.config.diskWarningThresholdBytes ??
 			FileEntityStorageConnector._DEFAULT_DISK_WARNING_THRESHOLD_BYTES;
+		this._lockTimeoutMs =
+			options.config.lockTimeoutMs ?? FileEntityStorageConnector._UPDATE_LOCK_TIMEOUT_MS;
 	}
 
 	/**
@@ -291,7 +306,7 @@ export class FileEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const store = await this.readStore();
+		const store = await this.readStoreWithLock();
 
 		const finalConditions = conditions ?? [];
 		if (Is.stringValue(partitionKey)) {
@@ -334,29 +349,31 @@ export class FileEntityStorageConnector<
 			{ nullBehavior: "omit" }
 		);
 
-		const store = await this.readStore();
+		await this.withLock(async () => {
+			const store = await this.readStore();
 
-		const finalConditions = conditions ?? [];
-		if (Is.stringValue(partitionKey)) {
-			finalConditions.push({
-				property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
-				value: partitionKey
-			});
-		}
+			const finalConditions = conditions ?? [];
+			if (Is.stringValue(partitionKey)) {
+				finalConditions.push({
+					property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
+					value: partitionKey
+				});
+			}
 
-		const existingIndex = this.findItem(
-			store,
-			prepared[this._primaryKey.property] as string,
-			undefined,
-			finalConditions
-		);
-		if (existingIndex >= 0) {
-			store[existingIndex] = prepared;
-		} else {
-			store.push(prepared);
-		}
+			const existingIndex = this.findItem(
+				store,
+				prepared[this._primaryKey.property] as string,
+				undefined,
+				finalConditions
+			);
+			if (existingIndex >= 0) {
+				store[existingIndex] = prepared;
+			} else {
+				store.push(prepared);
+			}
 
-		await this.writeStore(store);
+			await this.writeStore(store);
+		});
 	}
 
 	/**
@@ -369,41 +386,44 @@ export class FileEntityStorageConnector<
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
-		const store = await this.readStore();
 
-		for (const entity of entities) {
-			Guards.object<T>(FileEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
+		await this.withLock(async () => {
+			const store = await this.readStore();
 
-			const prepared = EntityStorageHelper.prepareEntity(
-				entity,
-				this._entitySchema,
-				Is.stringValue(partitionKey)
-					? [{ property: FileEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
-					: undefined,
-				{ nullBehavior: "omit" }
-			);
+			for (const entity of entities) {
+				Guards.object<T>(FileEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
-			const existingIndex = this.findItem(
-				store,
-				prepared[this._primaryKey.property] as string,
-				undefined,
-				Is.stringValue(partitionKey)
-					? [
-							{
-								property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
-								value: partitionKey
-							}
-						]
-					: []
-			);
-			if (existingIndex >= 0) {
-				store[existingIndex] = prepared;
-			} else {
-				store.push(prepared);
+				const prepared = EntityStorageHelper.prepareEntity(
+					entity,
+					this._entitySchema,
+					Is.stringValue(partitionKey)
+						? [{ property: FileEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
+						: undefined,
+					{ nullBehavior: "omit" }
+				);
+
+				const existingIndex = this.findItem(
+					store,
+					prepared[this._primaryKey.property] as string,
+					undefined,
+					Is.stringValue(partitionKey)
+						? [
+								{
+									property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
+									value: partitionKey
+								}
+							]
+						: []
+				);
+				if (existingIndex >= 0) {
+					store[existingIndex] = prepared;
+				} else {
+					store.push(prepared);
+				}
 			}
-		}
 
-		await this.writeStore(store);
+			await this.writeStore(store);
+		});
 	}
 
 	/**
@@ -415,17 +435,19 @@ export class FileEntityStorageConnector<
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const store = await this.readStore();
-			const remaining = Is.stringValue(partitionKey)
-				? store.filter(
-						item =>
-							ObjectHelper.propertyGet(
-								item as object,
-								FileEntityStorageConnector._PARTITION_KEY
-							) !== partitionKey
-					)
-				: [];
-			await this.writeStore(remaining);
+			await this.withLock(async () => {
+				const store = await this.readStore();
+				const remaining = Is.stringValue(partitionKey)
+					? store.filter(
+							item =>
+								ObjectHelper.propertyGet(
+									item as object,
+									FileEntityStorageConnector._PARTITION_KEY
+								) !== partitionKey
+						)
+					: [];
+				await this.writeStore(remaining);
+			});
 		} catch (err) {
 			throw new GeneralError(FileEntityStorageConnector.CLASS_NAME, "emptyFailed", undefined, err);
 		}
@@ -443,18 +465,21 @@ export class FileEntityStorageConnector<
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const store = await this.readStore();
-			const idSet = new Set(ids);
-			const remaining = store.filter(item => {
-				if (
-					Is.stringValue(partitionKey) &&
-					ObjectHelper.propertyGet(item, FileEntityStorageConnector._PARTITION_KEY) !== partitionKey
-				) {
-					return true;
-				}
-				return !idSet.has(item[this._primaryKey.property] as string);
+			await this.withLock(async () => {
+				const store = await this.readStore();
+				const idSet = new Set(ids);
+				const remaining = store.filter(item => {
+					if (
+						Is.stringValue(partitionKey) &&
+						ObjectHelper.propertyGet(item, FileEntityStorageConnector._PARTITION_KEY) !==
+							partitionKey
+					) {
+						return true;
+					}
+					return !idSet.has(item[this._primaryKey.property] as string);
+				});
+				await this.writeStore(remaining);
 			});
-			await this.writeStore(remaining);
 		} catch (err) {
 			throw new GeneralError(
 				FileEntityStorageConnector.CLASS_NAME,
@@ -518,22 +543,24 @@ export class FileEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const store = await this.readStore();
+		await this.withLock(async () => {
+			const store = await this.readStore();
 
-		const finalConditions = conditions ?? [];
-		if (Is.stringValue(partitionKey)) {
-			finalConditions.push({
-				property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
-				value: partitionKey
-			});
-		}
+			const finalConditions = conditions ?? [];
+			if (Is.stringValue(partitionKey)) {
+				finalConditions.push({
+					property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
+					value: partitionKey
+				});
+			}
 
-		const index = this.findItem(store, id, undefined, finalConditions);
+			const index = this.findItem(store, id, undefined, finalConditions);
 
-		if (index >= 0) {
-			store.splice(index, 1);
-			await this.writeStore(store);
-		}
+			if (index >= 0) {
+				store.splice(index, 1);
+				await this.writeStore(store);
+			}
+		});
 	}
 
 	/**
@@ -581,7 +608,7 @@ export class FileEntityStorageConnector<
 			);
 		}
 
-		let allEntities = await this.readStore();
+		let allEntities = await this.readStoreWithLock();
 
 		const finalConditions: EntityCondition<T> = {
 			conditions: [],
@@ -648,7 +675,7 @@ export class FileEntityStorageConnector<
 	 * @returns The total count of entities in the storage.
 	 */
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
-		const store = await this.readStore();
+		const store = await this.readStoreWithLock();
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
@@ -684,7 +711,7 @@ export class FileEntityStorageConnector<
 	public async getPartitionContextIds(): Promise<IContextIds[]> {
 		const contextIds: { [id: string]: IContextIds } = {};
 
-		const store = await this.readStore();
+		const store = await this.readStoreWithLock();
 
 		for (const entity of store) {
 			const partitionId = ObjectHelper.propertyGet(
@@ -773,22 +800,60 @@ export class FileEntityStorageConnector<
 	}
 
 	/**
-	 * Read the store from file.
+	 * Read the store from file while holding the directory mutex.
+	 * Use this for standalone reads (get, query, count, getPartitionContextIds) where
+	 * no outer lock is held. Do not call from inside a withLock callback —
+	 * use readStore instead to avoid a re-entrant deadlock.
+	 * @returns The store.
+	 * @internal
+	 */
+	private async readStoreWithLock(): Promise<T[]> {
+		return this.withLock(async () => this.readStore());
+	}
+
+	/**
+	 * Read the store from file without acquiring the directory mutex.
+	 * Must only be called from inside a withLock callback, where the mutex
+	 * is already held. Performing the read under the held lock prevents a race with
+	 * the atomic rename(tmp→store.json) window on Windows that would otherwise
+	 * return ENOENT and be misinterpreted as an empty store.
 	 * @returns The store.
 	 * @internal
 	 */
 	private async readStore(): Promise<T[]> {
+		const filename = path.join(this._directory, "store.json");
+
+		let store;
 		try {
-			const filename = path.join(this._directory, "store.json");
-			const store = await readFile(filename, "utf8");
+			store = await readFile(filename, "utf8");
+		} catch (err) {
+			if (ObjectHelper.propertyGet(err, "code") === "ENOENT") {
+				// The store has not been written yet, which is valid for a new store.
+				return [];
+			}
+			throw new GeneralError(
+				FileEntityStorageConnector.CLASS_NAME,
+				"readStoreFailed",
+				{ directory: this._directory },
+				err
+			);
+		}
+
+		try {
 			return JSON.parse(store) as T[];
-		} catch {
-			return [];
+		} catch (err) {
+			throw new GeneralError(
+				FileEntityStorageConnector.CLASS_NAME,
+				"readStoreCorrupt",
+				{ directory: this._directory },
+				err
+			);
 		}
 	}
 
 	/**
-	 * Write the store to the file.
+	 * Write the store to the file, atomically replacing the previous version so
+	 * a reader can never observe a partially written store.
 	 * @param store The store to write.
 	 * @returns Nothing.
 	 * @internal
@@ -796,8 +861,38 @@ export class FileEntityStorageConnector<
 	private async writeStore(store: T[]): Promise<void> {
 		try {
 			const filename = path.join(this._directory, "store.json");
-			await writeFile(filename, JSON.stringify(store, undefined, "\t"), "utf8");
-		} catch {}
+			const tempFilename = `${filename}.tmp`;
+			await writeFile(tempFilename, JSON.stringify(store, undefined, "\t"), "utf8");
+			await rename(tempFilename, filename);
+		} catch (err) {
+			throw new GeneralError(
+				FileEntityStorageConnector.CLASS_NAME,
+				"writeStoreFailed",
+				{ directory: this._directory },
+				err
+			);
+		}
+	}
+
+	/**
+	 * Serialize an update so that concurrent modifications cannot interleave
+	 * their read-modify-write cycles, which would lose updates or tear the
+	 * store file. The mutex is keyed on the storage directory, so every
+	 * connector or worker using the same store serializes with the others.
+	 * @param update The update operation to perform.
+	 * @returns The result of the update.
+	 * @internal
+	 */
+	private async withLock<U>(update: () => Promise<U>): Promise<U> {
+		await Mutex.lock(this._directory, {
+			timeoutMs: this._lockTimeoutMs,
+			throwOnTimeout: true
+		});
+		try {
+			return await update();
+		} finally {
+			Mutex.unlock(this._directory);
+		}
 	}
 
 	/**

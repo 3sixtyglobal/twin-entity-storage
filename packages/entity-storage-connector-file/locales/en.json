@@ -12,8 +12,11 @@
 		"fileEntityStorageConnector": {
 			"directoryCreateFailed": "Creating directory \"{directory}\" failed",
 			"emptyFailed": "Unable to empty entity storage",
+			"readStoreCorrupt": "The entity storage store file in directory \"{directory}\" contains corrupt JSON",
+			"readStoreFailed": "Unable to read the entity storage store file in directory \"{directory}\"",
 			"removeBatchFailed": "Unable to remove batch of entities",
-			"teardownFailed": "Unable to teardown entity storage"
+			"teardownFailed": "Unable to teardown entity storage",
+			"writeStoreFailed": "Unable to write the entity storage store file in directory \"{directory}\""
 		}
 	},
 	"health": {
