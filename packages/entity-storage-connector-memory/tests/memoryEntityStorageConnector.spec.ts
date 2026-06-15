@@ -165,7 +165,11 @@ describe("MemoryEntityStorageConnector", () => {
 		);
 
 		createConnector = async <T>(entitySchema: string, partitionContextIds?: string[]) => {
-			currentConnector = new MemoryEntityStorageConnector<T>({ entitySchema, partitionContextIds });
+			currentConnector = new MemoryEntityStorageConnector<T>({
+				entitySchema,
+				partitionContextIds,
+				config: { storageKey: "test" }
+			});
 			await currentConnector?.bootstrap?.();
 			return currentConnector as IEntityStorageConnector<T>;
 		};

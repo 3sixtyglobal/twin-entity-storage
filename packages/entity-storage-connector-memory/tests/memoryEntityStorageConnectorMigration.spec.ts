@@ -226,7 +226,8 @@ describe("MemoryEntityStorageConnector — partitioning and migration", () => {
 		createConnector = async (entitySchema, partitionContextIds) => {
 			currentConnector = new MemoryEntityStorageConnector({
 				entitySchema,
-				partitionContextIds
+				partitionContextIds,
+				config: { storageKey: "test" }
 			});
 			await currentConnector.bootstrap?.();
 			return currentConnector;

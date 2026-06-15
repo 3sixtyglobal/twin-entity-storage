@@ -25,6 +25,7 @@ describe("MemoryEntityStorageConnector — constructor and health", () => {
 				new MemoryEntityStorageConnector(
 					undefined as unknown as {
 						entitySchema: string;
+						config: { storageKey: string };
 					}
 				)
 		).toThrow(
@@ -42,6 +43,7 @@ describe("MemoryEntityStorageConnector — constructor and health", () => {
 				new MemoryEntityStorageConnector(
 					{} as unknown as {
 						entitySchema: string;
+						config: { storageKey: string };
 					}
 				)
 		).toThrow(
@@ -54,12 +56,18 @@ describe("MemoryEntityStorageConnector — constructor and health", () => {
 	});
 
 	test("can construct", () => {
-		const connector = new MemoryEntityStorageConnector({ entitySchema: nameof<TestType>() });
+		const connector = new MemoryEntityStorageConnector({
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "test" }
+		});
 		expect(connector).toBeDefined();
 	});
 
 	test("can get health as ok", async () => {
-		const connector = new MemoryEntityStorageConnector({ entitySchema: nameof<TestType>() });
+		const connector = new MemoryEntityStorageConnector({
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "test" }
+		});
 		const result = await connector.health();
 		expect(result).toHaveLength(1);
 		expect(result[0].status).toEqual(HealthStatus.Ok);

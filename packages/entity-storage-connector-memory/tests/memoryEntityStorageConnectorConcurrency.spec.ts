@@ -40,7 +40,8 @@ describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () =>
 
 	test("concurrent sets on one connector do not lose any update", async () => {
 		const connector = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "concurrent-sets-test" }
 		});
 
 		const count = 20;
@@ -59,7 +60,8 @@ describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () =>
 
 	test("concurrent reads during writes never return a torn snapshot", async () => {
 		const connector = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "torn-snapshot-test" }
 		});
 
 		await connector.set({ id: "anchor", value1: "stable" });
@@ -80,7 +82,8 @@ describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () =>
 
 	test("concurrent sets and counts do not throw", async () => {
 		const connector = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "sets-and-counts-test" }
 		});
 		await connector.set({ id: "seed", value1: "x" });
 
@@ -99,10 +102,12 @@ describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () =>
 
 	test("two connector instances for the same schema share the same buffer", async () => {
 		const connector1 = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "shared-buffer-test" }
 		});
 		const connector2 = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "shared-buffer-test" }
 		});
 
 		await connector1.set({ id: "1", value1: "from-connector-1" });
@@ -113,10 +118,12 @@ describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () =>
 
 	test("writes to one instance are immediately visible from the other", async () => {
 		const connector1 = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "immediate-visibility-test" }
 		});
 		const connector2 = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "immediate-visibility-test" }
 		});
 
 		await connector1.set({ id: "1", value1: "v1" });
@@ -128,10 +135,12 @@ describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () =>
 
 	test("teardown on one instance clears the shared buffer for all instances", async () => {
 		const connector1 = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "teardown-clears-buffer-test" }
 		});
 		const connector2 = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "teardown-clears-buffer-test" }
 		});
 
 		await connector1.set({ id: "1", value1: "v1" });
@@ -142,10 +151,12 @@ describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () =>
 
 	test("concurrent writes from two instances do not lose updates", async () => {
 		const connector1 = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "concurrent-instances-test" }
 		});
 		const connector2 = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "concurrent-instances-test" }
 		});
 
 		const count = 10;
@@ -224,13 +235,14 @@ describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () =>
 	test("data written directly into the SharedArrayBuffer by a worker is visible to the connector", async () => {
 		// Prime the buffer on the main thread so we have a reference to pass to the Worker.
 		const connector = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "worker-visibility-test" }
 		});
 		// A single read is enough to materialise the SharedArrayBuffer on the main thread.
 		await connector.count();
 
 		const buffers = SharedStore.get<{ [key: string]: SharedArrayBuffer }>("sharedObjectBuffers");
-		const buf = buffers?.[nameof<TestType>()];
+		const buf = buffers?.["worker-visibility-test"];
 		expect(buf).toBeInstanceOf(SharedArrayBuffer);
 
 		// Spawn a Worker that writes entity JSON directly into the shared buffer using
@@ -261,12 +273,13 @@ parentPort.postMessage('done');
 
 	test("data written by the connector is immediately visible to a worker reading the shared buffer", async () => {
 		const connector = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "worker-visibility-test-2" }
 		});
 		await connector.set({ id: "main-item", value1: "main-value" });
 
 		const buffers = SharedStore.get<{ [key: string]: SharedArrayBuffer }>("sharedObjectBuffers");
-		const buf = buffers?.[nameof<TestType>()];
+		const buf = buffers?.["worker-visibility-test-2"];
 		expect(buf).toBeInstanceOf(SharedArrayBuffer);
 
 		// The worker reads the buffer directly and posts back the parsed entity array.

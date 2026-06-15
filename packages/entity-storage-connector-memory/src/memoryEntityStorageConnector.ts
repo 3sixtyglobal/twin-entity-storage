@@ -34,6 +34,7 @@ import {
 } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
+import type { IMemoryEntityStorageConnectorConfig } from "./models/IMemoryEntityStorageConnectorConfig.js";
 import type { IMemoryEntityStorageConnectorConstructorOptions } from "./models/IMemoryEntityStorageConnectorConstructorOptions.js";
 
 /**
@@ -86,11 +87,10 @@ export class MemoryEntityStorageConnector<T = unknown>
 	private readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
-	 * The resolved schema name used as the shared buffer and lock key.
-	 * Stored separately so it is always a plain string rather than string | undefined.
+	 * The resolved storage key used as the shared buffer and lock key.
 	 * @internal
 	 */
-	private readonly _schemaName: string;
+	private readonly _storageKey: string;
 
 	/**
 	 * Initial capacity hint in bytes for the shared entity buffer.
@@ -109,18 +109,33 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 * @param options The options for the connector.
 	 */
 	constructor(options: IMemoryEntityStorageConnectorConstructorOptions) {
-		Guards.object(MemoryEntityStorageConnector.CLASS_NAME, nameof(options), options);
+		Guards.object<IMemoryEntityStorageConnectorConstructorOptions>(
+			MemoryEntityStorageConnector.CLASS_NAME,
+			nameof(options),
+			options
+		);
 		Guards.stringValue(
 			MemoryEntityStorageConnector.CLASS_NAME,
 			nameof(options.entitySchema),
 			options.entitySchema
 		);
+		Guards.object<IMemoryEntityStorageConnectorConfig>(
+			MemoryEntityStorageConnector.CLASS_NAME,
+			nameof(options.config),
+			options.config
+		);
+		Guards.stringValue(
+			MemoryEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.storageKey),
+			options.config.storageKey
+		);
+
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
-		this._schemaName = this._entitySchema.type ?? options.entitySchema;
+		this._storageKey = options.config.storageKey;
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
-		this._initialCapacityBytes = options.initialCapacityBytes;
-		this._maxCapacityBytes = options.maxCapacityBytes;
+		this._initialCapacityBytes = options.config?.initialCapacityBytes;
+		this._maxCapacityBytes = options.config?.maxCapacityBytes;
 	}
 
 	/**
@@ -141,7 +156,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 				source: MemoryEntityStorageConnector.CLASS_NAME,
 				status: HealthStatus.Ok,
 				description: "healthDescription",
-				data: { entityType: this._schemaName }
+				data: { entityType: this._storageKey }
 			}
 		];
 	}
@@ -160,7 +175,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 * @returns True if the bootstrapping process was successful.
 	 */
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
-		await SharedObjectBuffer.create(this._schemaName, {
+		await SharedObjectBuffer.create(this._storageKey, {
 			initialCapacityBytes: this._initialCapacityBytes,
 			maxCapacityBytes: this._maxCapacityBytes
 		});
@@ -507,11 +522,11 @@ export class MemoryEntityStorageConnector<T = unknown>
 			message: "storeTearingDown"
 		});
 
-		await Mutex.lock(this._schemaName, { throwOnTimeout: true });
+		await Mutex.lock(this._storageKey, { throwOnTimeout: true });
 		try {
-			SharedObjectBuffer.remove(this._schemaName);
+			SharedObjectBuffer.remove(this._storageKey);
 		} finally {
-			Mutex.unlock(this._schemaName);
+			Mutex.unlock(this._storageKey);
 		}
 
 		await nodeLogging?.log({
@@ -603,14 +618,14 @@ export class MemoryEntityStorageConnector<T = unknown>
 	public async createTargetConnector<U>(
 		newEntitySchema: string
 	): Promise<IEntityStorageConnector<U>> {
-		// Resolve the target schema name the same way _schemaName is resolved in the constructor.
+		// Resolve the target schema name the same way _storageKey is resolved in the constructor.
 		const targetSchemaEntry = EntitySchemaFactory.get(newEntitySchema);
 		const targetSchemaName = targetSchemaEntry.type ?? newEntitySchema;
 
 		// When migrating to a different schema, wipe the target buffer so that every
 		// migration starts from an empty store regardless of any previous connector
 		// instances that shared the same schema name.
-		if (targetSchemaName !== this._schemaName) {
+		if (targetSchemaName !== this._storageKey) {
 			await Mutex.lock(targetSchemaName, { throwOnTimeout: true });
 			try {
 				SharedObjectBuffer.remove(targetSchemaName);
@@ -622,8 +637,11 @@ export class MemoryEntityStorageConnector<T = unknown>
 		return new MemoryEntityStorageConnector<U>({
 			entitySchema: newEntitySchema,
 			partitionContextIds: this._partitionContextIds,
-			initialCapacityBytes: this._initialCapacityBytes,
-			maxCapacityBytes: this._maxCapacityBytes
+			config: {
+				storageKey: this._storageKey,
+				initialCapacityBytes: this._initialCapacityBytes,
+				maxCapacityBytes: this._maxCapacityBytes
+			}
 		});
 	}
 
@@ -663,7 +681,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private async withLock<R>(fn: (entities: T[]) => { updated?: T[]; result: R }): Promise<R> {
-		const key = this._schemaName;
+		const key = this._storageKey;
 		await Mutex.lock(key, { throwOnTimeout: true });
 		try {
 			await SharedObjectBuffer.create(key, {

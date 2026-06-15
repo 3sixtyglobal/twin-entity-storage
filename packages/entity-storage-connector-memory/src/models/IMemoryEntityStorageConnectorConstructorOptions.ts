@@ -1,5 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import type { IMemoryEntityStorageConnectorConfig } from "./IMemoryEntityStorageConnectorConfig.js";
 
 /**
  * Options for the Memory Entity Storage Connector constructor.
@@ -16,14 +17,7 @@ export interface IMemoryEntityStorageConnectorConstructorOptions {
 	partitionContextIds?: string[];
 
 	/**
-	 * Initial capacity in bytes for the shared entity buffer.
-	 * @default 16 MiB.
+	 * Configuration for storage key and capacity settings.
 	 */
-	initialCapacityBytes?: number;
-
-	/**
-	 * Maximum JSON payload size in bytes for the shared entity buffer.
-	 * @default 256 MiB.
-	 */
-	maxCapacityBytes?: number;
+	config: IMemoryEntityStorageConnectorConfig;
 }
