@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.29](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-file-v0.0.3-next.28...entity-storage-connector-file-v0.0.3-next.29) (2026-06-15)
+
+
+### Bug Fixes
+
+* serialize and atomically write file entity storage stores ([#132](https://github.com/iotaledger/twin-entity-storage/issues/132)) ([4b65edb](https://github.com/iotaledger/twin-entity-storage/commit/4b65edbceeff1b3d9bee29e5451a2cc78f46f577))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.28 to 0.0.3-next.29
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.28 to 0.0.3-next.29
+
 ## [0.0.3-next.28](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-file-v0.0.3-next.27...entity-storage-connector-file-v0.0.3-next.28) (2026-06-12)
 
 

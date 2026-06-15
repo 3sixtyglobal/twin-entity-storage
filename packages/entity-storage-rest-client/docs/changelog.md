@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.0.3-next.29](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.0.3-next.28...entity-storage-rest-client-v0.0.3-next.29) (2026-06-15)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-rest-client:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.28 to 0.0.3-next.29
+
 ## [0.0.3-next.28](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.0.3-next.27...entity-storage-rest-client-v0.0.3-next.28) (2026-06-12)
 
 
