@@ -43,7 +43,8 @@ describe("EntityStorageService", () => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 
 		storage = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "test-type" }
 		});
 
 		EntityStorageConnectorFactory.register("test-type", () => storage);
