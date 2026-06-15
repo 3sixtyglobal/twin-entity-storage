@@ -38,6 +38,7 @@
 	"devDependencies": {
 		"@twin.org/nameof-transformer": "next",
 		"@twin.org/nameof-vitest-plugin": "next",
+		"@types/node": "25.9.1",
 		"@twin.org/validate-locales": "next",
 		"@vitest/coverage-v8": "4.1.6",
 		"copyfiles": "2.4.1",

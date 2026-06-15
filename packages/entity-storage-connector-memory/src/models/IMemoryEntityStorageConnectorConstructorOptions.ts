@@ -14,4 +14,16 @@ export interface IMemoryEntityStorageConnectorConstructorOptions {
 	 * The keys to use from the context ids to create partitions.
 	 */
 	partitionContextIds?: string[];
+
+	/**
+	 * Initial capacity in bytes for the shared entity buffer.
+	 * @default 16 MiB.
+	 */
+	initialCapacityBytes?: number;
+
+	/**
+	 * Maximum JSON payload size in bytes for the shared entity buffer.
+	 * @default 256 MiB.
+	 */
+	maxCapacityBytes?: number;
 }

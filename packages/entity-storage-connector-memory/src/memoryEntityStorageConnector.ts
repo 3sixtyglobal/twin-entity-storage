@@ -9,7 +9,9 @@ import {
 	type IHealth,
 	Is,
 	type IValidationFailure,
+	Mutex,
 	ObjectHelper,
+	SharedObjectBuffer,
 	Validation
 } from "@twin.org/core";
 import {
@@ -35,7 +37,15 @@ import { nameof } from "@twin.org/nameof";
 import type { IMemoryEntityStorageConnectorConstructorOptions } from "./models/IMemoryEntityStorageConnectorConstructorOptions.js";
 
 /**
- * Class for performing entity storage operations in-memory.
+ * Class for performing entity storage operations in-memory backed by a shared object buffer.
+ *
+ * All reads and writes are serialised with a per-schema lock so that concurrent async
+ * access, including across worker threads, never produces torn or lost updates.
+ *
+ * All connector instances that share the same entity schema name share the same underlying
+ * buffer, making data written in one instance immediately visible in another, including
+ * across worker threads when the main thread forwards worker messages to the lock and
+ * buffer handlers.
  */
 export class MemoryEntityStorageConnector<T = unknown>
 	implements IEntityStorageConnector<T>, IEntityStorageMigrationConnector<T>
@@ -76,10 +86,23 @@ export class MemoryEntityStorageConnector<T = unknown>
 	private readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
-	 * The storage for the in-memory items.
+	 * The resolved schema name used as the shared buffer and lock key.
+	 * Stored separately so it is always a plain string rather than string | undefined.
 	 * @internal
 	 */
-	private _store: T[];
+	private readonly _schemaName: string;
+
+	/**
+	 * Initial capacity hint in bytes for the shared entity buffer.
+	 * @internal
+	 */
+	private readonly _initialCapacityBytes?: number;
+
+	/**
+	 * Maximum capacity in bytes for the shared entity buffer.
+	 * @internal
+	 */
+	private readonly _maxCapacityBytes?: number;
 
 	/**
 	 * Create a new instance of MemoryEntityStorageConnector.
@@ -93,9 +116,11 @@ export class MemoryEntityStorageConnector<T = unknown>
 			options.entitySchema
 		);
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
+		this._schemaName = this._entitySchema.type ?? options.entitySchema;
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
-		this._store = [];
+		this._initialCapacityBytes = options.initialCapacityBytes;
+		this._maxCapacityBytes = options.maxCapacityBytes;
 	}
 
 	/**
@@ -116,7 +141,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 				source: MemoryEntityStorageConnector.CLASS_NAME,
 				status: HealthStatus.Ok,
 				description: "healthDescription",
-				data: { entityType: this._entitySchema.type }
+				data: { entityType: this._schemaName }
 			}
 		];
 	}
@@ -127,6 +152,20 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 */
 	public getSchema(): IEntitySchema {
 		return this._entitySchema as IEntitySchema;
+	}
+
+	/**
+	 * Bootstrap the component by creating and initializing any resources it needs.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the bootstrapping process was successful.
+	 */
+	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
+		await SharedObjectBuffer.create(this._schemaName, {
+			initialCapacityBytes: this._initialCapacityBytes,
+			maxCapacityBytes: this._maxCapacityBytes
+		});
+
+		return true;
 	}
 
 	/**
@@ -154,23 +193,26 @@ export class MemoryEntityStorageConnector<T = unknown>
 			});
 		}
 
-		const index = this.findItem(id, secondaryIndex, finalConditions);
-		const item = index >= 0 ? this._store[index] : undefined;
+		return this.withLock(entities => {
+			const index = this.findItem(entities, id, secondaryIndex, finalConditions);
+			const item = index >= 0 ? entities[index] : undefined;
 
-		if (Is.objectValue(item)) {
-			return EntityStorageHelper.unPrepareEntity<T>(item, [
-				MemoryEntityStorageConnector._PARTITION_KEY
-			]);
-		}
-
-		return undefined;
+			if (Is.objectValue(item)) {
+				return {
+					result: EntityStorageHelper.unPrepareEntity<T>(item, [
+						MemoryEntityStorageConnector._PARTITION_KEY
+					])
+				};
+			}
+			return { result: undefined };
+		});
 	}
 
 	/**
 	 * Set an entity.
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.
-	 * @returns The id of the entity.
+	 * @returns Resolves when the entity has been stored.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(MemoryEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
@@ -196,16 +238,20 @@ export class MemoryEntityStorageConnector<T = unknown>
 			});
 		}
 
-		const existingIndex = this.findItem(
-			prepared[this._primaryKey.property] as string,
-			undefined,
-			finalConditions
-		);
-		if (existingIndex >= 0) {
-			this._store[existingIndex] = prepared;
-		} else {
-			this._store.push(prepared);
-		}
+		return this.withLock(entities => {
+			const existingIndex = this.findItem(
+				entities,
+				prepared[this._primaryKey.property] as string,
+				undefined,
+				finalConditions
+			);
+			if (existingIndex >= 0) {
+				entities[existingIndex] = prepared;
+			} else {
+				entities.push(prepared);
+			}
+			return { updated: entities, result: undefined };
+		});
 	}
 
 	/**
@@ -219,36 +265,43 @@ export class MemoryEntityStorageConnector<T = unknown>
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const indexMap = new Map<string, number>();
-		for (let i = 0; i < this._store.length; i++) {
-			const stored = this._store[i];
-			const storedPartition = ObjectHelper.propertyGet(
-				stored,
-				MemoryEntityStorageConnector._PARTITION_KEY
-			);
-			if (!Is.stringValue(partitionKey) || storedPartition === partitionKey) {
-				indexMap.set(stored[this._primaryKey.property] as string, i);
-			}
-		}
-
-		for (const entity of entities) {
-			const prepared = EntityStorageHelper.prepareEntity(
+		const preparedItems = entities.map(entity =>
+			EntityStorageHelper.prepareEntity(
 				entity,
 				this._entitySchema,
 				Is.stringValue(partitionKey)
 					? [{ property: MemoryEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
 					: undefined,
 				{ nullBehavior: "omit" }
-			);
-			const id = prepared[this._primaryKey.property] as string;
-			const existingIndex = indexMap.get(id);
-			if (existingIndex !== undefined) {
-				this._store[existingIndex] = prepared;
-			} else {
-				const newIndex = this._store.push(prepared) - 1;
-				indexMap.set(id, newIndex);
+			)
+		);
+
+		return this.withLock(store => {
+			const indexMap = new Map<string, number>();
+			for (let i = 0; i < store.length; i++) {
+				const stored = store[i];
+				const storedPartition = ObjectHelper.propertyGet(
+					stored,
+					MemoryEntityStorageConnector._PARTITION_KEY
+				);
+				if (!Is.stringValue(partitionKey) || storedPartition === partitionKey) {
+					indexMap.set(stored[this._primaryKey.property] as string, i);
+				}
 			}
-		}
+
+			for (const prepared of preparedItems) {
+				const id = prepared[this._primaryKey.property] as string;
+				const existingIndex = indexMap.get(id);
+				if (existingIndex !== undefined) {
+					store[existingIndex] = prepared;
+				} else {
+					const newIndex = store.push(prepared) - 1;
+					indexMap.set(id, newIndex);
+				}
+			}
+
+			return { updated: store, result: undefined };
+		});
 	}
 
 	/**
@@ -274,11 +327,13 @@ export class MemoryEntityStorageConnector<T = unknown>
 			});
 		}
 
-		const index = this.findItem(id, undefined, finalConditions);
-
-		if (index >= 0) {
-			this._store.splice(index, 1);
-		}
+		return this.withLock(entities => {
+			const index = this.findItem(entities, id, undefined, finalConditions);
+			if (index >= 0) {
+				entities.splice(index, 1);
+			}
+			return { updated: entities, result: undefined };
+		});
 	}
 
 	/**
@@ -326,65 +381,64 @@ export class MemoryEntityStorageConnector<T = unknown>
 			);
 		}
 
-		let allEntities = this._store.slice();
+		return this.withLock(store => {
+			let allEntities = store.slice();
 
-		const finalConditions: EntityCondition<T> = {
-			conditions: [],
-			logicalOperator: LogicalOperator.And
-		};
+			const finalConditions: EntityCondition<T> = {
+				conditions: [],
+				logicalOperator: LogicalOperator.And
+			};
 
-		if (Is.stringValue(partitionKey)) {
-			finalConditions.conditions.push({
-				property: MemoryEntityStorageConnector._PARTITION_KEY,
-				comparison: ComparisonOperator.Equals,
-				value: partitionKey
-			});
-		}
+			if (Is.stringValue(partitionKey)) {
+				finalConditions.conditions.push({
+					property: MemoryEntityStorageConnector._PARTITION_KEY,
+					comparison: ComparisonOperator.Equals,
+					value: partitionKey
+				});
+			}
 
-		if (!Is.empty(conditions)) {
-			finalConditions.conditions.push(EntityStorageHelper.normalizeConditionValues(conditions));
-		}
+			if (!Is.empty(conditions)) {
+				finalConditions.conditions.push(EntityStorageHelper.normalizeConditionValues(conditions));
+			}
 
-		const entities = [];
-		const finalLimit = limit ?? MemoryEntityStorageConnector._DEFAULT_LIMIT;
-		let nextCursor: string | undefined;
+			const resultEntities = [];
+			const finalLimit = limit ?? MemoryEntityStorageConnector._DEFAULT_LIMIT;
+			let nextCursor: string | undefined;
 
-		if (allEntities.length > 0) {
-			const finalSortKeys = EntitySchemaHelper.buildSortProperties<T>(
-				this._entitySchema,
-				sortProperties
-			);
-			allEntities = EntitySorter.sort(allEntities, finalSortKeys);
+			if (allEntities.length > 0) {
+				const finalSortKeys = EntitySchemaHelper.buildSortProperties<T>(
+					this._entitySchema,
+					sortProperties
+				);
+				allEntities = EntitySorter.sort(allEntities, finalSortKeys);
 
-			const startIndex = Coerce.number(cursor) ?? 0;
+				const startIndex = Coerce.number(cursor) ?? 0;
 
-			for (let i = startIndex; i < allEntities.length; i++) {
-				if (
-					EntityConditions.check(allEntities[i], finalConditions) &&
-					entities.length < finalLimit
-				) {
-					const entity = Is.arrayValue(properties)
-						? ObjectHelper.pick(allEntities[i], properties)
-						: allEntities[i];
-					entities.push(
-						EntityStorageHelper.unPrepareEntity<T>(entity, [
-							MemoryEntityStorageConnector._PARTITION_KEY
-						])
-					);
-					if (entities.length >= finalLimit) {
-						if (i < allEntities.length - 1) {
-							nextCursor = (i + 1).toString();
+				for (let i = startIndex; i < allEntities.length; i++) {
+					if (
+						EntityConditions.check(allEntities[i], finalConditions) &&
+						resultEntities.length < finalLimit
+					) {
+						const entity = Is.arrayValue(properties)
+							? ObjectHelper.pick(allEntities[i], properties)
+							: allEntities[i];
+						resultEntities.push(
+							EntityStorageHelper.unPrepareEntity<T>(entity, [
+								MemoryEntityStorageConnector._PARTITION_KEY
+							])
+						);
+						if (resultEntities.length >= finalLimit) {
+							if (i < allEntities.length - 1) {
+								nextCursor = (i + 1).toString();
+							}
+							break;
 						}
-						break;
 					}
 				}
 			}
-		}
 
-		return {
-			entities,
-			cursor: nextCursor
-		};
+			return { result: { entities: resultEntities, cursor: nextCursor } };
+		});
 	}
 
 	/**
@@ -395,18 +449,17 @@ export class MemoryEntityStorageConnector<T = unknown>
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		if (Is.stringValue(partitionKey)) {
-			for (let i = this._store.length - 1; i >= 0; i--) {
-				if (
-					ObjectHelper.propertyGet(this._store[i], MemoryEntityStorageConnector._PARTITION_KEY) ===
-					partitionKey
-				) {
-					this._store.splice(i, 1);
-				}
+		return this.withLock(entities => {
+			if (Is.stringValue(partitionKey)) {
+				const filtered = entities.filter(
+					item =>
+						ObjectHelper.propertyGet(item, MemoryEntityStorageConnector._PARTITION_KEY) !==
+						partitionKey
+				);
+				return { updated: filtered, result: undefined };
 			}
-		} else {
-			this._store.splice(0, this._store.length);
-		}
+			return { updated: [], result: undefined };
+		});
 	}
 
 	/**
@@ -428,16 +481,19 @@ export class MemoryEntityStorageConnector<T = unknown>
 			});
 		}
 
-		for (const id of ids) {
-			const index = this.findItem(id, undefined, finalConditions);
-			if (index >= 0) {
-				this._store.splice(index, 1);
+		return this.withLock(entities => {
+			for (const id of ids) {
+				const index = this.findItem(entities, id, undefined, finalConditions);
+				if (index >= 0) {
+					entities.splice(index, 1);
+				}
 			}
-		}
+			return { updated: entities, result: undefined };
+		});
 	}
 
 	/**
-	 * Teardown the storage by clearing the underlying store.
+	 * Teardown the storage by clearing the underlying shared buffer for this schema.
 	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the teardown process was successful.
 	 */
@@ -451,7 +507,12 @@ export class MemoryEntityStorageConnector<T = unknown>
 			message: "storeTearingDown"
 		});
 
-		this._store.splice(0, this._store.length);
+		await Mutex.lock(this._schemaName, { throwOnTimeout: true });
+		try {
+			SharedObjectBuffer.remove(this._schemaName);
+		} finally {
+			Mutex.unlock(this._schemaName);
+		}
 
 		await nodeLogging?.log({
 			level: "info",
@@ -489,21 +550,26 @@ export class MemoryEntityStorageConnector<T = unknown>
 			finalConditions.conditions.push(EntityStorageHelper.normalizeConditionValues(conditions));
 		}
 
-		if (finalConditions.conditions.length === 0) {
-			return this._store.length;
-		}
-
-		return this._store.filter(item => EntityConditions.check(item, finalConditions)).length;
+		return this.withLock(entities => {
+			if (finalConditions.conditions.length === 0) {
+				return { result: entities.length };
+			}
+			return {
+				result: entities.filter(item => EntityConditions.check(item, finalConditions)).length
+			};
+		});
 	}
 
 	/**
-	 * Get the memory store.
-	 * @returns The store.
+	 * Get all entities in the memory store.
+	 * @returns All stored entities with partition keys removed.
 	 */
-	public getStore(): T[] {
-		return this._store.map(item =>
-			EntityStorageHelper.unPrepareEntity<T>(item, [MemoryEntityStorageConnector._PARTITION_KEY])
-		);
+	public async getStore(): Promise<T[]> {
+		return this.withLock(entities => ({
+			result: entities.map(item =>
+				EntityStorageHelper.unPrepareEntity<T>(item, [MemoryEntityStorageConnector._PARTITION_KEY])
+			)
+		}));
 	}
 
 	/**
@@ -511,22 +577,22 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 * @returns The list of unique context ids.
 	 */
 	public async getPartitionContextIds(): Promise<IContextIds[]> {
-		const contextIds: { [id: string]: IContextIds } = {};
-
-		for (const entity of this._store) {
-			const partitionId = ObjectHelper.propertyGet(
-				entity,
-				MemoryEntityStorageConnector._PARTITION_KEY
-			);
-			if (Is.stringValue(partitionId)) {
-				contextIds[partitionId] = ContextIdHelper.shortSplit(
-					this._partitionContextIds ?? [],
-					partitionId
+		return this.withLock(entities => {
+			const contextIds: { [id: string]: IContextIds } = {};
+			for (const entity of entities) {
+				const partitionId = ObjectHelper.propertyGet(
+					entity,
+					MemoryEntityStorageConnector._PARTITION_KEY
 				);
+				if (Is.stringValue(partitionId)) {
+					contextIds[partitionId] = ContextIdHelper.shortSplit(
+						this._partitionContextIds ?? [],
+						partitionId
+					);
+				}
 			}
-		}
-
-		return Object.values(contextIds);
+			return { result: Object.values(contextIds) };
+		});
 	}
 
 	/**
@@ -537,10 +603,27 @@ export class MemoryEntityStorageConnector<T = unknown>
 	public async createTargetConnector<U>(
 		newEntitySchema: string
 	): Promise<IEntityStorageConnector<U>> {
-		// No resources to manipulate for in-memory, just return a new connector with the new store and the new schema.
+		// Resolve the target schema name the same way _schemaName is resolved in the constructor.
+		const targetSchemaEntry = EntitySchemaFactory.get(newEntitySchema);
+		const targetSchemaName = targetSchemaEntry.type ?? newEntitySchema;
+
+		// When migrating to a different schema, wipe the target buffer so that every
+		// migration starts from an empty store regardless of any previous connector
+		// instances that shared the same schema name.
+		if (targetSchemaName !== this._schemaName) {
+			await Mutex.lock(targetSchemaName, { throwOnTimeout: true });
+			try {
+				SharedObjectBuffer.remove(targetSchemaName);
+			} finally {
+				Mutex.unlock(targetSchemaName);
+			}
+		}
+
 		return new MemoryEntityStorageConnector<U>({
 			entitySchema: newEntitySchema,
-			partitionContextIds: this._partitionContextIds
+			partitionContextIds: this._partitionContextIds,
+			initialCapacityBytes: this._initialCapacityBytes,
+			maxCapacityBytes: this._maxCapacityBytes
 		});
 	}
 
@@ -556,9 +639,6 @@ export class MemoryEntityStorageConnector<T = unknown>
 		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<IEntityStorageConnector<U>> {
-		// Nothing to do for in-memory as the new connector is already using the correct store and schema.
-		// And there is nothing to teardown for the old connector as it is in-memory and will be garbage
-		// collected when there are no references to it.
 		return targetConnector;
 	}
 
@@ -573,12 +653,37 @@ export class MemoryEntityStorageConnector<T = unknown>
 		targetConnector: IEntityStorageConnector<U> | undefined,
 		options?: IMigrationOptions,
 		loggingComponentType?: string
-	): Promise<void> {
-		// Nothing to do for in-memory as there are no resources to cleanup.
+	): Promise<void> {}
+
+	/**
+	 * Acquires the schema-keyed lock, runs fn with the current entity array, optionally
+	 * writes back a modified array, then releases the lock.
+	 * @param fn The synchronous function to run while the lock is held.
+	 * @returns The result produced by fn.
+	 * @internal
+	 */
+	private async withLock<R>(fn: (entities: T[]) => { updated?: T[]; result: R }): Promise<R> {
+		const key = this._schemaName;
+		await Mutex.lock(key, { throwOnTimeout: true });
+		try {
+			await SharedObjectBuffer.create(key, {
+				initialCapacityBytes: this._initialCapacityBytes,
+				maxCapacityBytes: this._maxCapacityBytes
+			});
+			const entities = (await SharedObjectBuffer.read<T[]>(key)) ?? [];
+			const outcome = fn(entities);
+			if (outcome.updated !== undefined) {
+				await SharedObjectBuffer.write<T[]>(key, outcome.updated);
+			}
+			return outcome.result;
+		} finally {
+			Mutex.unlock(key);
+		}
 	}
 
 	/**
-	 * Find the item in the store.
+	 * Find the item in the provided entity array.
+	 * @param entities The current entity array.
 	 * @param id The id to search for.
 	 * @param secondaryIndex The secondary index to search for.
 	 * @param conditions The optional conditions to match for the entities.
@@ -586,6 +691,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private findItem(
+		entities: T[],
 		id: string,
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
@@ -601,7 +707,6 @@ export class MemoryEntityStorageConnector<T = unknown>
 		}
 
 		if (Is.arrayValue(conditions)) {
-			// If we haven't added a secondary index condition we need to add the primary key condition.
 			if (finalConditions.length === 0) {
 				finalConditions.push({
 					property: this._primaryKey.property as string,
@@ -619,13 +724,13 @@ export class MemoryEntityStorageConnector<T = unknown>
 		}
 
 		if (finalConditions.length > 0) {
-			for (let i = 0; i < this._store.length; i++) {
-				if (EntityConditions.check(this._store[i], { conditions: finalConditions })) {
+			for (let i = 0; i < entities.length; i++) {
+				if (EntityConditions.check(entities[i], { conditions: finalConditions })) {
 					return i;
 				}
 			}
 		} else {
-			return this._store.findIndex(e => e[this._primaryKey.property] === id);
+			return entities.findIndex(e => e[this._primaryKey.property] === id);
 		}
 
 		return -1;
