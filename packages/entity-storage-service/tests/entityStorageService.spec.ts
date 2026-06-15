@@ -49,6 +49,10 @@ describe("EntityStorageService", () => {
 		EntityStorageConnectorFactory.register("test-type", () => storage);
 	});
 
+	afterEach(async () => {
+		await storage.teardown();
+	});
+
 	test("can create the service", async () => {
 		const service = new EntityStorageService({ entityStorageType: "test-type" });
 		expect(service).toBeDefined();
@@ -60,7 +64,8 @@ describe("EntityStorageService", () => {
 		});
 		await service.set({ id: "1", value1: "value1", value2: 42 });
 
-		expect(storage.getStore()).toEqual([{ id: "1", value1: "value1", value2: 42 }]);
+		const store = await storage.getStore();
+		expect(store).toEqual([{ id: "1", value1: "value1", value2: 42 }]);
 	});
 
 	test("can set batch of entities", async () => {
@@ -73,9 +78,10 @@ describe("EntityStorageService", () => {
 			{ id: "3", value1: "value3", value2: 44 }
 		]);
 
-		expect(storage.getStore()).toHaveLength(3);
-		expect(storage.getStore()[0]).toEqual({ id: "1", value1: "value1", value2: 42 });
-		expect(storage.getStore()[2]).toEqual({ id: "3", value1: "value3", value2: 44 });
+		const store = await storage.getStore();
+		expect(store).toHaveLength(3);
+		expect(store[0]).toEqual({ id: "1", value1: "value1", value2: 42 });
+		expect(store[2]).toEqual({ id: "3", value1: "value3", value2: 44 });
 	});
 
 	test("can fail to set batch with no entities", async () => {
@@ -122,7 +128,8 @@ describe("EntityStorageService", () => {
 
 		await service.remove("1");
 
-		expect(storage.getStore()).toEqual([]);
+		const store = await storage.getStore();
+		expect(store).toEqual([]);
 	});
 
 	test("can query entities", async () => {
