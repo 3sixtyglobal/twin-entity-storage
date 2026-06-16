@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.32](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-cosmosdb-v0.0.3-next.31...entity-storage-connector-cosmosdb-v0.0.3-next.32) (2026-06-16)
+
+
+### Bug Fixes
+
+* dynamodb query gsi ([#140](https://github.com/iotaledger/twin-entity-storage/issues/140)) ([45b56d6](https://github.com/iotaledger/twin-entity-storage/commit/45b56d6260c9876012030cc6c85026ea84aebff5))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.31 to 0.0.3-next.32
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.31 to 0.0.3-next.32
+
 ## [0.0.3-next.31](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-cosmosdb-v0.0.3-next.30...entity-storage-connector-cosmosdb-v0.0.3-next.31) (2026-06-15)
 
 

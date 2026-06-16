@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.0.3-next.32](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-scylladb-v0.0.3-next.31...entity-storage-connector-scylladb-v0.0.3-next.32) (2026-06-16)
+
+
+### Bug Fixes
+
+* dynamodb query gsi ([#140](https://github.com/iotaledger/twin-entity-storage/issues/140)) ([45b56d6](https://github.com/iotaledger/twin-entity-storage/commit/45b56d6260c9876012030cc6c85026ea84aebff5))
+* use async getStore in tests ([0896ca4](https://github.com/iotaledger/twin-entity-storage/commit/0896ca4f587606156de5f4e0d3095e06510d69cf))
+* use async getStore in tests ([91563b5](https://github.com/iotaledger/twin-entity-storage/commit/91563b547aa66d2cc82cf98c1a2a78b99af96f9d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.31 to 0.0.3-next.32
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.31 to 0.0.3-next.32
+
 ## [0.0.3-next.31](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-scylladb-v0.0.3-next.30...entity-storage-connector-scylladb-v0.0.3-next.31) (2026-06-15)
 
 

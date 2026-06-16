@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.32](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.0.3-next.31...entity-storage-service-v0.0.3-next.32) (2026-06-16)
+
+
+### Bug Fixes
+
+* memory entity storage storageKey for uniqueness ([6fe8663](https://github.com/iotaledger/twin-entity-storage/commit/6fe8663e97cf0a151fd26b8fea0c4ef4b971f694))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.31 to 0.0.3-next.32
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.31 to 0.0.3-next.32
+
 ## [0.0.3-next.31](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.0.3-next.30...entity-storage-service-v0.0.3-next.31) (2026-06-15)
 
 
