@@ -1595,175 +1595,73 @@ export class DynamoDbEntityStorageConnector<
 		secondaryIndex?: string,
 		partitionKey?: string
 	): Promise<{
-		/**
-		 * The entities, which can be partial if a limited keys list was provided.
-		 */
 		entities: Partial<T>[];
-		/**
-		 * An optional cursor, when defined can be used to call find to get more entities.
-		 */
 		cursor?: string;
 	}> {
 		try {
 			const returnSize = limit ?? DynamoDbEntityStorageConnector._DEFAULT_LIMIT;
-
-			let indexName: string | undefined = Is.stringValue(secondaryIndex)
-				? `${secondaryIndex}Index`
-				: undefined;
-			// The attribute whose value must appear in ExclusiveStartKey when querying a GSI
-			let gsiAttribute: string | undefined = secondaryIndex;
-
-			// If we have a sortable property defined in the descriptor then we must use
-			// the secondary index for the query
-			let scanAscending = true;
-			if (Is.arrayValue(sortProperties)) {
-				if (sortProperties.length > 1) {
-					throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "sortSingle");
-				}
-
-				for (const sortProperty of sortProperties) {
-					const propertySchema = this._entitySchema.properties?.find(
-						e => e.property === sortProperty.property
-					);
-					if (propertySchema?.isPrimary) {
-						indexName = undefined;
-						gsiAttribute = undefined;
-					} else {
-						indexName = `${sortProperty.property as string}Index`;
-						gsiAttribute = sortProperty.property as string;
-					}
-					scanAscending = sortProperty.sortDirection === SortDirection.Ascending;
-				}
-			}
-
-			const attributeNames: { [id: string]: string } = { "#partitionId": "partitionId" };
-			const attributeValues: { [id: string]: AttributeValue } = {
-				[`:${DynamoDbEntityStorageConnector._PARTITION_KEY}`]: {
-					S: partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE
-				}
-			};
+			const indexConfig = this.resolveQueryIndexConfig(sortProperties, secondaryIndex);
+			const { attributeNames, attributeValues } = this.buildQueryAttributeMaps(partitionKey);
+			const safeCursor = this.sanitizeCursorForPartition(cursor, attributeValues);
 
 			const expressions = this.buildQueryParameters(
 				"",
 				conditions,
 				attributeNames,
 				attributeValues,
-				gsiAttribute
+				indexConfig.gsiAttribute
 			);
 
 			if (expressions.noResults) {
 				return { entities: [], cursor: undefined };
 			}
 
-			// OR conditions on primary key attributes can't use KeyConditionExpression or
-			// FilterExpression in a QueryCommand — fall back to a full table ScanCommand.
 			if (expressions.requiresScan) {
-				let scanFilter = "#partitionId = :partitionId";
-				if (Is.stringValue(expressions.filterCondition)) {
-					scanFilter += ` AND ${expressions.filterCondition.trim()}`;
-				}
+				const scanResult = await this.executeScanFallback(
+					expressions.filterCondition,
+					properties,
+					attributeNames,
+					attributeValues,
+					safeCursor,
+					returnSize
+				);
 
-				const dbConnection = this.createConnection();
-				const matchingItems: { [id: string]: AttributeValue }[] = [];
-				let scanStartKey: { [id: string]: AttributeValue } | undefined = Is.empty(cursor)
-					? undefined
-					: ObjectHelper.fromBytes(Converter.base64ToBytes(cursor));
-				const scanProjection = this.buildProjectionExpression(properties, attributeNames);
-
-				do {
-					const scanResult = await dbConnection.send(
-						new RawScanCommand({
-							TableName: this._config.tableName,
-							FilterExpression: scanFilter,
-							ExpressionAttributeNames: attributeNames,
-							ExpressionAttributeValues: attributeValues,
-							ProjectionExpression: scanProjection,
-							ExclusiveStartKey: scanStartKey
-						})
-					);
-					matchingItems.push(...(scanResult.Items ?? []));
-					scanStartKey = scanResult.LastEvaluatedKey;
-				} while (!Is.empty(scanStartKey));
-
-				const hasMore = matchingItems.length > returnSize;
-				const returnedRawItems = hasMore ? matchingItems.slice(0, returnSize) : matchingItems;
-
-				let resultCursor: string | undefined;
-				if (hasMore) {
-					const lastRawItem = returnedRawItems[returnedRawItems.length - 1];
-					const syntheticKey: { [id: string]: AttributeValue } = {
-						[DynamoDbEntityStorageConnector._PARTITION_KEY]:
-							lastRawItem[DynamoDbEntityStorageConnector._PARTITION_KEY],
-						[this._primaryKey.property as string]: lastRawItem[this._primaryKey.property as string]
-					};
-					resultCursor = Converter.bytesToBase64(ObjectHelper.toBytes(syntheticKey));
-				}
-
-				const scanEntities: T[] = returnedRawItems.map(item => {
-					const unmarshalled = unmarshall(item);
-					return EntityStorageHelper.unPrepareEntity(unmarshalled as T, [
-						DynamoDbEntityStorageConnector._PARTITION_KEY
-					]);
-				});
-
-				return { entities: scanEntities, cursor: resultCursor };
+				return {
+					entities: this.mapRawItemsToEntities(scanResult.rawItems),
+					cursor: scanResult.cursor
+				};
 			}
 
-			let keyExpression = "#partitionId = :partitionId";
-			if (expressions.keyCondition.length > 0) {
-				keyExpression += ` AND ${expressions.keyCondition}`;
-			}
-
+			const keyExpression = this.buildKeyExpression(expressions.keyCondition);
 			const queryProjection = this.buildProjectionExpression(properties, attributeNames);
-			const query = new QueryCommand({
-				TableName: this._config.tableName,
-				IndexName: indexName,
-				KeyConditionExpression: keyExpression,
-				FilterExpression: Is.stringValue(expressions.filterCondition)
-					? expressions.filterCondition
-					: undefined,
-				ExpressionAttributeNames: attributeNames,
-				ExpressionAttributeValues: attributeValues,
-				ProjectionExpression: queryProjection,
-				Limit: returnSize + 1,
-				ScanIndexForward: scanAscending,
-				ExclusiveStartKey: Is.empty(cursor)
-					? undefined
-					: ObjectHelper.fromBytes(Converter.base64ToBytes(cursor))
-			});
 
-			const connection = this.createDocClient();
+			const queryResult = Is.stringValue(expressions.filterCondition)
+				? await this.executeFilteredQuery(
+						keyExpression,
+						expressions.filterCondition,
+						attributeNames,
+						attributeValues,
+						queryProjection,
+						indexConfig.indexName,
+						indexConfig.scanAscending,
+						safeCursor,
+						returnSize
+					)
+				: await this.executeUnfilteredQuery(
+						keyExpression,
+						attributeNames,
+						attributeValues,
+						queryProjection,
+						indexConfig.indexName,
+						indexConfig.scanAscending,
+						safeCursor,
+						returnSize
+					);
 
-			const results = await connection.send(query);
-
-			const rawItems = results.Items ?? [];
-			const hasMore = rawItems.length > returnSize;
-			const returnedRawItems = hasMore ? rawItems.slice(0, returnSize) : rawItems;
-
-			let resultCursor: string | undefined;
-			if (hasMore) {
-				const lastRawItem = returnedRawItems[returnedRawItems.length - 1] as {
-					[id: string]: AttributeValue;
-				};
-				const syntheticKey: { [id: string]: AttributeValue } = {
-					[DynamoDbEntityStorageConnector._PARTITION_KEY]:
-						lastRawItem[DynamoDbEntityStorageConnector._PARTITION_KEY],
-					[this._primaryKey.property as string]: lastRawItem[this._primaryKey.property as string]
-				};
-				if (Is.stringValue(gsiAttribute)) {
-					syntheticKey[gsiAttribute] = lastRawItem[gsiAttribute];
-				}
-				resultCursor = Converter.bytesToBase64(ObjectHelper.toBytes(syntheticKey));
-			}
-
-			const entities: T[] = returnedRawItems.map(item => {
-				const unmarshalled = unmarshall(item);
-				return EntityStorageHelper.unPrepareEntity(unmarshalled as T, [
-					DynamoDbEntityStorageConnector._PARTITION_KEY
-				]);
-			});
-
-			return { entities, cursor: resultCursor };
+			return {
+				entities: this.mapRawItemsToEntities(queryResult.rawItems),
+				cursor: queryResult.cursor
+			};
 		} catch (err) {
 			if (BaseError.isErrorCode(err, "ResourceNotFoundException")) {
 				throw new GeneralError(
@@ -1782,6 +1680,371 @@ export class DynamoDbEntityStorageConnector<
 				err
 			);
 		}
+	}
+
+	/**
+	 * Resolve index configuration from sort options and optional explicit secondary index.
+	 * @param sortProperties The optional sort order.
+	 * @param secondaryIndex The optional explicit secondary index.
+	 * @returns The resolved index name, GSI attribute and sort direction.
+	 * @throws GeneralError if more than one sort property is specified.
+	 * @internal
+	 */
+	private resolveQueryIndexConfig(
+		sortProperties?: {
+			property: keyof T;
+			sortDirection: SortDirection;
+		}[],
+		secondaryIndex?: string
+	): {
+		indexName?: string;
+		gsiAttribute?: string;
+		scanAscending: boolean;
+	} {
+		let indexName: string | undefined = Is.stringValue(secondaryIndex)
+			? `${secondaryIndex}Index`
+			: undefined;
+		let gsiAttribute: string | undefined = secondaryIndex;
+		let scanAscending = true;
+
+		if (Is.arrayValue(sortProperties)) {
+			if (sortProperties.length > 1) {
+				throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "sortSingle");
+			}
+
+			for (const sortProperty of sortProperties) {
+				const propertySchema = this._entitySchema.properties?.find(
+					e => e.property === sortProperty.property
+				);
+				if (propertySchema?.isPrimary) {
+					indexName = undefined;
+					gsiAttribute = undefined;
+				} else {
+					indexName = `${sortProperty.property as string}Index`;
+					gsiAttribute = sortProperty.property as string;
+				}
+				scanAscending = sortProperty.sortDirection === SortDirection.Ascending;
+			}
+		}
+
+		return {
+			indexName,
+			gsiAttribute,
+			scanAscending
+		};
+	}
+
+	/**
+	 * Build the base attribute maps used for query/scan operations.
+	 * @param partitionKey The optional partition key.
+	 * @returns The query attribute maps.
+	 * @internal
+	 */
+	private buildQueryAttributeMaps(partitionKey?: string): {
+		attributeNames: { [id: string]: string };
+		attributeValues: { [id: string]: AttributeValue };
+	} {
+		return {
+			attributeNames: { "#partitionId": "partitionId" },
+			attributeValues: {
+				[`:${DynamoDbEntityStorageConnector._PARTITION_KEY}`]: {
+					S: partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE
+				}
+			}
+		};
+	}
+
+	/**
+	 * Build the key condition expression with the mandatory partition predicate.
+	 * @param keyCondition The optional extra key condition segment.
+	 * @returns The full key condition expression.
+	 * @internal
+	 */
+	private buildKeyExpression(keyCondition: string): string {
+		let keyExpression = "#partitionId = :partitionId";
+		if (keyCondition.length > 0) {
+			keyExpression += ` AND ${keyCondition}`;
+		}
+		return keyExpression;
+	}
+
+	/**
+	 * Decode a paginated cursor into a DynamoDB ExclusiveStartKey.
+	 * @param cursor The encoded cursor.
+	 * @returns The decoded exclusive start key.
+	 * @internal
+	 */
+	private decodeCursor(cursor?: string): { [id: string]: AttributeValue } | undefined {
+		return Is.empty(cursor) ? undefined : ObjectHelper.fromBytes(Converter.base64ToBytes(cursor));
+	}
+
+	/**
+	 * Encode a DynamoDB key to a cursor string.
+	 * @param key The key to encode.
+	 * @returns The encoded cursor.
+	 * @internal
+	 */
+	private encodeCursor(key?: { [id: string]: AttributeValue }): string | undefined {
+		return Is.empty(key) ? undefined : Converter.bytesToBase64(ObjectHelper.toBytes(key));
+	}
+
+	/**
+	 * Return undefined if the cursor belongs to a different partition, preventing cross-partition leakage.
+	 * @param cursor The encoded cursor.
+	 * @param attributeValues The current query attribute values containing the expected partition key.
+	 * @returns The cursor if it matches the current partition, otherwise undefined.
+	 * @internal
+	 */
+	private sanitizeCursorForPartition(
+		cursor: string | undefined,
+		attributeValues: { [id: string]: AttributeValue }
+	): string | undefined {
+		if (Is.empty(cursor)) {
+			return undefined;
+		}
+		const decoded = this.decodeCursor(cursor);
+		if (Is.empty(decoded)) {
+			return undefined;
+		}
+		const expectedPartition =
+			attributeValues[`:${DynamoDbEntityStorageConnector._PARTITION_KEY}`]?.S;
+		const cursorPartition = decoded[DynamoDbEntityStorageConnector._PARTITION_KEY]?.S;
+		return cursorPartition === expectedPartition ? cursor : undefined;
+	}
+
+	/**
+	 * Execute a scan fallback path for unsupported key-condition shapes.
+	 * @param filterCondition The optional filter expression part.
+	 * @param properties The projection properties.
+	 * @param attributeNames The expression attribute names.
+	 * @param attributeValues The expression attribute values.
+	 * @param cursor The optional cursor.
+	 * @param returnSize The requested page size.
+	 * @returns Raw items and an optional cursor.
+	 * @internal
+	 */
+	private async executeScanFallback(
+		filterCondition: string,
+		properties: (keyof T)[] | undefined,
+		attributeNames: { [id: string]: string },
+		attributeValues: { [id: string]: AttributeValue },
+		cursor: string | undefined,
+		returnSize: number
+	): Promise<{
+		rawItems: { [id: string]: AttributeValue }[];
+		cursor?: string;
+	}> {
+		let scanFilter = "#partitionId = :partitionId";
+		if (Is.stringValue(filterCondition)) {
+			scanFilter += ` AND ${filterCondition.trim()}`;
+		}
+
+		const dbConnection = this.createConnection();
+		const matchingItems: { [id: string]: AttributeValue }[] = [];
+		let scanStartKey = this.decodeCursor(cursor);
+		let lastEvaluatedKey: { [id: string]: AttributeValue } | undefined;
+
+		// Scan in batches with a heuristic limit to avoid scanning excessive unmatched rows.
+		// Use at least 2x returnSize per batch to balance accuracy and efficiency.
+		const batchScanLimit = Math.max(returnSize * 2, 100);
+
+		do {
+			const scanResult = await dbConnection.send(
+				new RawScanCommand({
+					TableName: this._config.tableName,
+					FilterExpression: scanFilter,
+					ExpressionAttributeNames: attributeNames,
+					ExpressionAttributeValues: attributeValues,
+					ExclusiveStartKey: scanStartKey,
+					Limit: batchScanLimit
+				})
+			);
+
+			matchingItems.push(...(scanResult.Items ?? []));
+			lastEvaluatedKey = scanResult.LastEvaluatedKey;
+			scanStartKey = lastEvaluatedKey;
+
+			// Early exit: stop scanning once we have enough filtered results to fill the page.
+			if (matchingItems.length >= returnSize) {
+				break;
+			}
+		} while (!Is.empty(lastEvaluatedKey));
+
+		const hasMore = matchingItems.length > returnSize;
+		const returnedRawItems = hasMore ? matchingItems.slice(0, returnSize) : matchingItems;
+
+		let resultCursor: string | undefined;
+		if (hasMore) {
+			const lastRawItem = returnedRawItems[returnedRawItems.length - 1];
+			const syntheticKey: { [id: string]: AttributeValue } = {
+				[DynamoDbEntityStorageConnector._PARTITION_KEY]:
+					lastRawItem[DynamoDbEntityStorageConnector._PARTITION_KEY],
+				[this._primaryKey.property as string]: lastRawItem[this._primaryKey.property as string]
+			};
+			resultCursor = this.encodeCursor(syntheticKey);
+		}
+
+		const projectedRawItems = Is.arrayValue(properties)
+			? returnedRawItems.map(item => {
+					const projected: { [id: string]: AttributeValue } = {};
+					for (const prop of properties) {
+						const key = prop as string;
+						if (!Is.undefined(item[key])) {
+							projected[key] = item[key];
+						}
+					}
+					if (!Is.undefined(item[DynamoDbEntityStorageConnector._PARTITION_KEY])) {
+						projected[DynamoDbEntityStorageConnector._PARTITION_KEY] =
+							item[DynamoDbEntityStorageConnector._PARTITION_KEY];
+					}
+					return projected;
+				})
+			: returnedRawItems;
+
+		return {
+			rawItems: projectedRawItems,
+			cursor: resultCursor
+		};
+	}
+
+	/**
+	 * Execute a query path without filter expression.
+	 * @param keyExpression The key condition expression.
+	 * @param attributeNames The expression attribute names.
+	 * @param attributeValues The expression attribute values.
+	 * @param projectionExpression The projection expression.
+	 * @param indexName The optional index name.
+	 * @param scanAscending The scan direction.
+	 * @param cursor The optional cursor.
+	 * @param returnSize The requested page size.
+	 * @returns Raw items and an optional cursor.
+	 * @internal
+	 */
+	private async executeUnfilteredQuery(
+		keyExpression: string,
+		attributeNames: { [id: string]: string },
+		attributeValues: { [id: string]: AttributeValue },
+		projectionExpression: string | undefined,
+		indexName: string | undefined,
+		scanAscending: boolean,
+		cursor: string | undefined,
+		returnSize: number
+	): Promise<{
+		rawItems: { [id: string]: AttributeValue }[];
+		cursor?: string;
+	}> {
+		const connection = this.createDocClient();
+		const results = await connection.send(
+			new QueryCommand({
+				TableName: this._config.tableName,
+				IndexName: indexName,
+				KeyConditionExpression: keyExpression,
+				ExpressionAttributeNames: attributeNames,
+				ExpressionAttributeValues: attributeValues,
+				ProjectionExpression: projectionExpression,
+				Limit: returnSize,
+				ScanIndexForward: scanAscending,
+				ExclusiveStartKey: this.decodeCursor(cursor)
+			})
+		);
+
+		const rawItems = (results.Items ?? []) as { [id: string]: AttributeValue }[];
+		let hasMore = false;
+
+		if (rawItems.length === returnSize && !Is.empty(results.LastEvaluatedKey)) {
+			const probe = await connection.send(
+				new QueryCommand({
+					TableName: this._config.tableName,
+					IndexName: indexName,
+					KeyConditionExpression: keyExpression,
+					ExpressionAttributeNames: attributeNames,
+					ExpressionAttributeValues: attributeValues,
+					ProjectionExpression: projectionExpression,
+					Limit: 1,
+					ScanIndexForward: scanAscending,
+					ExclusiveStartKey: results.LastEvaluatedKey
+				})
+			);
+			hasMore = (probe.Items?.length ?? 0) > 0;
+		}
+
+		return {
+			rawItems,
+			cursor: hasMore ? this.encodeCursor(results.LastEvaluatedKey) : undefined
+		};
+	}
+
+	/**
+	 * Execute a query path with filter expression, continuing until page is full or exhausted.
+	 * @param keyExpression The key condition expression.
+	 * @param filterExpression The filter expression.
+	 * @param attributeNames The expression attribute names.
+	 * @param attributeValues The expression attribute values.
+	 * @param projectionExpression The projection expression.
+	 * @param indexName The optional index name.
+	 * @param scanAscending The scan direction.
+	 * @param cursor The optional cursor.
+	 * @param returnSize The requested page size.
+	 * @returns Raw items and an optional cursor.
+	 * @internal
+	 */
+	private async executeFilteredQuery(
+		keyExpression: string,
+		filterExpression: string,
+		attributeNames: { [id: string]: string },
+		attributeValues: { [id: string]: AttributeValue },
+		projectionExpression: string | undefined,
+		indexName: string | undefined,
+		scanAscending: boolean,
+		cursor: string | undefined,
+		returnSize: number
+	): Promise<{
+		rawItems: { [id: string]: AttributeValue }[];
+		cursor?: string;
+	}> {
+		const connection = this.createDocClient();
+		const returnedRawItems: { [id: string]: AttributeValue }[] = [];
+		let lastEvaluatedKey: { [id: string]: AttributeValue } | undefined = this.decodeCursor(cursor);
+
+		do {
+			const results = await connection.send(
+				new QueryCommand({
+					TableName: this._config.tableName,
+					IndexName: indexName,
+					KeyConditionExpression: keyExpression,
+					FilterExpression: filterExpression,
+					ExpressionAttributeNames: attributeNames,
+					ExpressionAttributeValues: attributeValues,
+					ProjectionExpression: projectionExpression,
+					Limit: returnSize - returnedRawItems.length,
+					ScanIndexForward: scanAscending,
+					ExclusiveStartKey: lastEvaluatedKey
+				})
+			);
+
+			returnedRawItems.push(...((results.Items ?? []) as { [id: string]: AttributeValue }[]));
+			lastEvaluatedKey = results.LastEvaluatedKey;
+		} while (returnedRawItems.length < returnSize && !Is.empty(lastEvaluatedKey));
+
+		return {
+			rawItems: returnedRawItems,
+			cursor: this.encodeCursor(lastEvaluatedKey)
+		};
+	}
+
+	/**
+	 * Convert raw DynamoDB items into connector entities.
+	 * @param rawItems Raw DynamoDB items.
+	 * @returns The mapped entities.
+	 * @internal
+	 */
+	private mapRawItemsToEntities(rawItems: { [id: string]: AttributeValue }[]): T[] {
+		return rawItems.map(item => {
+			const unmarshalled = unmarshall(item);
+			return EntityStorageHelper.unPrepareEntity(unmarshalled as T, [
+				DynamoDbEntityStorageConnector._PARTITION_KEY
+			]);
+		});
 	}
 
 	/**

@@ -551,7 +551,7 @@ describe("CosmosDbEntityStorageConnector", () => {
 	);
 
 	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
-		"paginated cursor walk over a GSI sorted query has no skips or duplicates",
+		"paginated cursor walk over a secondary index sorted query has no skips or duplicates",
 		async () => {
 			const BATCH = 20;
 			const PAGE = 5;
@@ -608,6 +608,394 @@ describe("CosmosDbEntityStorageConnector", () => {
 			const result = await connector.query(condition, sort);
 			expect(result.entities.length).toBe(7);
 			expect(result.entities.every(e => (e.value1 as string) >= "val003")).toBe(true);
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"paginated cursor walk over a filtered and sorted secondary index query returns items in sort order",
+		async () => {
+			const BATCH = 20;
+			const PAGE = 4;
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			for (let i = 0; i < BATCH; i++) {
+				await connector.set({
+					id: String(i + 1).padStart(3, "0"),
+					value1: `val${String(i).padStart(3, "0")}`,
+					value2: i
+				});
+			}
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+			const condition = {
+				property: "value1" as keyof TestType,
+				comparison: ComparisonOperator.GreaterThanOrEqual,
+				value: "val005"
+			};
+
+			const all: Partial<TestType>[] = [];
+			let cursor: string | undefined;
+			let pages = 0;
+			do {
+				const page = await connector.query(condition, sort, undefined, cursor, PAGE);
+				all.push(...page.entities);
+				cursor = page.cursor;
+				expect(++pages).toBeLessThan(100);
+			} while (cursor !== undefined);
+
+			expect(all.length).toBe(15);
+			expect(all.every(e => (e.value1 as string) >= "val005")).toBe(true);
+			for (let i = 1; i < all.length; i++) {
+				expect((all[i].value1 as string) >= (all[i - 1].value1 as string)).toBe(true);
+			}
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"regression: cursor walk over sorted secondary index with non-key filter should not stop early",
+		async () => {
+			const BATCH = 40;
+			const PAGE = 5;
+			const connector = await createConnector<TestType>(nameof<TestType>());
+
+			for (let i = 0; i < BATCH; i++) {
+				await connector.set({
+					id: String(i + 1).padStart(3, "0"),
+					value1: `val${String(i).padStart(3, "0")}`,
+					value2: i
+				});
+			}
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+			const condition = {
+				property: "value2" as keyof TestType,
+				comparison: ComparisonOperator.GreaterThanOrEqual,
+				value: 30
+			};
+
+			const all: Partial<TestType>[] = [];
+			let cursor: string | undefined;
+			let pages = 0;
+			do {
+				const page = await connector.query(condition, sort, undefined, cursor, PAGE);
+				all.push(...page.entities);
+				cursor = page.cursor;
+				expect(++pages).toBeLessThan(100);
+			} while (cursor !== undefined);
+
+			expect(all.length).toBe(10);
+			expect(all.every(e => (e.value2 as number) >= 30)).toBe(true);
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"regression: paginating sorted secondary index query with projection should not produce invalid ExclusiveStartKey",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			for (let i = 0; i < 15; i++) {
+				await connector.set({
+					id: String(i + 1).padStart(3, "0"),
+					value1: `val${String(i).padStart(3, "0")}`,
+					value2: i
+				});
+			}
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+			const firstPage = await connector.query(undefined, sort, ["value2"], undefined, 10);
+
+			expect(firstPage.entities.length).toBe(10);
+			expect(firstPage.cursor).toBeDefined();
+
+			const secondPage = await connector.query(undefined, sort, ["value2"], firstPage.cursor, 10);
+
+			expect(secondPage.entities.length).toBe(5);
+			expect(secondPage.cursor).toBeUndefined();
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"can paginate filtered secondary-index query with descending sort",
+		async () => {
+			const BATCH = 20;
+			const PAGE = 4;
+			const connector = await createConnector<TestType>(nameof<TestType>());
+
+			for (let i = 0; i < BATCH; i++) {
+				await connector.set({
+					id: String(i + 1).padStart(3, "0"),
+					value1: `val${String(i).padStart(3, "0")}`,
+					value2: i
+				});
+			}
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Descending }
+			];
+			const condition = {
+				property: "value1" as keyof TestType,
+				comparison: ComparisonOperator.GreaterThanOrEqual,
+				value: "val005"
+			};
+
+			const all: Partial<TestType>[] = [];
+			let cursor: string | undefined;
+			let pages = 0;
+			do {
+				const page = await connector.query(condition, sort, undefined, cursor, PAGE);
+				all.push(...page.entities);
+				cursor = page.cursor;
+				expect(++pages).toBeLessThan(100);
+			} while (cursor !== undefined);
+
+			expect(all.length).toBe(15);
+			expect(all.every(e => (e.value1 as string) >= "val005")).toBe(true);
+			for (let i = 1; i < all.length; i++) {
+				expect((all[i].value1 as string) <= (all[i - 1].value1 as string)).toBe(true);
+			}
+		}
+	);
+
+	test("returns no cursor at exact page boundary for descending primary-key sort", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 10; i++) {
+			await connector.set({
+				id: String(i + 1).padStart(3, "0"),
+				value1: "fixed",
+				value2: i
+			});
+		}
+
+		const result = await connector.query(
+			undefined,
+			[{ property: "id", sortDirection: SortDirection.Descending }],
+			undefined,
+			undefined,
+			10
+		);
+
+		expect(result.entities.length).toBe(10);
+		expect(result.cursor).toBeUndefined();
+	});
+
+	test("returns no cursor at exact page boundary for projected unfiltered query", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < 10; i++) {
+			await connector.set({
+				id: String(i + 1).padStart(3, "0"),
+				value1: "fixed",
+				value2: i
+			});
+		}
+
+		const result = await connector.query(undefined, undefined, ["value1"], undefined, 10);
+
+		expect(result.entities.length).toBe(10);
+		expect(result.cursor).toBeUndefined();
+		expect(result.entities.every(e => e.value1 === "fixed")).toBe(true);
+		expect(result.entities.every(e => e.id === undefined)).toBe(true);
+	});
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"scan fallback cursor walk returns all items without duplicates",
+		async () => {
+			const BATCH = 18;
+			const PAGE = 5;
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			for (let i = 0; i < BATCH; i++) {
+				await connector.set({
+					id: String(i + 1).padStart(3, "0"),
+					value1: "scan",
+					value2: i
+				});
+			}
+
+			const condition = {
+				logicalOperator: LogicalOperator.Or,
+				conditions: [
+					{
+						property: "id" as keyof TestType,
+						comparison: ComparisonOperator.Equals,
+						value: "999"
+					},
+					{
+						property: "value2" as keyof TestType,
+						comparison: ComparisonOperator.GreaterThanOrEqual,
+						value: 0
+					}
+				]
+			};
+
+			const allIds: string[] = [];
+			let cursor: string | undefined;
+			let pages = 0;
+			do {
+				const page = await connector.query(condition, undefined, undefined, cursor, PAGE);
+				allIds.push(...page.entities.map(e => e.id as string));
+				cursor = page.cursor;
+				expect(++pages).toBeLessThan(100);
+			} while (cursor !== undefined);
+
+			expect(allIds.length).toBe(BATCH);
+			expect(new Set(allIds).size).toBe(BATCH);
+		}
+	);
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"scan fallback pagination works when projecting a non-key field",
+		async () => {
+			const BATCH = 12;
+			const PAGE = 5;
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			for (let i = 0; i < BATCH; i++) {
+				await connector.set({
+					id: String(i + 1).padStart(3, "0"),
+					value1: `scan-${i}`,
+					value2: i
+				});
+			}
+
+			const condition = {
+				logicalOperator: LogicalOperator.Or,
+				conditions: [
+					{
+						property: "id" as keyof TestType,
+						comparison: ComparisonOperator.Equals,
+						value: "999"
+					},
+					{
+						property: "value2" as keyof TestType,
+						comparison: ComparisonOperator.GreaterThanOrEqual,
+						value: 0
+					}
+				]
+			};
+
+			const all: Partial<TestType>[] = [];
+			let cursor: string | undefined;
+			do {
+				const page = await connector.query(condition, undefined, ["value1"], cursor, PAGE);
+				all.push(...page.entities);
+				cursor = page.cursor;
+			} while (cursor !== undefined);
+
+			expect(all.length).toBe(BATCH);
+			expect(all.every(e => typeof e.value1 === "string")).toBe(true);
+			expect(all.every(e => e.id === undefined)).toBe(true);
+		}
+	);
+
+	test("primary-key sort with secondary-property filter returns correctly sorted results", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "003", value1: "groupA", value2: 3 });
+		await connector.set({ id: "001", value1: "groupA", value2: 1 });
+		await connector.set({ id: "002", value1: "groupA", value2: 2 });
+		await connector.set({ id: "004", value1: "groupB", value2: 4 });
+
+		const result = await connector.query(
+			{
+				property: "value1",
+				comparison: ComparisonOperator.Equals,
+				value: "groupA"
+			},
+			[{ property: "id", sortDirection: SortDirection.Ascending }]
+		);
+
+		expect(result.entities.map(e => e.id)).toEqual(["001", "002", "003"]);
+	});
+
+	test("foreign partition cursor does not leak entities across partition contexts", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>(), ["tenant", "user"]);
+
+		currentUser = "userA";
+		for (let i = 0; i < 12; i++) {
+			await connector.set({
+				id: `A-${String(i + 1).padStart(3, "0")}`,
+				value1: "tenant",
+				value2: i
+			});
+		}
+		const firstPage = await connector.query(undefined, undefined, undefined, undefined, 5);
+		expect(firstPage.cursor).toBeDefined();
+
+		currentUser = "userB";
+		for (let i = 0; i < 6; i++) {
+			await connector.set({
+				id: `B-${String(i + 1).padStart(3, "0")}`,
+				value1: "tenant",
+				value2: i
+			});
+		}
+
+		const result = await connector.query(undefined, undefined, undefined, firstPage.cursor, 5);
+		expect(result.entities.every(e => !(e.id as string).startsWith("A-"))).toBe(true);
+	});
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"scan fallback stops early when filter matches few items in large partition",
+		async () => {
+			const TOTAL_ITEMS = 200;
+			const MATCHING_ITEMS = 8;
+			const PAGE_SIZE = 5;
+			const connector = await createConnector<TestType>(nameof<TestType>());
+
+			// Create many items with value1="noMatch" - these will NOT match the filter
+			for (let i = 0; i < TOTAL_ITEMS - MATCHING_ITEMS; i++) {
+				await connector.set({
+					id: String(i + 1).padStart(5, "0"),
+					value1: "noMatch",
+					value2: i
+				});
+			}
+
+			// Create a few items with value2 >= 1000 - these WILL match the filter
+			for (let i = 0; i < MATCHING_ITEMS; i++) {
+				await connector.set({
+					id: `match-${String(i + 1).padStart(3, "0")}`,
+					value1: "noMatch",
+					value2: 1000 + i
+				});
+			}
+
+			// Query with an OR condition that forces scan-fallback
+			// The filter will match only MATCHING_ITEMS out of TOTAL_ITEMS
+			const condition = {
+				logicalOperator: LogicalOperator.Or,
+				conditions: [
+					{
+						property: "id" as keyof TestType,
+						comparison: ComparisonOperator.Equals,
+						value: "nonexistent"
+					},
+					{
+						property: "value2" as keyof TestType,
+						comparison: ComparisonOperator.GreaterThanOrEqual,
+						value: 1000
+					}
+				]
+			};
+
+			// Fetch all matching items in pages
+			const allMatches: Partial<TestType>[] = [];
+			let cursor: string | undefined;
+			let pageCount = 0;
+			do {
+				const page = await connector.query(condition, undefined, undefined, cursor, PAGE_SIZE);
+				allMatches.push(...page.entities);
+				cursor = page.cursor;
+				pageCount++;
+			} while (cursor !== undefined);
+
+			// Verify results
+			expect(allMatches.length).toBe(MATCHING_ITEMS);
+			expect(allMatches.every(e => (e.id as string).startsWith("match-"))).toBe(true);
+			expect(allMatches.every(e => (e.value2 as number) >= 1000)).toBe(true);
+			// Should take 2 pages (5 on first, 3 on second), not many more
+			expect(pageCount).toBe(2);
 		}
 	);
 

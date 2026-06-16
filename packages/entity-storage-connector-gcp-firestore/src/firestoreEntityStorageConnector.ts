@@ -839,11 +839,16 @@ export class FirestoreEntityStorageConnector<
 			}
 
 			if (Is.stringValue(cursor)) {
-				const cursorDoc = await this._firestoreClient.doc(cursor).get();
-				if (cursorDoc?.exists) {
-					query = query.startAfter(cursorDoc);
+				// Discard cursors from a different partition — startAfter() throws if the
+				// snapshot belongs to a different collection than the current query.
+				const cursorCollection = cursor.slice(0, cursor.lastIndexOf("/"));
+				if (cursorCollection === this.collectionName(partitionKey)) {
+					const cursorDoc = await this._firestoreClient.doc(cursor).get();
+					if (cursorDoc?.exists) {
+						query = query.startAfter(cursorDoc);
+					}
+					queryDescription.push(`Cursor: ${cursor}`);
 				}
-				queryDescription.push(`Cursor: ${cursor}`);
 			}
 
 			query = query.limit(finalLimit + 1);
