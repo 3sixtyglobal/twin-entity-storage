@@ -75,12 +75,6 @@ export class FileEntityStorageConnector<
 	private static readonly _DEFAULT_DISK_ERROR_THRESHOLD_BYTES: number = 100 * 1024 * 1024;
 
 	/**
-	 * Maximum time to wait for the store update lock.
-	 * @internal
-	 */
-	private static readonly _UPDATE_LOCK_TIMEOUT_MS: number = 60000;
-
-	/**
 	 * The name for the schema.
 	 * @internal
 	 */
@@ -126,7 +120,7 @@ export class FileEntityStorageConnector<
 	 * Milliseconds to wait for the directory lock before throwing.
 	 * @internal
 	 */
-	private readonly _lockTimeoutMs: number;
+	private readonly _mutexTimeoutMs?: number;
 
 	/**
 	 * Create a new instance of FileEntityStorageConnector.
@@ -156,8 +150,7 @@ export class FileEntityStorageConnector<
 		this._diskWarningThresholdBytes =
 			options.config.diskWarningThresholdBytes ??
 			FileEntityStorageConnector._DEFAULT_DISK_WARNING_THRESHOLD_BYTES;
-		this._lockTimeoutMs =
-			options.config.lockTimeoutMs ?? FileEntityStorageConnector._UPDATE_LOCK_TIMEOUT_MS;
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 	}
 
 	/**
@@ -885,8 +878,8 @@ export class FileEntityStorageConnector<
 	 */
 	private async withLock<U>(update: () => Promise<U>): Promise<U> {
 		await Mutex.lock(this._directory, {
-			timeoutMs: this._lockTimeoutMs,
-			throwOnTimeout: true
+			throwOnTimeout: true,
+			timeoutMs: this._mutexTimeoutMs
 		});
 		try {
 			return await update();

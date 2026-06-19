@@ -462,8 +462,19 @@ export class MongoDbEntityStorageConnector<
 		});
 
 		try {
-			const collection = await this.getCollection();
-			await collection.drop();
+			if (Is.arrayValue(this._partitionContextIds)) {
+				const db = this._client.db(this._config.database);
+				const collections = await this.listPartitionCollections();
+				for (const col of collections) {
+					await db
+						.collection(col.name)
+						.drop()
+						.catch(() => {});
+				}
+			} else {
+				const collection = await this.getCollection();
+				await collection.drop();
+			}
 
 			await nodeLogging?.log({
 				level: "info",
@@ -594,11 +605,7 @@ export class MongoDbEntityStorageConnector<
 
 		try {
 			const prefix = `${this._config.collection}_`;
-			const escapedPrefix = prefix.replace(/[$()*+.?[\\\]^{|}]/g, "\\$&");
-			const db = this._client.db(this._config.database);
-			const collections = await db
-				.listCollections({ name: { $regex: `^${escapedPrefix}` } })
-				.toArray();
+			const collections = await this.listPartitionCollections();
 
 			return collections.map(col =>
 				ContextIdHelper.shortSplit(this._partitionContextIds ?? [], col.name.slice(prefix.length))
@@ -744,6 +751,27 @@ export class MongoDbEntityStorageConnector<
 	}
 
 	/**
+	 * Escape special regex characters in a string for use in a MongoDB $regex query.
+	 * @param value The string to escape.
+	 * @returns The escaped string.
+	 * @internal
+	 */
+	private escapeRegex(value: string): string {
+		return value.replace(/[$()*+.?[\\\]^{|}]/g, "\\$&");
+	}
+
+	/**
+	 * List all collections that belong to this connector's partition set.
+	 * @returns The collection info objects whose names share the connector's base prefix.
+	 * @internal
+	 */
+	private async listPartitionCollections(): Promise<{ name: string }[]> {
+		const prefix = `${this._config.collection}_`;
+		const db = this._client.db(this._config.database);
+		return db.listCollections({ name: { $regex: `^${this.escapeRegex(prefix)}` } }).toArray();
+	}
+
+	/**
 	 * Build a MongoDB filter from optional conditions.
 	 * @param conditions The optional entity conditions to include.
 	 * @returns The MongoDB filter object.
@@ -848,7 +876,7 @@ export class MongoDbEntityStorageConnector<
 				// For string fields, use regex for substring matching
 				if (type === EntitySchemaPropertyType.String) {
 					// Escape special regex characters in the value
-					const escapedValue = String(value).replace(/[$()*+.?[\\\]^{|}]/g, "\\$&");
+					const escapedValue = this.escapeRegex(String(value));
 					return { $regex: escapedValue };
 				}
 				// For array and object fields, use $elemMatch
@@ -860,7 +888,7 @@ export class MongoDbEntityStorageConnector<
 			case ComparisonOperator.NotIncludes:
 				// For string fields, use negated regex
 				if (type === EntitySchemaPropertyType.String) {
-					const escapedValue = String(value).replace(/[$()*+.?[\\\]^{|}]/g, "\\$&");
+					const escapedValue = this.escapeRegex(String(value));
 					return { $not: { $regex: escapedValue } };
 				}
 				// For array/object fields: $ne on an array field matches documents where

@@ -169,7 +169,7 @@ describe("FileEntityStorageConnector", () => {
 			currentConnector = new FileEntityStorageConnector<T>({
 				entitySchema,
 				partitionContextIds,
-				config: { directory: `./.tmp/test-data-${RandomHelper.generateUuidV7()}` }
+				config: { directory: `./.tmp/test-data-${RandomHelper.generateUuidV7("compact")}` }
 			});
 			await currentConnector?.bootstrap?.();
 			return currentConnector as IEntityStorageConnector<T>;
@@ -248,6 +248,17 @@ describe("FileEntityStorageConnector", () => {
 		]);
 		const item = await connector.get("1");
 		expect(item?.value2).toEqual(35);
+	});
+
+	test("can set only the targeted item when conditions match multiple records", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "shared", value2: 10 });
+		await connector.set({ id: "2", value1: "shared", value2: 20 });
+		await connector.set({ id: "2", value1: "shared", value2: 99 }, [
+			{ property: "value1", value: "shared" }
+		]);
+		expect((await connector.get("2"))?.value2).toEqual(99);
+		expect((await connector.get("1"))?.value2).toEqual(10);
 	});
 
 	test("can fail to set batch with no entities", async () => {
@@ -362,6 +373,16 @@ describe("FileEntityStorageConnector", () => {
 		expect(item).toBeUndefined();
 	});
 
+	test("can get the correct item by secondary index when conditions match multiple records", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "300", value1: "shared", value2: 10 });
+		await connector.set({ id: "301", value1: "shared", value2: 20 });
+		const item = await connector.get("shared", "value1", [{ property: "value2", value: 20 }]);
+		expect(item).toBeDefined();
+		expect(item?.id).toEqual("301");
+		expect(item?.value2).toEqual(20);
+	});
+
 	test.skipIf(!SUPPORT_NULLABLE_SECONDARY_INDEX)(
 		"can set and get an item when the secondary index field is null or undefined",
 		async () => {
@@ -406,6 +427,16 @@ describe("FileEntityStorageConnector", () => {
 		expect(item?.value2).toEqual(99);
 	});
 
+	test("can get the correct item by id when conditions match multiple records", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "shared", value2: 10 });
+		await connector.set({ id: "2", value1: "shared", value2: 20 });
+		const item = await connector.get("2", undefined, [{ property: "value1", value: "shared" }]);
+		expect(item).toBeDefined();
+		expect(item?.id).toEqual("2");
+		expect(item?.value2).toEqual(20);
+	});
+
 	test("can fail to remove an item with no id", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());
 		await expect(connector.remove(undefined as unknown as string)).rejects.toMatchObject({
@@ -441,6 +472,15 @@ describe("FileEntityStorageConnector", () => {
 		await connector.set({ id: "1", value1: "aaa", value2: 99 });
 		await connector.remove("1", [{ property: "value1", value: "aaa" }]);
 		expect(await connector.get("1")).toBeUndefined();
+	});
+
+	test("can remove only the targeted item when conditions match multiple records", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "shared", value2: 10 });
+		await connector.set({ id: "2", value1: "shared", value2: 20 });
+		await connector.remove("2", [{ property: "value1", value: "shared" }]);
+		expect(await connector.get("2")).toBeUndefined();
+		expect(await connector.get("1")).toBeDefined();
 	});
 
 	test("can fail to remove batch with no ids", async () => {

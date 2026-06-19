@@ -105,6 +105,12 @@ export class MemoryEntityStorageConnector<T = unknown>
 	private readonly _maxCapacityBytes?: number;
 
 	/**
+	 * Milliseconds to wait for the directory lock before throwing.
+	 * @internal
+	 */
+	private readonly _mutexTimeoutMs?: number;
+
+	/**
 	 * Create a new instance of MemoryEntityStorageConnector.
 	 * @param options The options for the connector.
 	 */
@@ -136,6 +142,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 		this._initialCapacityBytes = options.config?.initialCapacityBytes;
 		this._maxCapacityBytes = options.config?.maxCapacityBytes;
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 	}
 
 	/**
@@ -522,7 +529,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 			message: "storeTearingDown"
 		});
 
-		await Mutex.lock(this._storageKey, { throwOnTimeout: true });
+		await Mutex.lock(this._storageKey, { throwOnTimeout: true, timeoutMs: this._mutexTimeoutMs });
 		try {
 			SharedObjectBuffer.remove(this._storageKey);
 		} finally {
@@ -626,7 +633,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 		// migration starts from an empty store regardless of any previous connector
 		// instances that shared the same schema name.
 		if (targetSchemaName !== this._storageKey) {
-			await Mutex.lock(targetSchemaName, { throwOnTimeout: true });
+			await Mutex.lock(targetSchemaName, { throwOnTimeout: true, timeoutMs: this._mutexTimeoutMs });
 			try {
 				SharedObjectBuffer.remove(targetSchemaName);
 			} finally {
@@ -681,21 +688,20 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private async withLock<R>(fn: (entities: T[]) => { updated?: T[]; result: R }): Promise<R> {
-		const key = this._storageKey;
-		await Mutex.lock(key, { throwOnTimeout: true });
+		await Mutex.lock(this._storageKey, { throwOnTimeout: true, timeoutMs: this._mutexTimeoutMs });
 		try {
-			await SharedObjectBuffer.create(key, {
+			await SharedObjectBuffer.create(this._storageKey, {
 				initialCapacityBytes: this._initialCapacityBytes,
 				maxCapacityBytes: this._maxCapacityBytes
 			});
-			const entities = (await SharedObjectBuffer.read<T[]>(key)) ?? [];
+			const entities = (await SharedObjectBuffer.read<T[]>(this._storageKey)) ?? [];
 			const outcome = fn(entities);
 			if (outcome.updated !== undefined) {
-				await SharedObjectBuffer.write<T[]>(key, outcome.updated);
+				await SharedObjectBuffer.write<T[]>(this._storageKey, outcome.updated);
 			}
 			return outcome.result;
 		} finally {
-			Mutex.unlock(key);
+			Mutex.unlock(this._storageKey);
 		}
 	}
 

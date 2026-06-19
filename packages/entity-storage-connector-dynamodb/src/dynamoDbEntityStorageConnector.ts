@@ -421,6 +421,12 @@ export class DynamoDbEntityStorageConnector<
 					comparison: ComparisonOperator.Equals,
 					value: id
 				});
+			} else {
+				finalConditions.conditions.push({
+					property: this._primaryKey.property as string,
+					comparison: ComparisonOperator.Equals,
+					value: id
+				});
 			}
 			if (Is.arrayValue(conditions)) {
 				for (const c of conditions) {

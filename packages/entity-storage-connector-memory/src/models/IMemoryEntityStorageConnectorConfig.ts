@@ -22,4 +22,9 @@ export interface IMemoryEntityStorageConnectorConfig {
 	 * @default 256 MiB.
 	 */
 	maxCapacityBytes?: number;
+
+	/**
+	 * Maximum milliseconds to wait for the per-directory write lock before throwing.
+	 */
+	mutexTimeoutMs?: number;
 }

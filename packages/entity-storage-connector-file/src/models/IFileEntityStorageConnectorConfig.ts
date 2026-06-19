@@ -24,7 +24,6 @@ export interface IFileEntityStorageConnectorConfig {
 
 	/**
 	 * Maximum milliseconds to wait for the per-directory write lock before throwing.
-	 * Defaults to 60 000 ms (1 minute).
 	 */
-	lockTimeoutMs?: number;
+	mutexTimeoutMs?: number;
 }
