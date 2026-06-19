@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.0.3-next.33](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-gcp-firestore-v0.0.3-next.32...entity-storage-connector-gcp-firestore-v0.0.3-next.33) (2026-06-19)
+
+
+### Bug Fixes
+
+* dynamodb get with condition ignores primary key ([d2d0ec2](https://github.com/iotaledger/twin-entity-storage/commit/d2d0ec21023bc22f0e5a35c2d49396d90b42a4ce))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.0.3-next.32 to 0.0.3-next.33
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.0.3-next.32 to 0.0.3-next.33
+
 ## [0.0.3-next.32](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-gcp-firestore-v0.0.3-next.31...entity-storage-connector-gcp-firestore-v0.0.3-next.32) (2026-06-16)
 
 
