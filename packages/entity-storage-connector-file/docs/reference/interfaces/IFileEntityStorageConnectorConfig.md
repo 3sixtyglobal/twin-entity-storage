@@ -30,9 +30,8 @@ Defaults to 500 MB.
 
 ***
 
-### lockTimeoutMs? {#locktimeoutms}
+### mutexTimeoutMs? {#mutextimeoutms}
 
-> `optional` **lockTimeoutMs?**: `number`
+> `optional` **mutexTimeoutMs?**: `number`
 
 Maximum milliseconds to wait for the per-directory write lock before throwing.
-Defaults to 60 000 ms (1 minute).

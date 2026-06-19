@@ -38,3 +38,11 @@ Maximum JSON payload size in bytes for the shared entity buffer.
 ```ts
 256 MiB.
 ```
+
+***
+
+### mutexTimeoutMs? {#mutextimeoutms}
+
+> `optional` **mutexTimeoutMs?**: `number`
+
+Maximum milliseconds to wait for the per-directory write lock before throwing.
