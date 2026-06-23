@@ -13,7 +13,7 @@ npm install @twin.org/entity-storage-connector-scylladb
 To perform testing of this component it may be necessary to launch a local instance to communicate with.
 
 ```shell
-docker run -d --name twin-entity-storage-scylladb -p 19500:9042 scylladb/scylla:5.4.9
+docker run -d --name twin-entity-storage-scylladb -p 9042:9042 scylladb/scylla:5.4.9
 ```
 
 ## Examples
