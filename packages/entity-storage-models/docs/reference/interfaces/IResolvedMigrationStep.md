@@ -63,13 +63,19 @@ Optional transformation for properties, usually only called for object and array
 
 #### Param
 
+**schema1Property**
+
 The property schema in the old schema.
 
 #### Param
 
+**schemaProperty2**
+
 The property schema in the new schema.
 
 #### Param
+
+**value**
 
 The value of the property in the old schema.
 
