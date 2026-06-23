@@ -72,7 +72,7 @@ runs:
         cd "$TARGET_DIR"
         for i in {1..5}; do
           npm ci && break || {
-            if [ $i -eq 3 ]; then
+            if [ $i -eq 5 ]; then
               echo "npm ci failed after 3 attempts"
               exit 1
             fi

@@ -308,11 +308,11 @@ jobs:
           cd ${{ matrix.package }}
           for i in {1..5}; do
             npm install && break || {
-              if [ $i -eq 3 ]; then
-                echo "npm install failed after 3 attempts"
+              if [ $i -eq 5 ]; then
+                echo "npm install failed after 5 attempts"
                 exit 1
               fi
-              echo "npm install failed, retrying in 30 seconds (attempt $i/3)..."
+              echo "npm install failed, retrying in 30 seconds (attempt $i/5)..."
               sleep 30
             }
           done
