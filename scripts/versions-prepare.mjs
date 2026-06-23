@@ -71,23 +71,84 @@ async function run() {
 
 	if (isProduction) {
 		const semverType = process.argv[3];
-		if (!semverType || !['promote', 'patch', 'minor', 'major'].includes(semverType)) {
+		if (!semverType || !['promote', 'patch', 'minor', 'major', 'custom'].includes(semverType)) {
 			throw new Error(
-				'semver_type must be promote, patch, minor, or major for the production command'
+				'semver_type must be promote, patch, minor, major, or custom for the production command'
 			);
 		}
 
-		process.stdout.write(`Loading release-please manifest: ${MANIFEST_PRERELEASE_FILENAME}\n\n`);
-		const releaseManifestPrerelease = await loadJson(MANIFEST_PRERELEASE_FILENAME);
-		const prereleaseVersion = Object.entries(releaseManifestPrerelease)[0][1];
-		// Strip pre-release suffix: e.g. "1.2.4-next.5" -> "1.2.4"
-		const strippedVersion = prereleaseVersion.split('-')[0];
-		prodVersion = applyBump(strippedVersion, semverType);
+		if (semverType === 'custom') {
+			const customVersionArg = process.argv[4];
+			if (!customVersionArg || !/^\d+\.\d+\.\d+$/.test(customVersionArg)) {
+				throw new Error(
+					'custom semver_type requires a valid version argument in X.Y.Z format, e.g. 1.2.3'
+				);
+			}
 
-		process.stdout.write(`Prerelease Version: ${prereleaseVersion}\n`);
-		process.stdout.write(`Stripped Version:   ${strippedVersion}\n`);
-		process.stdout.write(`Semver Bump:        ${semverType}\n`);
-		process.stdout.write(`Production Version: ${prodVersion}\n\n`);
+			const [cMaj, cMin, cPat] = customVersionArg.split('.').map(Number);
+
+			if (cMaj > 999 || cMin > 999 || cPat > 999) {
+				throw new Error(
+					`customVersion ${customVersionArg} has a component exceeding 999 — this is likely a typo.`
+				);
+			}
+
+			// Read the current production manifest to validate the custom version is safe.
+			const releaseManifestProdCheck = await loadJson(MANIFEST_PRODUCTION_FILENAME);
+			const currentProdVersion = Object.entries(releaseManifestProdCheck)[0][1];
+			const [pMaj, pMin, pPat] = currentProdVersion.split('.').map(Number);
+
+			const releaseManifestPreCheck = await loadJson(MANIFEST_PRERELEASE_FILENAME);
+			const currentDevVersion = Object.entries(releaseManifestPreCheck)[0][1].split('-')[0];
+			const [rMaj, rMin, rPat] = currentDevVersion.split('.').map(Number);
+
+			function semverGt(a, b) {
+				if (a[0] !== b[0]) {
+					return a[0] > b[0];
+				}
+				if (a[1] !== b[1]) {
+					return a[1] > b[1];
+				}
+				return a[2] > b[2];
+			}
+
+			const cv = [cMaj, cMin, cPat];
+
+			if (!semverGt(cv, [pMaj, pMin, pPat])) {
+				throw new Error(
+					`customVersion ${customVersionArg} must be strictly greater than the published production version ${currentProdVersion}. npm packages cannot be un-published.`
+				);
+			}
+
+			if (cMaj - pMaj > 1) {
+				throw new Error(
+					`customVersion ${customVersionArg} would jump the major version by ${cMaj - pMaj} from the current ${currentProdVersion}. Maximum allowed increment is 1 — if this is intentional, update the production manifest manually before running this workflow.`
+				);
+			}
+
+			if (semverGt([rMaj, rMin, rPat], cv)) {
+				throw new Error(
+					`customVersion ${customVersionArg} is below the current development version ${currentDevVersion}. This would create a version conflict with the next branch.`
+				);
+			}
+
+			prodVersion = customVersionArg;
+			process.stdout.write(`Custom Version: ${prodVersion}\n`);
+			process.stdout.write(`Current Prod:   ${currentProdVersion}\n`);
+			process.stdout.write(`Current Dev:    ${currentDevVersion}\n\n`);
+		} else {
+			process.stdout.write(`Loading release-please manifest: ${MANIFEST_PRERELEASE_FILENAME}\n\n`);
+			const releaseManifestPrerelease = await loadJson(MANIFEST_PRERELEASE_FILENAME);
+			const prereleaseVersion = Object.entries(releaseManifestPrerelease)[0][1];
+			// Strip pre-release suffix: e.g. "1.2.4-next.5" -> "1.2.4"
+			const strippedVersion = prereleaseVersion.split('-')[0];
+			prodVersion = applyBump(strippedVersion, semverType);
+
+			process.stdout.write(`Prerelease Version: ${prereleaseVersion}\n`);
+			process.stdout.write(`Stripped Version:   ${strippedVersion}\n`);
+			process.stdout.write(`Semver Bump:        ${semverType}\n`);
+			process.stdout.write(`Production Version: ${prodVersion}\n\n`);
+		}
 
 		// Update the prod manifest to prodVersion so release-prepare can read it back
 		// and stamp Release-As: {prodVersion} on the force commit, which tells
@@ -100,18 +161,32 @@ async function run() {
 		await saveJson(MANIFEST_PRODUCTION_FILENAME, releaseManifestProd);
 		process.stdout.write(`Prod Manifest updated to: ${prodVersion}\n\n`);
 	} else {
-		process.stdout.write(`Loading release-please manifest: ${MANIFEST_PRODUCTION_FILENAME}\n\n`);
-		const releaseManifestProd = await loadJson(MANIFEST_PRODUCTION_FILENAME);
-		// Extract the current production version from the first package in the manifest
-		// All packages in the monorepo should have the same version
-		prodVersion = Object.entries(releaseManifestProd)[0][1];
-		// Calculate the next prerelease version by incrementing the patch number
-		// Example: 1.2.3 -> 1.2.4-next.0
-		const versionParts = prodVersion.split('.');
-		const nextPatch = Number.parseInt(versionParts[2], 10) + 1;
-		nextVersion = `${versionParts[0]}.${versionParts[1]}.${nextPatch}-next.0`;
-		process.stdout.write(`Production Version: ${prodVersion}\n`);
-		process.stdout.write(`Next Version: ${nextVersion}\n\n`);
+		const nextSemverType = process.argv[3];
+
+		if (nextSemverType === 'custom') {
+			const customBase = process.argv[4];
+			if (!customBase || !/^\d+\.\d+\.\d+$/.test(customBase)) {
+				throw new Error(
+					'custom next version requires a valid base version in X.Y.Z format, e.g. 0.1.0'
+				);
+			}
+			nextVersion = `${customBase}-next.0`;
+			prodVersion = customBase;
+			process.stdout.write(`Custom Next Version: ${nextVersion}\n\n`);
+		} else {
+			process.stdout.write(`Loading release-please manifest: ${MANIFEST_PRODUCTION_FILENAME}\n\n`);
+			const releaseManifestProd = await loadJson(MANIFEST_PRODUCTION_FILENAME);
+			// Extract the current production version from the first package in the manifest
+			// All packages in the monorepo should have the same version
+			prodVersion = Object.entries(releaseManifestProd)[0][1];
+			// Calculate the next prerelease version by incrementing the patch number
+			// Example: 1.2.3 -> 1.2.4-next.0
+			const versionParts = prodVersion.split('.');
+			const nextPatch = Number.parseInt(versionParts[2], 10) + 1;
+			nextVersion = `${versionParts[0]}.${versionParts[1]}.${nextPatch}-next.0`;
+			process.stdout.write(`Production Version: ${prodVersion}\n`);
+			process.stdout.write(`Next Version: ${nextVersion}\n\n`);
+		}
 	}
 
 	// Load the root package.json to get the list of workspaces
@@ -156,6 +231,11 @@ async function run() {
 
 		// We also need to update any files specified in the release-please-manifest
 		process.stdout.write('Updating release-please-config extra-files\n');
+		// Read the current prod version — that is the value actually written in extra
+		// files (after alignment to main). For the custom path prodVersion is the
+		// user-supplied target version, not the value currently in those files.
+		const prodManifestForExtras = await loadJson(MANIFEST_PRODUCTION_FILENAME);
+		const currentVersionInFiles = Object.values(prodManifestForExtras)[0];
 		const releaseConfig = await loadJson(CONFIG_PRERELEASE_FILENAME);
 		if (releaseConfig.packages) {
 			for (const packageName of Object.keys(releaseConfig.packages)) {
@@ -168,7 +248,7 @@ async function run() {
 						const lines = contents.split('\n');
 						for (let i = 0; i < lines.length; i++) {
 							if (lines[i].includes('x-release-please-version')) {
-								lines[i] = lines[i].replace(prodVersion, nextVersion);
+								lines[i] = lines[i].replace(currentVersionInFiles, nextVersion);
 							}
 						}
 						await fs.writeFile(filename, lines.join('\n'), 'utf8');

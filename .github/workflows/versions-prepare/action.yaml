@@ -6,7 +6,11 @@ inputs:
     description: 'Target branch to prepare versions on (main or next)'
     required: true
   semver_type:
-    description: 'Semver bump type for production releases (promote, patch, minor, major). Required when branch is main.'
+    description: 'Semver bump type for production releases (promote, patch, minor, major, custom). Required when branch is main.'
+    required: false
+    default: ''
+  custom_version:
+    description: 'Explicit version string, e.g. 1.2.3. Required when semver_type is custom.'
     required: false
     default: ''
   gpg_private_key:
@@ -89,8 +93,10 @@ runs:
     # follow-up PR does not inherit merge conflicts from divergent branch state.
     # Using diff | apply bypasses the merge algorithm entirely, so add/add
     # conflicts and other merge-time ambiguities do not block realignment.
+    # Skipped for custom version resets — those only change version numbers and
+    # should not pull in main content changes.
     - name: Align Next to Main
-      if: ${{ inputs.branch == 'next' }}
+      if: ${{ inputs.branch == 'next' && inputs.semver_type != 'custom' }}
       shell: bash
       run: |
         cd "$TARGET_DIR"
@@ -112,15 +118,35 @@ runs:
         echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
     # Run the custom script to align package versions for the target release type.
+    # Use the script from GITHUB_WORKSPACE (the triggering branch) rather than
+    # TARGET_DIR — after Align Next to Main, TARGET_DIR holds main's copy of the
+    # script which may predate custom-version support on the next branch.
     - name: Update Versions
       shell: bash
       run: |
         cd "$TARGET_DIR"
-        if [ "${{ inputs.branch }}" = "next" ]; then
-          node scripts/versions-prepare.mjs next
+        VERSIONS_SCRIPT="$GITHUB_WORKSPACE/scripts/versions-prepare.mjs"
+        if [ "${{ inputs.branch }}" = "next" ] && [ "${{ inputs.semver_type }}" = "custom" ]; then
+          node "$VERSIONS_SCRIPT" next custom "${{ inputs.custom_version }}"
+        elif [ "${{ inputs.branch }}" = "next" ]; then
+          node "$VERSIONS_SCRIPT" next
+        elif [ "${{ inputs.semver_type }}" = "custom" ]; then
+          node "$VERSIONS_SCRIPT" production custom "${{ inputs.custom_version }}"
         else
-          node scripts/versions-prepare.mjs production ${{ inputs.semver_type }}
+          node "$VERSIONS_SCRIPT" production ${{ inputs.semver_type }}
         fi
+
+    - name: Extract version
+      shell: bash
+      run: |
+        cd "$TARGET_DIR"
+        if [ "${{ inputs.branch }}" = "next" ]; then
+          MANIFEST="release/release-please-manifest.prerelease.json"
+        else
+          MANIFEST="release/release-please-manifest.prod.json"
+        fi
+        VERSION=$(node -e "const m=JSON.parse(require('fs').readFileSync('$MANIFEST','utf8'));console.log(Object.values(m)[0])")
+        echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
 
     - name: Check for changes
       id: check-changes
@@ -143,7 +169,7 @@ runs:
       shell: bash
       run: |
         cd "$TARGET_DIR"
-        for i in {1..3}; do
+        for i in {1..5}; do
           npm install && break || {
             if [ $i -eq 3 ]; then
               echo "npm install failed after 3 attempts"
@@ -179,7 +205,7 @@ runs:
       run: |
         cd "$TARGET_DIR"
         git add -A
-        git commit -S -m "chore: prepare versions for ${{ inputs.branch }}"
+        git commit -S -m "chore: prepare versions for ${{ inputs.branch }} to $RELEASE_VERSION"
         git push origin $BRANCH_NAME
 
     # Create a PR with the changes
@@ -189,8 +215,8 @@ runs:
       shell: bash
       run: |
         PR_URL=$(gh pr create \
-          --title "chore: prepare versions for ${{ inputs.branch }}" \
-          --body "This PR prepares the versions of all packages for ${{ inputs.branch }}." \
+          --title "chore: prepare versions for ${{ inputs.branch }} to $RELEASE_VERSION" \
+          --body "This PR prepares the versions of all packages for ${{ inputs.branch }} to \`$RELEASE_VERSION\`." \
           --base ${{ inputs.branch }} \
           --head $BRANCH_NAME)
         PR_NUMBER=$(echo $PR_URL | grep -o '[0-9]\+$')

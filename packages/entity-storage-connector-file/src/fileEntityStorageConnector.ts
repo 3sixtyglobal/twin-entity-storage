@@ -310,7 +310,7 @@ export class FileEntityStorageConnector<
 		}
 
 		const index = this.findItem(store, id, secondaryIndex, finalConditions);
-		const item = index >= 0 ? store[index] : undefined;
+		const item = store[index];
 
 		if (Is.objectValue(item)) {
 			return EntityStorageHelper.unPrepareEntity<T>(item, [

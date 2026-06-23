@@ -217,7 +217,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 
 		return this.withLock(entities => {
 			const index = this.findItem(entities, id, secondaryIndex, finalConditions);
-			const item = index >= 0 ? entities[index] : undefined;
+			const item = entities[index];
 
 			if (Is.objectValue(item)) {
 				return {
