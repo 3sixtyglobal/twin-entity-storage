@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-rest-client",
-	"version": "0.9.0-next.0",
+	"version": "0.9.0-next.1",
 	"description": "REST client for calling storage services from applications and tools.",
 	"repository": {
 		"type": "git",
@@ -32,7 +32,7 @@
 		"@twin.org/api-models": "0.9.0-next.1",
 		"@twin.org/core": "0.9.0-next.1",
 		"@twin.org/entity": "0.9.0-next.1",
-		"@twin.org/entity-storage-models": "0.9.0-next.0",
+		"@twin.org/entity-storage-models": "0.9.0-next.1",
 		"@twin.org/nameof": "0.9.0-next.1",
 		"@twin.org/web": "0.9.0-next.1"
 	},
