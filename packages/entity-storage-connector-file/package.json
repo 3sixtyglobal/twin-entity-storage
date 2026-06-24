@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-file",
-	"version": "0.9.0-next.1",
+	"version": "0.9.0",
 	"description": "File-based connector that stores entities on disk for straightforward deployments.",
 	"repository": {
 		"type": "git",
@@ -28,20 +28,20 @@
 		"dist:no-test": "npm run clean && npm run build && npm run test:build"
 	},
 	"dependencies": {
-		"@twin.org/context": "next",
-		"@twin.org/core": "next",
-		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.9.0-next.1",
-		"@twin.org/logging-models": "next",
-		"@twin.org/nameof": "next"
+		"@twin.org/context": "^0.9.0",
+		"@twin.org/core": "^0.9.0",
+		"@twin.org/entity": "^0.9.0",
+		"@twin.org/entity-storage-models": "^0.9.0",
+		"@twin.org/logging-models": "^0.9.0",
+		"@twin.org/nameof": "^0.9.0"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.9.0-next.1",
-		"@twin.org/logging-connector-entity-storage": "next",
-		"@twin.org/logging-service": "next",
-		"@twin.org/nameof-transformer": "next",
-		"@twin.org/nameof-vitest-plugin": "next",
-		"@twin.org/validate-locales": "next",
+		"@twin.org/entity-storage-connector-memory": "^0.9.0",
+		"@twin.org/logging-connector-entity-storage": "^0.9.0",
+		"@twin.org/logging-service": "^0.9.0",
+		"@twin.org/nameof-transformer": "^0.9.0",
+		"@twin.org/nameof-vitest-plugin": "^0.9.0",
+		"@twin.org/validate-locales": "^0.9.0",
 		"@types/node": "26.0.0",
 		"@vitest/coverage-v8": "4.1.9",
 		"copyfiles": "2.4.1",
