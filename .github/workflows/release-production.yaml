@@ -525,6 +525,7 @@ jobs:
           echo "  • Realigning the next branch (auto-merge enabled; merges when checks pass)"
           echo ""
           echo "Publish run: $PUBLISH_RUN_URL"
+          echo "::notice title=Publish Run::$PUBLISH_RUN_URL"
 
           {
             echo "## Production Release Orchestration Complete"
