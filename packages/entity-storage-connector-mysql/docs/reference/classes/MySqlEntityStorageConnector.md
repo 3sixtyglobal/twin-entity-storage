@@ -10,7 +10,7 @@ Class for performing entity storage operations using MySql.
 
 ## Implements
 
-- `IEntityStorageConnector`\<`T`\>
+- `IEntityStorageMigrationConnector`\<`T`\>
 
 ## Constructors
 
@@ -34,45 +34,51 @@ The options for the connector.
 
 ## Properties
 
-### CLASS\_NAME
+### CLASS\_NAME {#class_name}
 
-> `readonly` **CLASS\_NAME**: `string`
+> `readonly` `static` **CLASS\_NAME**: `string`
 
 Runtime name for the class.
 
-#### Implementation of
-
-`IEntityStorageConnector.CLASS_NAME`
-
 ## Methods
 
-### bootstrap()
+### className() {#classname}
 
-> **bootstrap**(`nodeLoggingConnectorType?`): `Promise`\<`boolean`\>
+> **className**(): `string`
 
-Initialize the MySql environment.
-
-#### Parameters
-
-##### nodeLoggingConnectorType?
-
-`string`
-
-Optional type of the logging connector.
+Returns the class name of the component.
 
 #### Returns
 
-`Promise`\<`boolean`\>
+`string`
 
-A promise that resolves to a boolean indicating success.
+The class name of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.bootstrap`
+`IEntityStorageMigrationConnector.className`
 
 ***
 
-### getSchema()
+### health() {#health}
+
+> **health**(): `Promise`\<`IHealth`[]\>
+
+Get the health of the component.
+
+#### Returns
+
+`Promise`\<`IHealth`[]\>
+
+The health of the component.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.health`
+
+***
+
+### getSchema() {#getschema}
 
 > **getSchema**(): `IEntitySchema`
 
@@ -86,13 +92,65 @@ The schema for the entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.getSchema`
+`IEntityStorageMigrationConnector.getSchema`
 
 ***
 
-### get()
+### bootstrap() {#bootstrap}
 
-> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`undefined` \| `T`\>
+> **bootstrap**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+
+Initialize the MySql environment.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+Optional type of the logging component.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+A promise that resolves to a boolean indicating success.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.bootstrap`
+
+***
+
+### stop() {#stop}
+
+> **stop**(`nodeLoggingComponentType?`): `Promise`\<`void`\>
+
+The component needs to be stopped when the node is closed.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.stop`
+
+***
+
+### get() {#get}
+
+> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
 
 Get an entity from MySql.
 
@@ -118,17 +176,17 @@ The optional conditions to match for the entities.
 
 #### Returns
 
-`Promise`\<`undefined` \| `T`\>
+`Promise`\<`T` \| `undefined`\>
 
 The object if it can be found or undefined.
 
 #### Implementation of
 
-`IEntityStorageConnector.get`
+`IEntityStorageMigrationConnector.get`
 
 ***
 
-### set()
+### set() {#set}
 
 > **set**(`entity`, `conditions?`): `Promise`\<`void`\>
 
@@ -156,11 +214,55 @@ The id of the entity.
 
 #### Implementation of
 
-`IEntityStorageConnector.set`
+`IEntityStorageMigrationConnector.set`
 
 ***
 
-### remove()
+### setBatch() {#setbatch}
+
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.setBatch`
+
+***
+
+### empty() {#empty}
+
+> **empty**(): `Promise`\<`void`\>
+
+Empty the entity storage.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.empty`
+
+***
+
+### remove() {#remove}
 
 > **remove**(`id`, `conditions?`): `Promise`\<`void`\>
 
@@ -188,13 +290,65 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.remove`
+`IEntityStorageMigrationConnector.remove`
 
 ***
 
-### query()
+### teardown() {#teardown}
 
-> **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `pageSize?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
+> **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+
+Teardown the entity storage by dropping the table.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True if the teardown process was successful.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.teardown`
+
+***
+
+### removeBatch() {#removebatch}
+
+> **removeBatch**(`ids`): `Promise`\<`void`\>
+
+Remove multiple entities by their primary key IDs.
+
+#### Parameters
+
+##### ids
+
+`string`[]
+
+The ids of the entities to remove.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.removeBatch`
+
+***
+
+### query() {#query}
+
+> **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `limit?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 
 Find all the entities which match the conditions.
 
@@ -222,9 +376,9 @@ The optional properties to return, defaults to all.
 
 `string`
 
-The cursor to request the next page of entities.
+The cursor to request the next chunk of entities.
 
-##### pageSize?
+##### limit?
 
 `number`
 
@@ -239,15 +393,194 @@ and a cursor which can be used to request more entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.query`
+`IEntityStorageMigrationConnector.query`
 
 ***
 
-### tableDrop()
+### count() {#count}
 
-> **tableDrop**(): `Promise`\<`void`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
 
-Drop the table.
+Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
+
+#### Returns
+
+`Promise`\<`number`\>
+
+The total count of entities in the storage.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.count`
+
+***
+
+### getPartitionContextIds() {#getpartitioncontextids}
+
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+
+Get all unique partition context ids present in the table.
+
+#### Returns
+
+`Promise`\<`IContextIds`[]\>
+
+An array of context id objects, one per unique partition.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### createTargetConnector() {#createtargetconnector}
+
+> **createTargetConnector**\<`U`\>(`newEntitySchema`): `Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Create the target connector for performing the migration using a temporary table.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### newEntitySchema
+
+`string`
+
+The name of the new entity schema to create the connector for.
+
+#### Returns
+
+`Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Connector for performing the migration.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.createTargetConnector`
+
+***
+
+### finalizeMigration() {#finalizemigration}
+
+> **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`MySqlEntityStorageConnector`\<`U`\>\>
+
+Finalize the migration by dropping the source table and renaming the migration table to the original name.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`MySqlEntityStorageConnector`\<`U`\>
+
+The connector holding the migrated data in a temporary table.
+
+##### options?
+
+`IMigrationOptions`
+
+The options to control how the migration is finalized.
+
+##### loggingComponentType?
+
+`string`
+
+The logging component type to use during finalization.
+
+#### Returns
+
+`Promise`\<`MySqlEntityStorageConnector`\<`U`\>\>
+
+The final connector using the original table name with the new schema.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.finalizeMigration`
+
+***
+
+### cleanupMigration() {#cleanupmigration}
+
+> **cleanupMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`void`\>
+
+Cleanup a failed or aborted migration by dropping the temporary migration table.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`IEntityStorageConnector`\<`U`\> \| `undefined`
+
+The target connector to cleanup.
+
+##### options?
+
+`IMigrationOptions`
+
+The options to control how the migration is cleaned up.
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+A promise that resolves when the cleanup is complete.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.cleanupMigration`
+
+***
+
+### databaseExists() {#databaseexists}
+
+> **databaseExists**(): `Promise`\<`boolean`\>
+
+Check if the database exists.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True if the database exists, false otherwise.
+
+***
+
+### close() {#close}
+
+> **close**(): `Promise`\<`void`\>
+
+Close the connection pool and release all connections.
+Should be called when the connector is no longer needed.
 
 #### Returns
 

@@ -4,7 +4,7 @@ Configuration for the Dynamo DB Entity Storage Connector.
 
 ## Properties
 
-### region
+### region {#region}
 
 > **region**: `string`
 
@@ -12,23 +12,39 @@ The region for the AWS connection.
 
 ***
 
-### accessKeyId
+### authMode? {#authmode}
 
-> **accessKeyId**: `string`
+> `optional` **authMode?**: `"credentials"` \| `"pod"`
 
-The AWS access key.
+The authentication mode.
+- "credentials": Use access key ID and secret access key.
+- "pod": Use IAM role attached to the pod (e.g., in EKS).
+
+#### Default
+
+```ts
+credentials
+```
 
 ***
 
-### secretAccessKey
+### accessKeyId? {#accesskeyid}
 
-> **secretAccessKey**: `string`
+> `optional` **accessKeyId?**: `string`
+
+The AWS access key ID.
+
+***
+
+### secretAccessKey? {#secretaccesskey}
+
+> `optional` **secretAccessKey?**: `string`
 
 The AWS secret access key.
 
 ***
 
-### tableName
+### tableName {#tablename}
 
 > **tableName**: `string`
 
@@ -36,8 +52,25 @@ The name of the table for the storage.
 
 ***
 
-### endpoint?
+### endpoint? {#endpoint}
 
-> `optional` **endpoint**: `string`
+> `optional` **endpoint?**: `string`
 
-AWS endpoint, not usually required but could be used for local DynamoDB instance e.g. http://localhost:8000.
+AWS endpoint, not usually required but could be used for local DynamoDB instance e.g. http://localhost:10000.
+
+***
+
+### connectionTimeoutMs? {#connectiontimeoutms}
+
+> `optional` **connectionTimeoutMs?**: `number`
+
+The connection timeout in milliseconds.
+
+***
+
+### maxAttempts? {#maxattempts}
+
+> `optional` **maxAttempts?**: `number`
+
+Maximum number of attempts for each SDK request (1 = no retries).
+Defaults to the AWS SDK default (3).

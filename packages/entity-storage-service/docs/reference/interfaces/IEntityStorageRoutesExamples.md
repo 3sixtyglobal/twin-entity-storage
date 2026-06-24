@@ -4,9 +4,9 @@ Examples for the entity storage routes.
 
 ## Properties
 
-### set?
+### set? {#set}
 
-> `optional` **set**: `object`
+> `optional` **set?**: `object`
 
 Examples for the set route.
 
@@ -16,9 +16,9 @@ Examples for the set route.
 
 ***
 
-### get?
+### get? {#get}
 
-> `optional` **get**: `object`
+> `optional` **get?**: `object`
 
 Examples for the get route.
 
@@ -32,9 +32,9 @@ Examples for the get route.
 
 ***
 
-### remove?
+### remove? {#remove}
 
-> `optional` **remove**: `object`
+> `optional` **remove?**: `object`
 
 Examples for the remove route.
 
@@ -44,9 +44,9 @@ Examples for the remove route.
 
 ***
 
-### list?
+### list? {#list}
 
-> `optional` **list**: `object`
+> `optional` **list?**: `object`
 
 Examples for the list route.
 
@@ -57,3 +57,19 @@ Examples for the list route.
 #### responseExamples
 
 > **responseExamples**: `IRestRouteResponseExample`\<`IEntityStorageListResponse`\>[]
+
+***
+
+### count? {#count}
+
+> `optional` **count?**: `object`
+
+Examples for the count route.
+
+#### requestExamples
+
+> **requestExamples**: `IRestRouteRequestExample`\<`IEntityStorageCountRequest`\>[]
+
+#### responseExamples
+
+> **responseExamples**: `IRestRouteResponseExample`\<`IEntityStorageCountResponse`\>[]

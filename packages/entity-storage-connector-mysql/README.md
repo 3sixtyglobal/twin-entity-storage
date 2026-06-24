@@ -1,6 +1,6 @@
-# TWIN Entity Storage Connector MySQL
+# Entity Storage Connector MySQL
 
-Entity Storage connector implementation using MySQL storage.
+This package provides a MySQL backend for relational persistence and SQL-based access patterns. It is designed to work with the wider storage ecosystem so applications can keep behaviour consistent across connectors and environments.
 
 ## Installation
 
@@ -8,18 +8,13 @@ Entity Storage connector implementation using MySQL storage.
 npm install @twin.org/entity-storage-connector-mysql
 ```
 
-## Testing
+## Docker
 
-The tests developed are functional tests and need an instance of MySql up and running. To run MySql locally:
+To perform testing of this component it may be necessary to launch a local instance to communicate with.
 
-```sh
-docker run -p 3306:3306 --name twin-entity-storage-mysql --hostname mysql -e MYSQL_ROOT_PASSWORD=password -d mysql:latest
-```
-
-Afterwards you can run the tests as follows:
-
-```sh
-npm run test
+```shell
+docker pull mysql:latest
+docker run -d --name twin-entity-storage-mysql -e MYSQL_ROOT_PASSWORD=password -p 3400:3306 mysql:latest
 ```
 
 ## Examples

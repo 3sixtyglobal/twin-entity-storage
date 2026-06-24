@@ -1,52 +1,90 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import {
-	Firestore,
-	type Settings,
-	type CollectionReference,
-	type Query,
 	type DocumentSnapshot,
-	type DocumentData
+	Filter,
+	Firestore,
+	type Query,
+	type Settings
 } from "@google-cloud/firestore";
-import { BaseError, Converter, GeneralError, Guards, Is, ObjectHelper } from "@twin.org/core";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
+import {
+	BaseError,
+	ComponentFactory,
+	Converter,
+	GeneralError,
+	Guards,
+	HealthStatus,
+	type IHealth,
+	Is,
+	type IValidationFailure,
+	ObjectHelper,
+	Validation
+} from "@twin.org/core";
 import {
 	ComparisonOperator,
 	type EntityCondition,
+	EntityConditions,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
 	type IEntitySchema,
 	type IEntitySchemaProperty,
+	LogicalOperator,
 	SortDirection
 } from "@twin.org/entity";
-import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { LoggingConnectorFactory } from "@twin.org/logging-models";
+import {
+	EntityStorageHelper,
+	type IEntityStorageConnector,
+	type IEntityStorageMigrationConnector,
+	type IMigrationOptions
+} from "@twin.org/entity-storage-models";
+import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import type { JWTInput } from "google-auth-library";
-import type { IEntityWithIndexing } from "./models/IEntityWithIndexing";
-import type { IFirestoreEntityStorageConnectorConfig } from "./models/IFirestoreEntityStorageConnectorConfig";
-import type { IFirestoreEntityStorageConnectorConstructorOptions } from "./models/IFirestoreEntityStorageConnectorConstructorOptions";
-import type { IValueType } from "./models/IValueType";
+import type { IFirestoreEntityStorageConnectorConfig } from "./models/IFirestoreEntityStorageConnectorConfig.js";
+import type { IFirestoreEntityStorageConnectorConstructorOptions } from "./models/IFirestoreEntityStorageConnectorConstructorOptions.js";
 
 /**
  * Class for performing entity storage operations using Firestore.
  */
-export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
+export class FirestoreEntityStorageConnector<
+	T = unknown
+> implements IEntityStorageMigrationConnector<T> {
+	/**
+	 * Runtime name for the class.
+	 */
+	public static readonly CLASS_NAME: string = nameof<FirestoreEntityStorageConnector>();
+
 	/**
 	 * Limit the number of entities when finding.
 	 * @internal
 	 */
-	private static readonly _PAGE_SIZE: number = 40;
+	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
-	 * Runtime name for the class.
+	 * Separator used between context ID parts in Firestore collection names.
+	 * Must not be "/" which Firestore interprets as a path separator.
+	 * @internal
 	 */
-	public readonly CLASS_NAME: string = nameof<FirestoreEntityStorageConnector>();
+	private static readonly _PARTITION_SEPARATOR: string = ":";
+
+	/**
+	 * The name for the schema.
+	 * @internal
+	 */
+	private readonly _entitySchemaName: string;
 
 	/**
 	 * The schema for the entity.
 	 * @internal
 	 */
 	private readonly _entitySchema: IEntitySchema<T>;
+
+	/**
+	 * The keys to use from the context ids to create partitions.
+	 * @internal
+	 */
+	private readonly _partitionContextIds?: string[];
 
 	/**
 	 * The primary key.
@@ -67,26 +105,28 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	private readonly _firestoreClient: Firestore;
 
 	/**
-	 * The Firestore collection.
-	 * @internal
-	 */
-	private readonly _collection: CollectionReference;
-
-	/**
 	 * Create a new instance of FirestoreEntityStorageConnector.
 	 * @param options The options for the connector.
 	 */
 	constructor(options: IFirestoreEntityStorageConnectorConstructorOptions) {
-		Guards.object(this.CLASS_NAME, nameof(options), options);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.entitySchema), options.entitySchema);
+		Guards.object(FirestoreEntityStorageConnector.CLASS_NAME, nameof(options), options);
+		Guards.stringValue(
+			FirestoreEntityStorageConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
+		);
 		Guards.object<IFirestoreEntityStorageConnectorConfig>(
-			this.CLASS_NAME,
+			FirestoreEntityStorageConnector.CLASS_NAME,
 			nameof(options.config),
 			options.config
 		);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.projectId), options.config.projectId);
 		Guards.stringValue(
-			this.CLASS_NAME,
+			FirestoreEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.projectId),
+			options.config.projectId
+		);
+		Guards.stringValue(
+			FirestoreEntityStorageConnector.CLASS_NAME,
 			nameof(options.config.collectionName),
 			options.config.collectionName
 		);
@@ -94,7 +134,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		let credentials: JWTInput | undefined;
 		if (!Is.empty(options.config.credentials)) {
 			Guards.stringBase64(
-				this.CLASS_NAME,
+				FirestoreEntityStorageConnector.CLASS_NAME,
 				nameof(options.config.credentials),
 				options.config.credentials
 			);
@@ -104,7 +144,9 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		}
 
 		this._config = options.config;
+		this._entitySchemaName = options.entitySchema;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
+		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 
 		const firestoreOptions: Settings = {
@@ -122,23 +164,64 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		}
 
 		this._firestoreClient = new Firestore(firestoreOptions);
-		this._collection = this._firestoreClient.collection(this._config.collectionName);
+	}
+
+	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return FirestoreEntityStorageConnector.CLASS_NAME;
+	}
+
+	/**
+	 * Returns the health status of the component.
+	 * @returns The health status of the component.
+	 */
+	public async health(): Promise<IHealth[]> {
+		try {
+			await this._firestoreClient.listCollections();
+			return [
+				{
+					source: FirestoreEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Ok,
+					description: "healthDescription",
+					data: { projectId: this._config.projectId, collectionName: this._config.collectionName }
+				}
+			];
+		} catch {
+			return [
+				{
+					source: FirestoreEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Error,
+					description: "healthDescription",
+					message: "connectionFailed",
+					data: { projectId: this._config.projectId, collectionName: this._config.collectionName }
+				}
+			];
+		}
+	}
+
+	/**
+	 * Get the schema for the entities.
+	 * @returns The schema for the entities.
+	 */
+	public getSchema(): IEntitySchema {
+		return this._entitySchema as IEntitySchema;
 	}
 
 	/**
 	 * Bootstrap the component by creating and initializing any resources it needs.
-	 * @param nodeLoggingConnectorType The node logging connector type, defaults to "node-logging".
+	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the bootstrapping process was successful.
 	 */
-	public async bootstrap(nodeLoggingConnectorType?: string): Promise<boolean> {
-		const nodeLogging = LoggingConnectorFactory.getIfExists(
-			nodeLoggingConnectorType ?? "node-logging"
-		);
+	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: FirestoreEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "firestoreCreating",
 				data: {
@@ -155,7 +238,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: FirestoreEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "firestoreCreated",
 				data: {
@@ -168,7 +251,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		} catch (err) {
 			await nodeLogging?.log({
 				level: "error",
-				source: this.CLASS_NAME,
+				source: FirestoreEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "firestoreCreationFailed",
 				error: BaseError.fromError(err),
@@ -179,14 +262,6 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 			});
 			return false;
 		}
-	}
-
-	/**
-	 * Get the schema for the entities.
-	 * @returns The schema for the entities.
-	 */
-	public getSchema(): IEntitySchema {
-		return this._entitySchema as IEntitySchema;
 	}
 
 	/**
@@ -201,20 +276,29 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(FirestoreEntityStorageConnector.CLASS_NAME, nameof(id), id);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(
+			contextIds,
+			this._partitionContextIds,
+			FirestoreEntityStorageConnector._PARTITION_SEPARATOR
+		);
 
 		try {
-			if (!Is.stringValue(secondaryIndex) && !Is.arrayValue(conditions)) {
-				const docRef = this._collection.doc(id);
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+
+			if (!Is.arrayValue(conditions)) {
+				const docRef = collection.doc(id);
 				const doc = await docRef.get();
 
 				if (doc.exists) {
-					return doc.data() as T;
+					return EntityStorageHelper.unPrepareEntity<T>(doc.data() as T, []);
 				}
 			}
 
-			// Use secondaryIndex and/or conditions to construct a query
-			let query: Query = this._collection;
+			// Use conditions to construct a query
+			let query: Query = collection;
 
 			if (secondaryIndex) {
 				query = query.where(secondaryIndex as string, "==", id);
@@ -231,10 +315,15 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 
 			const querySnapshot = await query.limit(1).get();
 			if (!querySnapshot.empty) {
-				return querySnapshot.docs[0].data() as T;
+				return EntityStorageHelper.unPrepareEntity<T>(querySnapshot.docs[0].data() as T, []);
 			}
 		} catch (err) {
-			throw new GeneralError(this.CLASS_NAME, "getEntityFailed", { id }, err);
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"getEntityFailed",
+				{ id },
+				err
+			);
 		}
 	}
 
@@ -245,52 +334,136 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	 * @returns Nothing.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
-		Guards.object(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object(FirestoreEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
-		EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(
+			contextIds,
+			this._partitionContextIds,
+			FirestoreEntityStorageConnector._PARTITION_SEPARATOR
+		);
+
+		const prepared = EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
+			nullBehavior: "nullify"
+		});
 
 		try {
-			const id = entity[this._primaryKey.property as keyof T] as string;
+			const id = prepared[this._primaryKey.property] as string;
 
-			const entityCopy = { ...entity } as T & Partial<IEntityWithIndexing>;
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
 
-			// Handle indexing field
-			if (entityCopy.valueArray && Is.array(entityCopy.valueArray)) {
-				const valueArrayFields = entityCopy.valueArray
-					.filter((item): item is IValueType => Is.notEmpty(item))
-					.map(item => `${item.field}:${item.value}`);
-				entityCopy.valueArrayFields = valueArrayFields;
-			}
-
-			const docRef = this._collection.doc(id);
+			const docRef = collection.doc(id);
 
 			if (!Is.arrayValue(conditions)) {
-				await docRef.set(entityCopy as DocumentData);
+				await docRef.set(prepared);
 			} else {
 				await this._firestoreClient.runTransaction(async transaction => {
 					const docSnapshot = await transaction.get(docRef);
 
 					if (!docSnapshot.exists) {
-						transaction.set(docRef, entityCopy as DocumentData);
+						transaction.set(docRef, prepared as object);
 					} else {
 						const data = docSnapshot.data() as T;
 
-						let conditionsMet = true;
-						for (const condition of conditions) {
-							if (data[condition.property] !== condition.value) {
-								conditionsMet = false;
-								break;
-							}
-						}
-
-						if (conditionsMet) {
-							transaction.set(docRef, entityCopy as DocumentData);
+						if (
+							EntityConditions.check(data, {
+								conditions: conditions.map(c => ({
+									property: c.property as string,
+									comparison: ComparisonOperator.Equals,
+									value: c.value
+								}))
+							})
+						) {
+							transaction.set(docRef, prepared as object);
 						}
 					}
 				});
 			}
 		} catch (err) {
-			throw new GeneralError(this.CLASS_NAME, "setEntityFailed", { entity }, err);
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"setEntityFailed",
+				{ id: entity.id },
+				err
+			);
+		}
+	}
+
+	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(FirestoreEntityStorageConnector.CLASS_NAME, nameof(entities), entities);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(
+			contextIds,
+			this._partitionContextIds,
+			FirestoreEntityStorageConnector._PARTITION_SEPARATOR
+		);
+
+		const preparedEntities = entities.map(entity =>
+			EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
+				nullBehavior: "nullify"
+			})
+		);
+
+		try {
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const chunkSize = FirestoreEntityStorageConnector._DEFAULT_LIMIT;
+			for (let i = 0; i < preparedEntities.length; i += chunkSize) {
+				const chunk = preparedEntities.slice(i, i + chunkSize);
+				const batch = this._firestoreClient.batch();
+				for (const entity of chunk) {
+					const id = entity[this._primaryKey.property] as string;
+					const docRef = collection.doc(id);
+					batch.set(docRef, entity as { [key: string]: unknown });
+				}
+				await batch.commit();
+			}
+		} catch (err) {
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"setBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Empty the storage by deleting all entities in the collection.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(
+			contextIds,
+			this._partitionContextIds,
+			FirestoreEntityStorageConnector._PARTITION_SEPARATOR
+		);
+
+		try {
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const snapshot = await collection.get();
+			const chunkSize = 500;
+			for (let i = 0; i < snapshot.docs.length; i += chunkSize) {
+				const chunk = snapshot.docs.slice(i, i + chunkSize);
+				const batch = this._firestoreClient.batch();
+				for (const doc of chunk) {
+					batch.delete(doc.ref);
+				}
+				await batch.commit();
+			}
+		} catch (err) {
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"emptyFailed",
+				undefined,
+				err
+			);
 		}
 	}
 
@@ -304,10 +477,18 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		id: string,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(FirestoreEntityStorageConnector.CLASS_NAME, nameof(id), id);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(
+			contextIds,
+			this._partitionContextIds,
+			FirestoreEntityStorageConnector._PARTITION_SEPARATOR
+		);
 
 		try {
-			const docRef = this._collection.doc(id);
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const docRef = collection.doc(id);
 
 			if (!Is.arrayValue(conditions)) {
 				await docRef.delete();
@@ -317,23 +498,216 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 
 					if (docSnapshot.exists) {
 						const data = docSnapshot.data() as T;
-						let conditionsMet = true;
-						for (const condition of conditions) {
-							if (data[condition.property] !== condition.value) {
-								conditionsMet = false;
-								break;
-							}
-						}
-
-						if (conditionsMet) {
+						if (
+							EntityConditions.check(data, {
+								conditions: conditions.map(c => ({
+									property: c.property as string,
+									comparison: ComparisonOperator.Equals,
+									value: c.value
+								}))
+							})
+						) {
 							transaction.delete(docRef);
 						}
 					}
 				});
 			}
 		} catch (err) {
-			throw new GeneralError(this.CLASS_NAME, "removeEntityFailed", { id }, err);
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"removeEntityFailed",
+				{ id },
+				err
+			);
 		}
+	}
+
+	/**
+	 * Remove multiple entities by their primary key IDs using a Firestore WriteBatch.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(FirestoreEntityStorageConnector.CLASS_NAME, nameof(ids), ids);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(
+			contextIds,
+			this._partitionContextIds,
+			FirestoreEntityStorageConnector._PARTITION_SEPARATOR
+		);
+
+		try {
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const chunkSize = 500;
+			for (let i = 0; i < ids.length; i += chunkSize) {
+				const chunk = ids.slice(i, i + chunkSize);
+				const batch = this._firestoreClient.batch();
+				for (const id of chunk) {
+					const docRef = collection.doc(id);
+					batch.delete(docRef);
+				}
+				await batch.commit();
+			}
+		} catch (err) {
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"removeBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Teardown the storage by deleting all documents across all partition collections.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: FirestoreEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "storeTearingDown"
+		});
+
+		try {
+			await this.deleteAllPartitionCollections(this._config.collectionName);
+
+			await nodeLogging?.log({
+				level: "info",
+				source: FirestoreEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "storeTornDown"
+			});
+
+			return true;
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: FirestoreEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "teardownFailed",
+				error: BaseError.fromError(err)
+			});
+			return false;
+		}
+	}
+
+	/**
+	 * Get a unique list of all the context ids from the storage.
+	 * @returns The list of unique context ids.
+	 */
+	public async getPartitionContextIds(): Promise<IContextIds[]> {
+		const partitionContextIds = this._partitionContextIds;
+		if (!Is.arrayValue(partitionContextIds)) {
+			return [];
+		}
+		try {
+			const prefix = `${this._config.collectionName}_`;
+			const collections = await this._firestoreClient.listCollections();
+			const result: IContextIds[] = [];
+			for (const col of collections) {
+				if (col.id.startsWith(prefix)) {
+					const partitionKey = col.id.slice(prefix.length);
+					if (Is.stringValue(partitionKey)) {
+						result.push(
+							ContextIdHelper.shortSplit(
+								partitionContextIds,
+								partitionKey,
+								FirestoreEntityStorageConnector._PARTITION_SEPARATOR
+							)
+						);
+					}
+				}
+			}
+			return result;
+		} catch (err) {
+			throw new GeneralError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"getPartitionContextIdsFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Create the target connector for performing the migration using a temporary collection name.
+	 * @param newEntitySchema The name of the new entity schema to create the connector for.
+	 * @returns Connector for performing the migration.
+	 */
+	public async createTargetConnector<U>(
+		newEntitySchema: string
+	): Promise<IEntityStorageConnector<U>> {
+		const migrationCollectionName = `${this._config.collectionName}Migration${Date.now()}`;
+		return new FirestoreEntityStorageConnector<U>({
+			entitySchema: newEntitySchema,
+			config: { ...this._config, collectionName: migrationCollectionName },
+			partitionContextIds: this._partitionContextIds
+		});
+	}
+
+	/**
+	 * Finalize the migration by tearing down the old collections and replacing them with the target collections.
+	 * @param targetConnector The target connector to finalize the migration with.
+	 * @param options The options to control how the migration is finalized.
+	 * @param loggingComponentType The optional component type to use for logging.
+	 * @returns The final connector pointing at the original collection name.
+	 */
+	public async finalizeMigration<U>(
+		targetConnector: FirestoreEntityStorageConnector<U>,
+		options?: IMigrationOptions,
+		loggingComponentType?: string
+	): Promise<FirestoreEntityStorageConnector<U>> {
+		// Firestore has no collection-rename operation, so we create fresh collections under
+		// the original name, copy all documents from the migration collections, then delete the
+		// migration collections.
+
+		// Teardown all existing source collections to free up the original collection name prefix.
+		await this.teardown(loggingComponentType);
+
+		// Create a new connector at the original collection name but with the new schema.
+		const originalCollectionName = this._config.collectionName;
+		const finalConnector = new FirestoreEntityStorageConnector<U>({
+			entitySchema: targetConnector._entitySchemaName,
+			config: { ...targetConnector._config, collectionName: originalCollectionName },
+			partitionContextIds: this._partitionContextIds
+		});
+
+		if (await finalConnector.bootstrap(loggingComponentType)) {
+			// Since there is no rename, we need to copy the data from the migration table to the new table
+			const partitions = await targetConnector.getPartitionContextIds();
+			const batchSize = options?.batchSize ?? FirestoreEntityStorageConnector._DEFAULT_LIMIT;
+			await this.bulkCopy(targetConnector, finalConnector, partitions, batchSize);
+
+			await targetConnector.teardown(loggingComponentType);
+
+			return finalConnector;
+		}
+		throw new GeneralError(
+			FirestoreEntityStorageConnector.CLASS_NAME,
+			"finalizeMigrationFailedBootstrap",
+			undefined
+		);
+	}
+
+	/**
+	 * Cleanup the migration if a migration fails or needs to be aborted.
+	 * @param targetConnector The target connector to cleanup.
+	 * @param options The options to control how the migration is cleaned up.
+	 * @param loggingComponentType The optional component type to use for logging.
+	 */
+	public async cleanupMigration<U>(
+		targetConnector: IEntityStorageConnector<U> | undefined,
+		options?: IMigrationOptions,
+		loggingComponentType?: string
+	): Promise<void> {
+		// If something failed the only thing to cleanup is the migration table
+		await targetConnector?.teardown?.(loggingComponentType);
 	}
 
 	/**
@@ -341,8 +715,8 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk.
 	 * @returns The matching entities and a cursor for the next page.
 	 */
 	public async query(
@@ -350,7 +724,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 		sortProperties?: { property: keyof T; sortDirection: SortDirection }[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{
 		/**
 		 * The entities, which can be partial if a limited keys list was provided.
@@ -363,11 +737,94 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	}> {
 		const queryDescription: string[] = [];
 
-		try {
-			let query = this._collection as Query;
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(
+			contextIds,
+			this._partitionContextIds,
+			FirestoreEntityStorageConnector._PARTITION_SEPARATOR
+		);
 
-			if (conditions) {
-				query = this.applyConditions(query, conditions);
+		const finalLimit = limit ?? FirestoreEntityStorageConnector._DEFAULT_LIMIT;
+
+		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
+		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+
+		if (!Is.empty(limit)) {
+			const validationFailures: IValidationFailure[] = [];
+			Validation.integer(nameof(limit), limit, validationFailures, undefined, { minValue: 1 });
+			Validation.asValidationError(
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"query",
+				validationFailures
+			);
+		}
+
+		try {
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+
+			// Firestore has no native substring search. When any condition needs in-memory
+			// filtering (string Includes / NotIncludes), fetch all matching docs and filter
+			// client-side, using an index-based cursor for pagination.
+			if (!Is.empty(conditions) && this.needsPostFilter(conditions)) {
+				queryDescription.push("InMemoryFilter");
+
+				let baseQuery = collection as Query;
+
+				if (Is.arrayValue(sortProperties)) {
+					for (const { property, sortDirection } of sortProperties) {
+						baseQuery = baseQuery.orderBy(
+							property as string,
+							sortDirection === SortDirection.Ascending ? "asc" : "desc"
+						);
+					}
+				}
+
+				const allSnapshot = await baseQuery.get();
+				let allEntities = allSnapshot.docs.map((doc: DocumentSnapshot) =>
+					EntityStorageHelper.unPrepareEntity<T>(doc.data() as T, [])
+				);
+
+				allEntities = allEntities.filter(e => EntityConditions.check(e as Partial<T>, conditions));
+
+				let projected: Partial<T>[];
+				if (Is.arrayValue(properties)) {
+					projected = allEntities.map(e => {
+						const out: Partial<T> = {};
+						for (const prop of properties) {
+							if (prop in (e as object)) {
+								out[prop] = e[prop];
+							}
+						}
+						return out;
+					});
+				} else {
+					projected = allEntities;
+				}
+
+				const start = Is.stringValue(cursor) ? Number.parseInt(cursor, 10) : 0;
+				const page = projected.slice(start, start + finalLimit);
+				const nextCursor =
+					start + finalLimit < projected.length ? String(start + finalLimit) : undefined;
+
+				return { entities: page, cursor: nextCursor };
+			}
+
+			if (this.hasEmptyInCondition(conditions)) {
+				return { entities: [], cursor: undefined };
+			}
+
+			// Prune empty-In leaves from OR branches: the Firestore SDK throws on
+			// Filter.where(prop, "in", []) even inside an OR where other branches still match.
+			// hasEmptyInCondition above already handles the all-false case, so pruning here
+			// is safe — any removed leaf was a no-op branch.
+			const effectiveConditions = !Is.empty(conditions)
+				? (this.pruneEmptyInConditions(conditions) ?? undefined)
+				: conditions;
+
+			let query = collection as Query;
+
+			if (!Is.empty(effectiveConditions)) {
+				query = this.applyConditions(query, effectiveConditions);
 				queryDescription.push(`Conditions: ${JSON.stringify(conditions)}`);
 			}
 
@@ -382,28 +839,36 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 			}
 
 			if (Is.stringValue(cursor)) {
-				const cursorDoc = await this._firestoreClient.doc(cursor).get();
-				if (cursorDoc?.exists) {
-					query = query.startAfter(cursorDoc);
+				// Discard cursors from a different partition — startAfter() throws if the
+				// snapshot belongs to a different collection than the current query.
+				const cursorCollection = cursor.slice(0, cursor.lastIndexOf("/"));
+				if (cursorCollection === this.collectionName(partitionKey)) {
+					const cursorDoc = await this._firestoreClient.doc(cursor).get();
+					if (cursorDoc?.exists) {
+						query = query.startAfter(cursorDoc);
+					}
+					queryDescription.push(`Cursor: ${cursor}`);
 				}
-				queryDescription.push(`Cursor: ${cursor}`);
 			}
 
-			const limit = pageSize ?? FirestoreEntityStorageConnector._PAGE_SIZE;
-			query = query.limit(limit);
-			queryDescription.push(`Limit: ${limit}`);
+			query = query.limit(finalLimit + 1);
+			queryDescription.push(`Limit: ${finalLimit}`);
 
-			if (properties) {
+			if (Is.arrayValue(properties)) {
 				query = query.select(...(properties as string[]));
 				queryDescription.push(`Properties: ${properties.join(", ")}`);
 			}
 
 			const querySnapshot = await query.get();
-			const entities = querySnapshot.docs.map((doc: DocumentSnapshot) => doc.data() as T);
+			const hasMore = querySnapshot.docs.length > finalLimit;
+			const resultDocs = hasMore ? querySnapshot.docs.slice(0, finalLimit) : querySnapshot.docs;
+			const entities = resultDocs.map((doc: DocumentSnapshot) =>
+				EntityStorageHelper.unPrepareEntity<T>(doc.data() as T, [])
+			);
 
 			let nextCursor: string | undefined;
-			if (entities.length === limit) {
-				nextCursor = querySnapshot.docs[querySnapshot.docs.length - 1].ref.path;
+			if (hasMore) {
+				nextCursor = resultDocs[resultDocs.length - 1].ref.path;
 			}
 
 			return {
@@ -412,7 +877,7 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 			};
 		} catch (err) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				FirestoreEntityStorageConnector.CLASS_NAME,
 				"queryFailed",
 				{ queryDescription: queryDescription.join("; ") },
 				err
@@ -421,87 +886,304 @@ export class FirestoreEntityStorageConnector<T = unknown> implements IEntityStor
 	}
 
 	/**
-	 * Delete all entities in the collection.
-	 * @returns Nothing.
-	 * @internal
+	 * Count all the entities which match the conditions.
+	 * @param conditions The optional conditions to match for the entities.
+	 * @returns The total count of entities in the storage.
 	 */
-	public async collectionDelete(): Promise<void> {
-		const collection = this._collection;
-		const batchSize = 500;
-		const query = collection.limit(batchSize);
-
+	public async count(conditions?: EntityCondition<T>): Promise<number> {
 		try {
-			await this.deleteQueryBatch(query, batchSize);
-		} catch (error) {
+			const contextIds = await ContextIdStore.getContextIds();
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				contextIds,
+				this._partitionContextIds,
+				FirestoreEntityStorageConnector._PARTITION_SEPARATOR
+			);
+
+			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+
+			if (this.hasEmptyInCondition(conditions)) {
+				return 0;
+			}
+
+			if (!Is.empty(conditions) && this.needsPostFilter(conditions)) {
+				const allSnapshot = await collection.get();
+				const allEntities = allSnapshot.docs.map((doc: DocumentSnapshot) =>
+					EntityStorageHelper.unPrepareEntity<T>(doc.data() as T, [])
+				);
+				return allEntities.filter(e => EntityConditions.check(e as Partial<T>, conditions)).length;
+			}
+
+			const effectiveConditions = !Is.empty(conditions)
+				? (this.pruneEmptyInConditions(conditions) ?? undefined)
+				: conditions;
+
+			let query = collection as Query;
+			if (!Is.empty(effectiveConditions)) {
+				query = this.applyConditions(query, effectiveConditions);
+			}
+
+			const snapshot = await query.count().get();
+			return snapshot.data().count;
+		} catch (err) {
 			throw new GeneralError(
-				this.CLASS_NAME,
-				"collectionDeleteFailed",
-				{ collectionName: this._config.collectionName },
-				error
+				FirestoreEntityStorageConnector.CLASS_NAME,
+				"countFailed",
+				undefined,
+				err
 			);
 		}
 	}
 
 	/**
-	 * Apply conditions to a Firestore query.
+	 * Copy all entities from sourceConnector to destConnector, paging through each partition.
+	 * @param sourceConnector The connector to read entities from.
+	 * @param destConnector The connector to write entities to.
+	 * @param partitions The partition list returned by getPartitionContextIds.
+	 * @param batchSize The number of entities to read per page.
+	 * @internal
+	 */
+	private async bulkCopy<U>(
+		sourceConnector: FirestoreEntityStorageConnector<U>,
+		destConnector: FirestoreEntityStorageConnector<U>,
+		partitions: IContextIds[],
+		batchSize: number
+	): Promise<void> {
+		let partitionList: IContextIds[];
+		if (Is.arrayValue(partitions)) {
+			partitionList = partitions;
+		} else if (Is.arrayValue(sourceConnector._partitionContextIds)) {
+			partitionList = [];
+		} else {
+			partitionList = [{}];
+		}
+
+		for (let i = 0; i < partitionList.length; i++) {
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				partitionList[i],
+				sourceConnector._partitionContextIds,
+				FirestoreEntityStorageConnector._PARTITION_SEPARATOR
+			);
+
+			const sourceCollection = sourceConnector._firestoreClient.collection(
+				sourceConnector.collectionName(partitionKey)
+			);
+			const destCollection = destConnector._firestoreClient.collection(
+				destConnector.collectionName(partitionKey)
+			);
+
+			let lastDoc: DocumentSnapshot | undefined;
+			let hasMore = true;
+
+			while (hasMore) {
+				let pageQuery = sourceCollection.limit(batchSize);
+				if (lastDoc) {
+					pageQuery = pageQuery.startAfter(lastDoc);
+				}
+				const snapshot = await pageQuery.get();
+				const docs = snapshot.docs;
+
+				for (let j = 0; j < docs.length; j += batchSize) {
+					const chunk = docs.slice(j, j + batchSize);
+					const batch = destConnector._firestoreClient.batch();
+					for (const doc of chunk) {
+						batch.set(destCollection.doc(doc.id), doc.data());
+					}
+					await batch.commit();
+				}
+
+				lastDoc = docs[docs.length - 1];
+				hasMore = docs.length === batchSize;
+			}
+		}
+	}
+
+	/**
+	 * Delete all documents in every collection whose name starts with collectionName_.
+	 * @param collectionName The base collection name prefix.
+	 * @internal
+	 */
+	private async deleteAllPartitionCollections(collectionName: string): Promise<void> {
+		const prefix = `${collectionName}_`;
+		const collections = await this._firestoreClient.listCollections();
+		const chunkSize = 500;
+		for (const col of collections) {
+			if (col.id.startsWith(prefix)) {
+				const snapshot = await col.get();
+				for (let i = 0; i < snapshot.docs.length; i += chunkSize) {
+					const chunk = snapshot.docs.slice(i, i + chunkSize);
+					const batch = this._firestoreClient.batch();
+					for (const doc of chunk) {
+						batch.delete(doc.ref);
+					}
+					await batch.commit();
+				}
+			}
+		}
+	}
+
+	/**
+	 * Returns true when the condition tree is guaranteed to match nothing due to empty
+	 * In lists, respecting AND/OR boolean semantics (#141):
+	 * - AND group: true if ANY child is always-false (false AND x = false)
+	 * - OR  group: true if ALL children are always-false (false OR false = false)
+	 * - Leaf:      true only for `In []`
+	 * @param condition The condition tree to inspect.
+	 * @returns True if a short-circuit to empty results is required.
+	 * @internal
+	 */
+	private hasEmptyInCondition(condition?: EntityCondition<T>): boolean {
+		if (Is.empty(condition)) {
+			return false;
+		}
+		if ("conditions" in condition) {
+			return condition.logicalOperator === LogicalOperator.Or
+				? condition.conditions.every(c => this.hasEmptyInCondition(c))
+				: condition.conditions.some(c => this.hasEmptyInCondition(c));
+		}
+		return (
+			condition.comparison === ComparisonOperator.In &&
+			Is.array(condition.value) &&
+			condition.value.length === 0
+		);
+	}
+
+	/**
+	 * Returns a copy of the condition tree with all empty-In leaves removed.
+	 * Used to keep `In []` out of native Firestore Filter calls (the SDK throws on
+	 * `Filter.where(prop, "in", [])`) while preserving correct OR semantics (#141).
+	 * Returns null when the entire subtree reduces to nothing (caller should treat
+	 * as no conditions).
+	 * @param condition The condition to prune.
+	 * @returns The pruned condition, or null if the subtree was fully removed.
+	 * @internal
+	 */
+	private pruneEmptyInConditions(condition: EntityCondition<T>): EntityCondition<T> | null {
+		if (!("conditions" in condition)) {
+			if (
+				condition.comparison === ComparisonOperator.In &&
+				Is.array(condition.value) &&
+				condition.value.length === 0
+			) {
+				return null;
+			}
+			return condition;
+		}
+		// For AND groups: if any child has an empty In, the whole AND is dead.
+		// Do not recurse — promoting the surviving siblings would turn a dead
+		// branch into a live one when this AND sits inside an OR (#141).
+		if (condition.logicalOperator !== LogicalOperator.Or && this.hasEmptyInCondition(condition)) {
+			return null;
+		}
+		// For OR groups: prune dead branches individually so the Firestore SDK
+		// never receives `In []`, while keeping live siblings.
+		const pruned = condition.conditions
+			.map(c => this.pruneEmptyInConditions(c))
+			.filter((c): c is EntityCondition<T> => c !== null);
+		if (pruned.length === 0) {
+			return null;
+		}
+		if (pruned.length === 1) {
+			return pruned[0];
+		}
+		return { ...condition, conditions: pruned };
+	}
+
+	/**
+	 * Returns true when any leaf condition requires client-side filtering
+	 * (Firestore has no native string-contains / not-contains operator).
+	 * @param condition The condition tree to inspect.
+	 * @returns True if post-filtering is required.
+	 * @internal
+	 */
+	private needsPostFilter(condition?: EntityCondition<T>): boolean {
+		if (Is.empty(condition)) {
+			return false;
+		}
+		if ("conditions" in condition) {
+			return condition.conditions.some(c => this.needsPostFilter(c));
+		}
+		const { comparison, value } = condition;
+		if (comparison === ComparisonOperator.NotIncludes) {
+			return true;
+		}
+		// Includes on a primitive (string/number) means substring search — not natively supported.
+		// Includes on an object means array-contains, which Firestore does support.
+		if (
+			comparison === ComparisonOperator.Includes &&
+			(value === null || typeof value !== "object")
+		) {
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Apply conditions to a Firestore query using composite Filter objects so that
+	 * OR groups are handled correctly.
 	 * @param query The initial query.
 	 * @param condition The condition to apply.
 	 * @returns The updated query.
 	 * @internal
 	 */
 	private applyConditions(query: Query, condition: EntityCondition<T>): Query {
+		return query.where(this.buildFilter(condition));
+	}
+
+	/**
+	 * Recursively convert an EntityCondition tree into a Firestore Filter.
+	 * Only called for native conditions (needsPostFilter must be false).
+	 * @param condition The condition to convert.
+	 * @returns A Firestore Filter.
+	 * @throws GeneralError if the comparison operator is not supported.
+	 * @internal
+	 */
+	private buildFilter(condition: EntityCondition<T>): Filter {
 		if ("conditions" in condition) {
-			// It's a group of conditions
-			for (const c of condition.conditions) {
-				query = this.applyConditions(query, c);
-			}
-			return query;
+			const filters = condition.conditions.map(c => this.buildFilter(c));
+			return condition.logicalOperator === LogicalOperator.Or
+				? Filter.or(...filters)
+				: Filter.and(...filters);
 		}
-		// It's a single condition
-		const { property, value, comparison } = condition;
+		const { property, comparison } = condition;
+		// Firestore has no undefined type — null has the correct semantics:
+		//   == null  matches documents where the field is null OR missing
+		//   != null  matches documents where the field exists and is not null
+		const value = condition.value === undefined ? null : condition.value;
 		switch (comparison) {
 			case ComparisonOperator.Equals:
-				return query.where(property as string, "==", value);
+				return Filter.where(property, "==", value);
 			case ComparisonOperator.NotEquals:
-				return query.where(property as string, "!=", value);
+				return Filter.where(property, "!=", value);
 			case ComparisonOperator.GreaterThan:
-				return query.where(property as string, ">", value);
+				return Filter.where(property, ">", value);
 			case ComparisonOperator.LessThan:
-				return query.where(property as string, "<", value);
+				return Filter.where(property, "<", value);
 			case ComparisonOperator.GreaterThanOrEqual:
-				return query.where(property as string, ">=", value);
+				return Filter.where(property, ">=", value);
 			case ComparisonOperator.LessThanOrEqual:
-				return query.where(property as string, "<=", value);
+				return Filter.where(property, "<=", value);
 			case ComparisonOperator.In:
-				return query.where(property as string, "in", value as unknown[]);
+				return Filter.where(property, "in", value);
 			case ComparisonOperator.Includes:
-				return query.where(property as string, "array-contains", value);
+				// Object value → array-contains (caller ensured needsPostFilter is false here)
+				return Filter.where(property, "array-contains", value);
+			case ComparisonOperator.NotIncludes:
 			default:
-				throw new GeneralError(this.CLASS_NAME, "unsupportedComparisonOperator", { comparison });
+				throw new GeneralError(
+					FirestoreEntityStorageConnector.CLASS_NAME,
+					"unsupportedComparisonOperator",
+					{ comparison }
+				);
 		}
 	}
 
 	/**
-	 * Delete all entities in the collection.
-	 * @returns Nothing.
+	 * Get the collection name based on partition key.
+	 * @param partitionKey The optional partition key to include in the collection name.
+	 * @returns The collection name.
 	 * @internal
 	 */
-	private async deleteQueryBatch(query: Query, batchSize: number): Promise<void> {
-		const snapshot = await query.get();
-
-		if (snapshot.size === 0) {
-			return;
-		}
-
-		const batch = this._firestoreClient.batch();
-		for (const doc of snapshot.docs) {
-			batch.delete(doc.ref);
-		}
-
-		await batch.commit();
-
-		if (snapshot.size === batchSize) {
-			await this.deleteQueryBatch(query, batchSize);
-		}
+	private collectionName(partitionKey?: string): string {
+		return `${this._config.collectionName}_${partitionKey ?? "default"}`;
 	}
 }

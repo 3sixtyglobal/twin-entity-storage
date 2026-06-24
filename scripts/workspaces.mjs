@@ -6,7 +6,6 @@
  * but it fails fast when there is an error.
  */
 import path from 'node:path';
-import FastGlob from 'fast-glob';
 import { fileExists, loadJson, runShellCmd } from './common.mjs';
 
 /**
@@ -27,7 +26,7 @@ async function run() {
 
 	const packageJson = await loadJson('package.json');
 
-	const workspaces = await FastGlob(packageJson.workspaces, { onlyDirectories: true });
+	const workspaces = packageJson.workspaces;
 
 	for (const workspace of workspaces) {
 		const workspacePackageJsonFilename = path.join(workspace, 'package.json');

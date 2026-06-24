@@ -42,15 +42,11 @@ The options for the connector.
 
 ## Properties
 
-### CLASS\_NAME
+### CLASS\_NAME {#class_name}
 
-> `readonly` **CLASS\_NAME**: `string`
+> `readonly` `static` **CLASS\_NAME**: `string`
 
 Runtime name for the class.
-
-#### Implementation of
-
-`IEntityStorageConnector.CLASS_NAME`
 
 #### Overrides
 
@@ -58,7 +54,7 @@ Runtime name for the class.
 
 ## Methods
 
-### getSchema()
+### getSchema() {#getschema}
 
 > **getSchema**(): `IEntitySchema`
 
@@ -80,9 +76,9 @@ The schema for the entities.
 
 ***
 
-### get()
+### get() {#get}
 
-> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`undefined` \| `T`\>
+> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
 
 Get an entity.
 
@@ -108,7 +104,7 @@ The optional conditions to match for the entities.
 
 #### Returns
 
-`Promise`\<`undefined` \| `T`\>
+`Promise`\<`T` \| `undefined`\>
 
 The object if it can be found or undefined.
 
@@ -122,9 +118,9 @@ The object if it can be found or undefined.
 
 ***
 
-### query()
+### query() {#query}
 
-> **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `pageSize?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
+> **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `limit?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 
 Find all the entities which match the conditions.
 
@@ -152,9 +148,9 @@ The optional properties to return, defaults to all.
 
 `string`
 
-The cursor to request the next page of entities.
+The cursor to request the next chunk of entities.
 
-##### pageSize?
+##### limit?
 
 `number`
 
@@ -177,19 +173,97 @@ and a cursor which can be used to request more entities.
 
 ***
 
-### bootstrap()
+### count() {#count}
 
-> **bootstrap**(`nodeLoggingConnectorType?`): `Promise`\<`boolean`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
+
+Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
+
+#### Returns
+
+`Promise`\<`number`\>
+
+The total count of entities in the storage.
+
+#### Implementation of
+
+`IEntityStorageConnector.count`
+
+#### Inherited from
+
+`AbstractScyllaDBConnector.count`
+
+***
+
+### safeTableName() {#safetablename}
+
+> `protected` **safeTableName**(`name`): `string`
+
+Get a safe table name by replacing any non-alphanumeric characters.
+
+#### Parameters
+
+##### name
+
+`string`
+
+The name to sanitize.
+
+#### Returns
+
+`string`
+
+The safe table name.
+
+#### Inherited from
+
+`AbstractScyllaDBConnector.safeTableName`
+
+***
+
+### className() {#classname}
+
+> **className**(): `string`
+
+Returns the class name of the component.
+
+#### Returns
+
+`string`
+
+The class name of the component.
+
+#### Implementation of
+
+`IEntityStorageConnector.className`
+
+#### Overrides
+
+`AbstractScyllaDBConnector.className`
+
+***
+
+### bootstrap() {#bootstrap}
+
+> **bootstrap**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
 
 Bootstrap the component by creating and initializing any resources it needs.
 
 #### Parameters
 
-##### nodeLoggingConnectorType?
+##### nodeLoggingComponentType?
 
 `string`
 
-The node logging connector type, defaults to "node-logging".
+The node logging component type.
 
 #### Returns
 
@@ -203,7 +277,7 @@ True if the bootstrapping process was successful.
 
 ***
 
-### set()
+### set() {#set}
 
 > **set**(`entity`): `Promise`\<`void`\>
 
@@ -227,7 +301,47 @@ The entity to set.
 
 ***
 
-### remove()
+### setBatch() {#setbatch}
+
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageConnector.setBatch`
+
+***
+
+### empty() {#empty}
+
+> **empty**(): `Promise`\<`void`\>
+
+Remove all entities from the storage.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageConnector.empty`
+
+***
+
+### remove() {#remove}
 
 > **remove**(`id`): `Promise`\<`void`\>
 
@@ -248,3 +362,53 @@ The id of the entity to remove.
 #### Implementation of
 
 `IEntityStorageConnector.remove`
+
+***
+
+### removeBatch() {#removebatch}
+
+> **removeBatch**(`ids`): `Promise`\<`void`\>
+
+Remove multiple entities.
+
+#### Parameters
+
+##### ids
+
+`string`[]
+
+The ids of the entities to remove.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageConnector.removeBatch`
+
+***
+
+### teardown() {#teardown}
+
+> **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+
+Teardown the entity storage (not supported for views).
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True if the teardown process was successful.
+
+#### Implementation of
+
+`IEntityStorageConnector.teardown`

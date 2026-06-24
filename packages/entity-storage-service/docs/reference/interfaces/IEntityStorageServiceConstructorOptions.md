@@ -4,7 +4,7 @@ Options for the Entity Storage Service constructor.
 
 ## Properties
 
-### entityStorageType
+### entityStorageType {#entitystoragetype}
 
 > **entityStorageType**: `string`
 
@@ -12,8 +12,8 @@ The type of the entity storage.
 
 ***
 
-### config?
+### config? {#config}
 
-> `optional` **config**: [`IEntityStorageConfig`](IEntityStorageConfig.md)
+> `optional` **config?**: [`IEntityStorageServiceConfig`](IEntityStorageServiceConfig.md)
 
 The configuration for the service.

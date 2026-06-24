@@ -1,28 +1,56 @@
 {
 	"info": {
 		"scyllaDBTableConnector": {
+			"keyspaceCreating": "Creating keyspace \"{keyspace}\"",
+			"keyspaceExists": "Skipping create keyspace \"{keyspace}\" as it already exists",
 			"tableCreating": "Creating table \"{table}\"",
-			"tableCreated": "Created table \"{table}\"",
 			"tableExists": "Skipping create table \"{table}\" as it already exists",
-			"typeCreated": "Created type \"{typeName}\"",
-			"sql": "SQL: \"{sql}\""
+			"typeCreating": "Creating type \"{typeName}\"",
+			"sql": "SQL: \"{sql}\"",
+			"tableDropping": "Dropping table \"{table}\"",
+			"tableDropped": "Table \"{table}\" dropped"
 		},
 		"scyllaDBViewConnector": {
 			"viewCreating": "Creating view \"{view}\"",
 			"viewCreated": "Created view \"{view}\"",
-			"viewExists": "Skipping create view \"{view}\" as it already exists",
-			"typeCreated": "Created type \"{typeName}\"",
+			"viewExists": "Skipping create view \"{view}\" as it already exists"
+		},
+		"abstractScyllaDBConnector": {
 			"sql": "SQL: \"{sql}\""
 		}
 	},
 	"error": {
 		"scyllaDBTableConnector": {
 			"tableCreateFailed": "Creating table \"{table}\" failed",
-			"getFailed": "Getting item with \"{id}\" failed",
-			"dropTableFailed": " \"{table}\" cannot be dropped",
-			"truncateTableFailed": " \"{table}\" cannot be dropped",
 			"removeFailed": "Removing item with \"{id}\" failed",
-			"findFailed": "Error while querying data on  \"{table}\""
+			"setFailed": "Setting item with \"{id}\" failed",
+			"setBatchFailed": "Setting batch of items failed",
+			"emptyFailed": "Emptying entity storage failed",
+			"removeBatchFailed": "Remove batch of entities failed",
+			"teardownFailed": "Teardown entity storage failed",
+			"getPartitionContextIdsFailed": "Unable to get partition context ids",
+			"finalizeMigrationFailedBootstrap": "Finalizing migration failed during bootstrap phase"
+		},
+		"scyllaDBViewConnector": {
+			"viewCreateFailed": "Creating view \"{view}\" failed",
+			"notSupported": "The operation is not supported \"{methodName}\""
+		},
+		"abstractScyllaDBConnector": {
+			"getFailed": "Getting item with \"{id}\" failed",
+			"findFailed": "Error while querying data on  \"{table}\"",
+			"parseJSONFailed": "Parsing JSON failed for field \"{name}\" with value \"{value}\"",
+			"comparisonNotSupported": "Dot-notation nested property path \"{property}\" is not supported in CQL queries",
+			"notEqualsNotSupported": "The NotEquals operator is not supported in CQL queries for property \"{property}\"",
+			"notIncludesNotSupported": "The NotIncludes operator is not supported in CQL queries for property \"{property}\"",
+			"orConditionNotSupported": "OR logical operators are not supported in CQL queries",
+			"countFailed": "Unable to count entities",
+			"sortOnlyPrimaryKey": "ScyllaDB only supports ORDER BY on clustering (primary key) columns; \"{property}\" is a secondary index and cannot be used for sorting"
+		}
+	},
+	"health": {
+		"scyllaDBTableConnector": {
+			"healthDescription": "Checks if the ScyllaDB table \"{table}\" is available",
+			"connectionFailed": "Failed to connect to ScyllaDB table \"{table}\""
 		}
 	}
 }

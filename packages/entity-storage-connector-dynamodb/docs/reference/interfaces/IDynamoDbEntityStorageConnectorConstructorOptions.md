@@ -4,7 +4,7 @@ Options for the Dynamo DB Entity Storage Connector constructor.
 
 ## Properties
 
-### entitySchema
+### entitySchema {#entityschema}
 
 > **entitySchema**: `string`
 
@@ -12,15 +12,23 @@ The schema for the entity
 
 ***
 
-### loggingConnectorType?
+### partitionContextIds? {#partitioncontextids}
 
-> `optional` **loggingConnectorType**: `string`
+> `optional` **partitionContextIds?**: `string`[]
 
-The type of logging connector to use, defaults to no logging.
+The keys to use from the context ids to create partitions.
 
 ***
 
-### config
+### loggingComponentType? {#loggingcomponenttype}
+
+> `optional` **loggingComponentType?**: `string`
+
+The type of logging component to use, defaults to no logging.
+
+***
+
+### config {#config}
 
 > **config**: [`IDynamoDbEntityStorageConnectorConfig`](IDynamoDbEntityStorageConnectorConfig.md)
 

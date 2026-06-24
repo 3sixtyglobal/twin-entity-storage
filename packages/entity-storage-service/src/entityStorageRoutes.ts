@@ -11,16 +11,21 @@ import {
 import { Coerce, ComponentFactory, Guards, StringHelper } from "@twin.org/core";
 import type {
 	IEntityStorageComponent,
+	IEntityStorageCountRequest,
+	IEntityStorageCountResponse,
+	IEntityStorageEmptyRequest,
 	IEntityStorageGetRequest,
 	IEntityStorageGetResponse,
 	IEntityStorageListRequest,
 	IEntityStorageListResponse,
+	IEntityStorageRemoveBatchRequest,
 	IEntityStorageRemoveRequest,
+	IEntityStorageSetBatchRequest,
 	IEntityStorageSetRequest
 } from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
 import { HttpStatusCode } from "@twin.org/web";
-import type { IEntityStorageRoutesExamples } from "./models/IEntityStorageRoutesExamples";
+import type { IEntityStorageRoutesExamples } from "./models/IEntityStorageRoutesExamples.js";
 
 /**
  * The source used when communicating about these routes.
@@ -78,6 +83,35 @@ export function generateRestRoutesEntityStorage(
 							id: "12345",
 							name: "My Item"
 						}
+					}
+				}
+			]
+		},
+		responseType: [
+			{
+				type: nameof<INoContentResponse>()
+			}
+		]
+	};
+
+	const setBatchRoute: IRestRoute<IEntityStorageSetBatchRequest, INoContentResponse> = {
+		operationId: `${camelTypeName}SetBatch`,
+		summary: `Set multiple entries in ${lowerName}.`,
+		tag: options?.tagName ?? tagsEntityStorage[0].name,
+		method: "POST",
+		path: `${baseRouteName}/batch`,
+		handler: async (httpRequestContext, request) =>
+			entityStorageSetBatch(httpRequestContext, componentName, request),
+		requestType: {
+			type: nameof<IEntityStorageSetBatchRequest>(),
+			examples: [
+				{
+					id: `${camelTypeName}SetBatchRequestExample`,
+					request: {
+						body: [
+							{ id: "12345", name: "My Item" },
+							{ id: "67890", name: "My Other Item" }
+						]
 					}
 				}
 			]
@@ -196,7 +230,100 @@ export function generateRestRoutesEntityStorage(
 		]
 	};
 
-	return [setRoute, getRoute, removeRoute, listRoute];
+	const countRoute: IRestRoute<IEntityStorageCountRequest, IEntityStorageCountResponse> = {
+		operationId: `${camelTypeName}Count`,
+		summary: `Count entries in ${lowerName}.`,
+		tag: options?.tagName ?? tagsEntityStorage[0].name,
+		method: "GET",
+		path: `${baseRouteName}/count`,
+		handler: async (httpRequestContext, request) =>
+			entityStorageCount(httpRequestContext, componentName, request),
+		requestType: {
+			type: nameof<IEntityStorageCountRequest>(),
+			examples: options?.examples?.count?.requestExamples ?? [
+				{
+					id: `${camelTypeName}CountRequestExample`,
+					request: {}
+				}
+			]
+		},
+		responseType: [
+			{
+				type: nameof<IEntityStorageCountResponse>(),
+				examples: options?.examples?.count?.responseExamples ?? [
+					{
+						id: `${camelTypeName}CountResponseExample`,
+						response: {
+							body: {
+								count: 1
+							}
+						}
+					}
+				]
+			}
+		]
+	};
+
+	const emptyRoute: IRestRoute<IEntityStorageEmptyRequest, INoContentResponse> = {
+		operationId: `${camelTypeName}Empty`,
+		summary: `Remove all entries from ${lowerName}.`,
+		tag: options?.tagName ?? tagsEntityStorage[0].name,
+		method: "DELETE",
+		path: `${baseRouteName}/`,
+		handler: async (httpRequestContext, request) =>
+			entityStorageEmpty(httpRequestContext, componentName, request),
+		requestType: {
+			type: nameof<IEntityStorageEmptyRequest>(),
+			examples: [
+				{
+					id: `${camelTypeName}EmptyRequestExample`,
+					request: {}
+				}
+			]
+		},
+		responseType: [
+			{
+				type: nameof<INoContentResponse>()
+			}
+		]
+	};
+
+	const removeBatchRoute: IRestRoute<IEntityStorageRemoveBatchRequest, INoContentResponse> = {
+		operationId: `${camelTypeName}RemoveBatch`,
+		summary: `Remove multiple entries from ${lowerName} by id.`,
+		tag: options?.tagName ?? tagsEntityStorage[0].name,
+		method: "DELETE",
+		path: `${baseRouteName}/batch`,
+		handler: async (httpRequestContext, request) =>
+			entityStorageRemoveBatch(httpRequestContext, componentName, request),
+		requestType: {
+			type: nameof<IEntityStorageRemoveBatchRequest>(),
+			examples: [
+				{
+					id: `${camelTypeName}RemoveBatchRequestExample`,
+					request: {
+						body: ["12345", "67890"]
+					}
+				}
+			]
+		},
+		responseType: [
+			{
+				type: nameof<INoContentResponse>()
+			}
+		]
+	};
+
+	return [
+		setRoute,
+		setBatchRoute,
+		getRoute,
+		removeRoute,
+		removeBatchRoute,
+		emptyRoute,
+		listRoute,
+		countRoute
+	];
 }
 
 /**
@@ -216,12 +343,50 @@ export async function entityStorageSet(
 	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
 	await component.set(
 		request.body,
-		httpRequestContext.userIdentity,
-		httpRequestContext.nodeIdentity
+		HttpParameterHelper.objectFromString(request.query?.conditions)
 	);
 	return {
 		statusCode: HttpStatusCode.noContent
 	};
+}
+
+/**
+ * Set multiple entries in entity storage.
+ * @param httpRequestContext The request context for the API.
+ * @param componentName The name of the component to use in the routes.
+ * @param request The request.
+ * @returns The response object with additional http response properties.
+ */
+export async function entityStorageSetBatch(
+	httpRequestContext: IHttpRequestContext,
+	componentName: string,
+	request: IEntityStorageSetBatchRequest
+): Promise<INoContentResponse> {
+	Guards.object<IEntityStorageSetBatchRequest>(ROUTES_SOURCE, nameof(request), request);
+	Guards.arrayValue(ROUTES_SOURCE, nameof(request.body), request.body);
+
+	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
+	await component.setBatch(request.body);
+	return {
+		statusCode: HttpStatusCode.noContent
+	};
+}
+
+/**
+ * Remove all entries from entity storage.
+ * @param httpRequestContext The request context for the API.
+ * @param componentName The name of the component to use in the routes.
+ * @param request The request.
+ * @returns The response object with additional http response properties.
+ */
+export async function entityStorageEmpty(
+	httpRequestContext: IHttpRequestContext,
+	componentName: string,
+	request: IEntityStorageEmptyRequest
+): Promise<INoContentResponse> {
+	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
+	await component.empty();
+	return { statusCode: HttpStatusCode.noContent };
 }
 
 /**
@@ -248,8 +413,7 @@ export async function entityStorageGet(
 	const item = await component.get(
 		request.pathParams.id,
 		request.query?.secondaryIndex as keyof unknown,
-		httpRequestContext.userIdentity,
-		httpRequestContext.nodeIdentity
+		HttpParameterHelper.objectFromString(request.query?.conditions)
 	);
 	return {
 		body: item
@@ -279,8 +443,7 @@ export async function entityStorageRemove(
 	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
 	await component.remove(
 		request.pathParams.id,
-		httpRequestContext.userIdentity,
-		httpRequestContext.nodeIdentity
+		HttpParameterHelper.objectFromString(request.query?.conditions)
 	);
 	return {
 		statusCode: HttpStatusCode.noContent
@@ -308,11 +471,52 @@ export async function entityStorageList(
 		request.query?.orderByDirection,
 		HttpParameterHelper.objectFromString(request.query?.properties),
 		request.query?.cursor,
-		Coerce.number(request.query?.pageSize),
-		httpRequestContext.userIdentity,
-		httpRequestContext.nodeIdentity
+		Coerce.number(request.query?.limit)
 	);
 	return {
 		body: result
+	};
+}
+
+/**
+ * Count the entries in entity storage.
+ * @param httpRequestContext The request context for the API.
+ * @param componentName The name of the component to use in the routes.
+ * @param request The request.
+ * @returns The response object with additional http response properties.
+ */
+export async function entityStorageCount(
+	httpRequestContext: IHttpRequestContext,
+	componentName: string,
+	request: IEntityStorageCountRequest
+): Promise<IEntityStorageCountResponse> {
+	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
+	const count = await component.count(
+		HttpParameterHelper.objectFromString(request.query?.conditions)
+	);
+	return {
+		body: { count }
+	};
+}
+
+/**
+ * Remove multiple entries from entity storage by id.
+ * @param httpRequestContext The request context for the API.
+ * @param componentName The name of the component to use in the routes.
+ * @param request The request.
+ * @returns The response object with additional http response properties.
+ */
+export async function entityStorageRemoveBatch(
+	httpRequestContext: IHttpRequestContext,
+	componentName: string,
+	request: IEntityStorageRemoveBatchRequest
+): Promise<INoContentResponse> {
+	Guards.object<IEntityStorageRemoveBatchRequest>(ROUTES_SOURCE, nameof(request), request);
+	Guards.arrayValue(ROUTES_SOURCE, nameof(request.body), request.body);
+
+	const component = ComponentFactory.get<IEntityStorageComponent>(componentName);
+	await component.removeBatch(request.body);
+	return {
+		statusCode: HttpStatusCode.noContent
 	};
 }

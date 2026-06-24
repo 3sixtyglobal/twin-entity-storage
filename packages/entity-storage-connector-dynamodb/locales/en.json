@@ -3,7 +3,9 @@
 		"dynamoDbEntityStorageConnector": {
 			"tableCreating": "Creating table \"{tableName}\"",
 			"tableCreated": "Created table \"{tableName}\"",
-			"tableExists": "Skipping create table \"{tableName}\" as it already exists"
+			"tableExists": "Skipping create table \"{tableName}\" as it already exists",
+			"tableDeleting": "Deleting table \"{tableName}\"",
+			"tableDeleted": "Table \"{tableName}\" deleted"
 		}
 	},
 	"error": {
@@ -17,7 +19,20 @@
 			"comparisonNotSupported": "Comparison operator \"{comparison}\" is not supported",
 			"conditionalNotSupported": "Conditional operator \"{operator}\" is not supported",
 			"sortSingle": "You can only sort by a single property",
-			"sortNotIndexed": "The property \"{property}\" is not indexed and cannot be used for sorting"
+			"propertyNotFound": "The property \"{property}\" was not found on the entity schema",
+			"getPartitionContextIdsFailed": "Unable to get partition context ids",
+			"setBatchFailed": "Unable to set batch of entities",
+			"removeBatchFailed": "Unable to remove batch of entities",
+			"emptyFailed": "Unable to empty entity storage",
+			"countFailed": "Unable to count entities",
+			"teardownFailed": "Unable to teardown entity storage",
+			"finalizeMigrationFailedBootstrap": "Finalizing migration failed during bootstrap phase"
+		}
+	},
+	"health": {
+		"dynamoDbEntityStorageConnector": {
+			"healthDescription": "Checks if the DynamoDB table \"{tableName}\" is available",
+			"connectionFailed": "Failed to connect to DynamoDB table \"{tableName}\""
 		}
 	}
 }

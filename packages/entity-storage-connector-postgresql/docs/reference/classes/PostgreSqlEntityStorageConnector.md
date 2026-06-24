@@ -10,7 +10,7 @@ Class for performing entity storage operations using ql.
 
 ## Implements
 
-- `IEntityStorageConnector`\<`T`\>
+- `IEntityStorageMigrationConnector`\<`T`\>
 
 ## Constructors
 
@@ -34,31 +34,27 @@ The options for the connector.
 
 ## Properties
 
-### CLASS\_NAME
+### CLASS\_NAME {#class_name}
 
-> `readonly` **CLASS\_NAME**: `string`
+> `readonly` `static` **CLASS\_NAME**: `string`
 
 Runtime name for the class.
 
-#### Implementation of
-
-`IEntityStorageConnector.CLASS_NAME`
-
 ## Methods
 
-### bootstrap()
+### bootstrap() {#bootstrap}
 
-> **bootstrap**(`nodeLoggingConnectorType?`): `Promise`\<`boolean`\>
+> **bootstrap**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
 
 Initialize the PostgreSql environment.
 
 #### Parameters
 
-##### nodeLoggingConnectorType?
+##### nodeLoggingComponentType?
 
 `string`
 
-Optional type of the logging connector.
+Optional type of the logging component.
 
 #### Returns
 
@@ -68,11 +64,65 @@ A promise that resolves to a boolean indicating success.
 
 #### Implementation of
 
-`IEntityStorageConnector.bootstrap`
+`IEntityStorageMigrationConnector.bootstrap`
 
 ***
 
-### getSchema()
+### className() {#classname}
+
+> **className**(): `string`
+
+Returns the class name of the component.
+
+#### Returns
+
+`string`
+
+The class name of the component.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.className`
+
+***
+
+### health() {#health}
+
+> **health**(): `Promise`\<`IHealth`[]\>
+
+Get the health of the component.
+
+#### Returns
+
+`Promise`\<`IHealth`[]\>
+
+The health of the component.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.health`
+
+***
+
+### stop() {#stop}
+
+> **stop**(): `Promise`\<`void`\>
+
+The component needs to be stopped when the node is closed.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.stop`
+
+***
+
+### getSchema() {#getschema}
 
 > **getSchema**(): `IEntitySchema`
 
@@ -86,13 +136,13 @@ The schema for the entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.getSchema`
+`IEntityStorageMigrationConnector.getSchema`
 
 ***
 
-### get()
+### get() {#get}
 
-> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`undefined` \| `T`\>
+> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
 
 Get an entity from PostgreSql.
 
@@ -118,17 +168,17 @@ The optional conditions to match for the entities.
 
 #### Returns
 
-`Promise`\<`undefined` \| `T`\>
+`Promise`\<`T` \| `undefined`\>
 
 The object if it can be found or undefined.
 
 #### Implementation of
 
-`IEntityStorageConnector.get`
+`IEntityStorageMigrationConnector.get`
 
 ***
 
-### set()
+### set() {#set}
 
 > **set**(`entity`, `conditions?`): `Promise`\<`void`\>
 
@@ -156,11 +206,55 @@ The id of the entity.
 
 #### Implementation of
 
-`IEntityStorageConnector.set`
+`IEntityStorageMigrationConnector.set`
 
 ***
 
-### remove()
+### setBatch() {#setbatch}
+
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.setBatch`
+
+***
+
+### empty() {#empty}
+
+> **empty**(): `Promise`\<`void`\>
+
+Empty all the entities.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.empty`
+
+***
+
+### remove() {#remove}
 
 > **remove**(`id`, `conditions?`): `Promise`\<`void`\>
 
@@ -188,13 +282,201 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.remove`
+`IEntityStorageMigrationConnector.remove`
 
 ***
 
-### query()
+### removeBatch() {#removebatch}
 
-> **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `pageSize?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
+> **removeBatch**(`ids`): `Promise`\<`void`\>
+
+Remove multiple entities by their primary key IDs.
+
+#### Parameters
+
+##### ids
+
+`string`[]
+
+The ids of the entities to remove.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.removeBatch`
+
+***
+
+### teardown() {#teardown}
+
+> **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+
+Teardown the entity storage by dropping the table.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True if the teardown process was successful.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.teardown`
+
+***
+
+### getPartitionContextIds() {#getpartitioncontextids}
+
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+
+Get all the distinct partition context ids from the storage.
+
+#### Returns
+
+`Promise`\<`IContextIds`[]\>
+
+An array of context id objects, one per unique partition.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### createTargetConnector() {#createtargetconnector}
+
+> **createTargetConnector**\<`U`\>(`entitySchemaName`): `Promise`\<`PostgreSqlEntityStorageConnector`\<`U`\>\>
+
+Create a new target connector for the migration.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### entitySchemaName
+
+`string`
+
+The entity schema name to use for the target connector.
+
+#### Returns
+
+`Promise`\<`PostgreSqlEntityStorageConnector`\<`U`\>\>
+
+A new connector configured with a migration table name.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.createTargetConnector`
+
+***
+
+### finalizeMigration() {#finalizemigration}
+
+> **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`PostgreSqlEntityStorageConnector`\<`U`\>\>
+
+Finalize the migration by renaming the migration table to the original table name.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`PostgreSqlEntityStorageConnector`\<`U`\>
+
+The connector pointing to the migration table.
+
+##### options?
+
+`IMigrationOptions`
+
+The optional migration options.
+
+##### loggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`PostgreSqlEntityStorageConnector`\<`U`\>\>
+
+A connector pointing to the final (renamed) table.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.finalizeMigration`
+
+***
+
+### cleanupMigration() {#cleanupmigration}
+
+> **cleanupMigration**\<`U`\>(`targetConnector?`, `options?`, `loggingComponentType?`): `Promise`\<`void`\>
+
+Clean up the migration by tearing down the migration table.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector?
+
+`PostgreSqlEntityStorageConnector`\<`U`\>
+
+The connector pointing to the migration table.
+
+##### options?
+
+`IMigrationOptions`
+
+The optional migration options.
+
+##### loggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.cleanupMigration`
+
+***
+
+### query() {#query}
+
+> **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `limit?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 
 Find all the entities which match the conditions.
 
@@ -222,9 +504,9 @@ The optional properties to return, defaults to all.
 
 `string`
 
-The cursor to request the next page of entities.
+The cursor to request the next chunk of entities.
 
-##### pageSize?
+##### limit?
 
 `number`
 
@@ -239,18 +521,30 @@ and a cursor which can be used to request more entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.query`
+`IEntityStorageMigrationConnector.query`
 
 ***
 
-### tableDrop()
+### count() {#count}
 
-> **tableDrop**(): `Promise`\<`void`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
 
-Drop the table.
+Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
 
 #### Returns
 
-`Promise`\<`void`\>
+`Promise`\<`number`\>
 
-Nothing.
+The total count of entities in the storage.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.count`

@@ -14,4 +14,14 @@ export interface IEntityStorageRemoveRequest {
 		 */
 		id: string;
 	};
+
+	/**
+	 * The query parameters.
+	 */
+	query?: {
+		/**
+		 * The optional conditions to match for the entity, JSON encoded array of property/value pairs.
+		 */
+		conditions?: string;
+	};
 }

@@ -9,4 +9,14 @@ export interface IEntityStorageSetRequest {
 	 * The data to be used in the entity.
 	 */
 	body: unknown;
+
+	/**
+	 * The query parameters.
+	 */
+	query?: {
+		/**
+		 * The optional conditions to match for the entity, JSON encoded array of property/value pairs.
+		 */
+		conditions?: string;
+	};
 }

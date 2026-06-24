@@ -1,0 +1,13 @@
+name: 'Teardown Testing Environment'
+description: 'Stop and remove test environment services after workflow completion.'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Teardown Docker Test Environment
+      shell: bash
+      run: |
+        docker stop $(docker ps -aq) || true
+        docker rm $(docker ps -aq) || true
+        docker rmi -f $(docker images -aq) || true
+        docker system prune -a --volumes -f || true

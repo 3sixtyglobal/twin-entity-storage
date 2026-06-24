@@ -1,0 +1,260 @@
+name: Versions Prepare
+description: Prepares package versions, builds, and creates an alignment PR for the target branch.
+
+inputs:
+  branch:
+    description: 'Target branch to prepare versions on (main or next)'
+    required: true
+  semver_type:
+    description: 'Semver bump type for production releases (promote, patch, minor, major, custom). Required when branch is main.'
+    required: false
+    default: ''
+  custom_version:
+    description: 'Explicit version string, e.g. 1.2.3. Required when semver_type is custom.'
+    required: false
+    default: ''
+  gpg_private_key:
+    description: 'Base64-encoded GPG private key for signing commits'
+    required: true
+  gpg_key_id:
+    description: 'GPG key ID'
+    required: true
+  test_env_vars:
+    description: 'Test environment variables'
+    required: false
+    default: ''
+  github_token:
+    description: 'GitHub token for creating PRs (github-actions bot)'
+    required: true
+  release_token:
+    description: 'GitHub token for approving PRs (must be from a different user)'
+    required: true
+
+outputs:
+  pr_number:
+    description: 'Number of the created alignment PR'
+    value: ${{ steps.create-pr.outputs.pr_number }}
+  pr_url:
+    description: 'URL of the created alignment PR'
+    value: ${{ steps.create-pr.outputs.pr_url }}
+  has_changes:
+    description: 'Whether the versions script produced any changes'
+    value: ${{ steps.check-changes.outputs.has_changes }}
+
+runs:
+  using: composite
+  steps:
+    # Inject secrets as env vars so subsequent steps can reference them without re-expanding the secret.
+    - name: Load Test Environment Variables
+      shell: bash
+      run: |
+        printf '%s\n' "${{ inputs.test_env_vars }}" >> "$GITHUB_ENV"
+
+    # Import GPG key for signing commits
+    - name: Import GPG key
+      shell: bash
+      run: |
+        echo "${{ inputs.gpg_private_key }}" | base64 --decode | gpg --import
+        echo "TWIN_GPG_KEY_ID=${{ inputs.gpg_key_id }}" >> $GITHUB_ENV
+
+    # Set git config once for all subsequent steps
+    - name: Configure Git
+      shell: bash
+      run: |
+        git config --global user.email "github@twindev.org"
+        git config --global user.name "TWIN GitHub Bot"
+        git config --global user.signingkey "$TWIN_GPG_KEY_ID"
+        git config --global commit.gpgsign true
+        git config --global tag.gpgsign true
+
+    # Keep the main workspace on the triggering ref and do target-branch work in
+    # a separate worktree so local actions continue to resolve from the ref that
+    # started the workflow.
+    - name: Prepare target worktree
+      shell: bash
+      run: |
+        TARGET_BRANCH="${{ inputs.branch }}"
+        TARGET_DIR="$RUNNER_TEMP/versions-prepare-$TARGET_BRANCH-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+          git fetch --no-tags --prune --unshallow origin
+        fi
+
+        git fetch --no-tags --prune origin "+refs/heads/$TARGET_BRANCH:refs/remotes/origin/$TARGET_BRANCH"
+
+        if [ "$TARGET_BRANCH" = "next" ]; then
+          git fetch --no-tags --prune origin "+refs/heads/main:refs/remotes/origin/main"
+        fi
+
+        git worktree add --detach "$TARGET_DIR" "origin/$TARGET_BRANCH"
+        echo "TARGET_DIR=$TARGET_DIR" >> "$GITHUB_ENV"
+
+    # Align next to main's current content before version preparation so the
+    # follow-up PR does not inherit merge conflicts from divergent branch state.
+    # Using diff | apply bypasses the merge algorithm entirely, so add/add
+    # conflicts and other merge-time ambiguities do not block realignment.
+    # Skipped for custom version resets — those only change version numbers and
+    # should not pull in main content changes.
+    - name: Align Next to Main
+      if: ${{ inputs.branch == 'next' && inputs.semver_type != 'custom' }}
+      shell: bash
+      run: |
+        cd "$TARGET_DIR"
+        git diff --binary origin/next origin/main | git apply --index
+
+    # Set up Node.js environment for running npm commands
+    - name: Setup Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: 24
+
+    # Timestamp the branch name to avoid collisions when the action is re-run on the same day.
+    - name: Create Version Update Branch
+      shell: bash
+      run: |
+        BRANCH_NAME="release/versions-prepare-${{ inputs.branch }}-$(date +%s)"
+        cd "$TARGET_DIR"
+        git checkout -b $BRANCH_NAME
+        echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+    # Run the custom script to align package versions for the target release type.
+    # Use the script from GITHUB_WORKSPACE (the triggering branch) rather than
+    # TARGET_DIR — after Align Next to Main, TARGET_DIR holds main's copy of the
+    # script which may predate custom-version support on the next branch.
+    - name: Update Versions
+      shell: bash
+      run: |
+        cd "$TARGET_DIR"
+        VERSIONS_SCRIPT="$GITHUB_WORKSPACE/scripts/versions-prepare.mjs"
+        if [ "${{ inputs.branch }}" = "next" ] && [ "${{ inputs.semver_type }}" = "custom" ]; then
+          node "$VERSIONS_SCRIPT" next custom "${{ inputs.custom_version }}"
+        elif [ "${{ inputs.branch }}" = "next" ]; then
+          node "$VERSIONS_SCRIPT" next
+        elif [ "${{ inputs.semver_type }}" = "custom" ]; then
+          node "$VERSIONS_SCRIPT" production custom "${{ inputs.custom_version }}"
+        else
+          node "$VERSIONS_SCRIPT" production ${{ inputs.semver_type }}
+        fi
+
+    - name: Extract version
+      shell: bash
+      run: |
+        cd "$TARGET_DIR"
+        if [ "${{ inputs.branch }}" = "next" ]; then
+          MANIFEST="release/release-please-manifest.prerelease.json"
+        else
+          MANIFEST="release/release-please-manifest.prod.json"
+        fi
+        VERSION=$(node -e "const m=JSON.parse(require('fs').readFileSync('$MANIFEST','utf8'));console.log(Object.values(m)[0])")
+        echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+    - name: Check for changes
+      id: check-changes
+      shell: bash
+      run: |
+        cd "$TARGET_DIR"
+        if [ -z "$(git status --porcelain)" ]; then
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          echo "No version changes detected. Skipping build and PR creation."
+        else
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+          echo "Version changes detected. Proceeding with build and PR creation."
+        fi
+
+    # Install dependencies with retry to handle transient registry failures.
+    # Uses npm install (not npm ci) because package.json versions have just been
+    # updated and the lockfile needs to be regenerated to match.
+    - name: Install dependencies
+      if: ${{ steps.check-changes.outputs.has_changes == 'true' }}
+      shell: bash
+      run: |
+        cd "$TARGET_DIR"
+        for i in {1..5}; do
+          npm install && break || {
+            if [ $i -eq 5 ]; then
+              echo "npm install failed after 5 attempts"
+              exit 1
+            fi
+            echo "npm install failed, retrying in 30 seconds (attempt $i/5)..."
+            sleep 30
+          }
+        done
+
+    # Setup any services required for tests here
+    - name: Setup Test Environment
+      if: ${{ steps.check-changes.outputs.has_changes == 'true' }}
+      uses: ./.github/workflows/setup-test-env
+      with:
+        test_env_vars: ${{ inputs.test_env_vars }}
+
+    # Validate that the version changes do not break the build; tests are skipped because
+    # test-environment setup is the responsibility of the calling workflow.
+    - name: Build Packages
+      if: ${{ steps.check-changes.outputs.has_changes == 'true' }}
+      shell: bash
+      run: |
+        cd "$TARGET_DIR"
+        npm run format
+        npm run lint
+        npm run dist
+
+    # Commit all version and lockfile changes together so the PR is self-contained.
+    - name: Commit Changes
+      if: ${{ steps.check-changes.outputs.has_changes == 'true' }}
+      shell: bash
+      run: |
+        cd "$TARGET_DIR"
+        git add -A
+        git commit -S -m "chore: prepare versions for ${{ inputs.branch }} to $RELEASE_VERSION"
+        git push origin $BRANCH_NAME
+
+    # Create a PR with the changes
+    - name: Create Update PR
+      id: create-pr
+      if: ${{ steps.check-changes.outputs.has_changes == 'true' }}
+      shell: bash
+      run: |
+        PR_URL=$(gh pr create \
+          --title "chore: prepare versions for ${{ inputs.branch }} to $RELEASE_VERSION" \
+          --body "This PR prepares the versions of all packages for ${{ inputs.branch }} to \`$RELEASE_VERSION\`." \
+          --base ${{ inputs.branch }} \
+          --head $BRANCH_NAME)
+        PR_NUMBER=$(echo $PR_URL | grep -o '[0-9]\+$')
+        echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+        echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+        echo "Alignment PR created: #$PR_NUMBER – $PR_URL"
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
+    # Approval uses a separate token because authors cannot self-approve their own PRs.
+    - name: Approve PR
+      if: ${{ steps.create-pr.outputs.pr_number != '' }}
+      shell: bash
+      run: |
+        gh pr review ${{ steps.create-pr.outputs.pr_number }} --approve
+      env:
+        GH_TOKEN: ${{ inputs.release_token }}
+
+    # Always remove GPG key material from the runner to prevent key leakage between jobs.
+    - name: Cleanup GPG key
+      if: always()
+      shell: bash
+      run: |
+        FINGERPRINT=$(gpg --list-secret-keys --with-colons "$TWIN_GPG_KEY_ID" | awk -F: '/fpr:/ {print $10}' | head -1)
+        if [ -n "$FINGERPRINT" ]; then
+          gpg --batch --yes --delete-secret-keys "$FINGERPRINT" || true
+          gpg --batch --yes --delete-keys "$FINGERPRINT" || true
+        fi
+
+    # Always teardown the environment, necessary to cleanup self-hosted runners.
+    - name: Teardown Test Environment
+      if: always()
+      uses: ./.github/workflows/teardown-test-env
+
+    - name: Cleanup target worktree
+      if: always()
+      shell: bash
+      run: |
+        if [ -n "${TARGET_DIR:-}" ]; then
+          git worktree remove --force "$TARGET_DIR" || true
+        fi

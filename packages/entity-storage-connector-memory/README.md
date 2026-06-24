@@ -1,6 +1,6 @@
-# TWIN Entity Storage Connector Memory
+# Entity Storage Connector Memory
 
-Entity Storage connector implementation using in-memory storage.
+This package provides an in-memory backend suited to local development, automated testing and short-lived workloads. It is designed to work with the wider storage ecosystem so applications can keep behaviour consistent across connectors and environments.
 
 ## Installation
 

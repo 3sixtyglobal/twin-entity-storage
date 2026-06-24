@@ -12,7 +12,7 @@ Definition of MySQL DB configuration.
 
 ## Properties
 
-### hosts
+### hosts {#hosts}
 
 > **hosts**: `string`[]
 
@@ -24,7 +24,7 @@ The host to contact to.
 
 ***
 
-### localDataCenter
+### localDataCenter {#localdatacenter}
 
 > **localDataCenter**: `string`
 
@@ -36,7 +36,7 @@ The local data center.
 
 ***
 
-### keyspace
+### keyspace {#keyspace}
 
 > **keyspace**: `string`
 
@@ -48,9 +48,27 @@ The keyspace to use.
 
 ***
 
-### tableName?
+### port? {#port}
 
-> `optional` **tableName**: `string`
+> `optional` **port?**: `number`
+
+The port to connect to.
+
+#### Default
+
+```ts
+9042
+```
+
+#### Inherited from
+
+[`IScyllaDBConfig`](IScyllaDBConfig.md).[`port`](IScyllaDBConfig.md#port)
+
+***
+
+### tableName {#tablename}
+
+> **tableName**: `string`
 
 The name of the table for the storage.
 

@@ -19,4 +19,10 @@ export interface IScyllaDBConfig {
 	 * The keyspace to use.
 	 */
 	keyspace: string;
+
+	/**
+	 * The port to connect to.
+	 * @default 9042
+	 */
+	port?: number;
 }

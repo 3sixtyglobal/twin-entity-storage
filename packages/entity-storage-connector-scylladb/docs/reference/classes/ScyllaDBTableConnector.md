@@ -14,7 +14,7 @@ Store entities using ScyllaDB.
 
 ## Implements
 
-- `IEntityStorageConnector`\<`T`\>
+- `IEntityStorageMigrationConnector`\<`T`\>
 
 ## Constructors
 
@@ -42,15 +42,11 @@ The options for the connector.
 
 ## Properties
 
-### CLASS\_NAME
+### CLASS\_NAME {#class_name}
 
-> `readonly` **CLASS\_NAME**: `string`
+> `readonly` `static` **CLASS\_NAME**: `string`
 
 Runtime name for the class.
-
-#### Implementation of
-
-`IEntityStorageConnector.CLASS_NAME`
 
 #### Overrides
 
@@ -58,7 +54,7 @@ Runtime name for the class.
 
 ## Methods
 
-### getSchema()
+### getSchema() {#getschema}
 
 > **getSchema**(): `IEntitySchema`
 
@@ -72,7 +68,7 @@ The schema for the entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.getSchema`
+`IEntityStorageMigrationConnector.getSchema`
 
 #### Inherited from
 
@@ -80,9 +76,9 @@ The schema for the entities.
 
 ***
 
-### get()
+### get() {#get}
 
-> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`undefined` \| `T`\>
+> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
 
 Get an entity.
 
@@ -108,13 +104,13 @@ The optional conditions to match for the entities.
 
 #### Returns
 
-`Promise`\<`undefined` \| `T`\>
+`Promise`\<`T` \| `undefined`\>
 
 The object if it can be found or undefined.
 
 #### Implementation of
 
-`IEntityStorageConnector.get`
+`IEntityStorageMigrationConnector.get`
 
 #### Inherited from
 
@@ -122,9 +118,9 @@ The object if it can be found or undefined.
 
 ***
 
-### query()
+### query() {#query}
 
-> **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `pageSize?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
+> **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `limit?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 
 Find all the entities which match the conditions.
 
@@ -152,9 +148,9 @@ The optional properties to return, defaults to all.
 
 `string`
 
-The cursor to request the next page of entities.
+The cursor to request the next chunk of entities.
 
-##### pageSize?
+##### limit?
 
 `number`
 
@@ -169,7 +165,7 @@ and a cursor which can be used to request more entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.query`
+`IEntityStorageMigrationConnector.query`
 
 #### Inherited from
 
@@ -177,19 +173,115 @@ and a cursor which can be used to request more entities.
 
 ***
 
-### bootstrap()
+### count() {#count}
 
-> **bootstrap**(`nodeLoggingConnectorType?`): `Promise`\<`boolean`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
+
+Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
+
+#### Returns
+
+`Promise`\<`number`\>
+
+The total count of entities in the storage.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.count`
+
+#### Inherited from
+
+`AbstractScyllaDBConnector.count`
+
+***
+
+### safeTableName() {#safetablename}
+
+> `protected` **safeTableName**(`name`): `string`
+
+Get a safe table name by replacing any non-alphanumeric characters.
+
+#### Parameters
+
+##### name
+
+`string`
+
+The name to sanitize.
+
+#### Returns
+
+`string`
+
+The safe table name.
+
+#### Inherited from
+
+`AbstractScyllaDBConnector.safeTableName`
+
+***
+
+### className() {#classname}
+
+> **className**(): `string`
+
+Returns the class name of the component.
+
+#### Returns
+
+`string`
+
+The class name of the component.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.className`
+
+#### Overrides
+
+`AbstractScyllaDBConnector.className`
+
+***
+
+### health() {#health}
+
+> **health**(): `Promise`\<`IHealth`[]\>
+
+Get the health of the component.
+
+#### Returns
+
+`Promise`\<`IHealth`[]\>
+
+The health of the component.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.health`
+
+***
+
+### bootstrap() {#bootstrap}
+
+> **bootstrap**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
 
 Bootstrap the component by creating and initializing any resources it needs.
 
 #### Parameters
 
-##### nodeLoggingConnectorType?
+##### nodeLoggingComponentType?
 
 `string`
 
-The node logging connector type, defaults to "node-logging".
+The node logging component type.
 
 #### Returns
 
@@ -199,11 +291,11 @@ True if the bootstrapping process was successful.
 
 #### Implementation of
 
-`IEntityStorageConnector.bootstrap`
+`IEntityStorageMigrationConnector.bootstrap`
 
 ***
 
-### set()
+### set() {#set}
 
 > **set**(`entity`, `conditions?`): `Promise`\<`void`\>
 
@@ -229,11 +321,61 @@ The optional conditions to match for the entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.set`
+`IEntityStorageMigrationConnector.set`
 
 ***
 
-### remove()
+### setBatch() {#setbatch}
+
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.setBatch`
+
+***
+
+### empty() {#empty}
+
+> **empty**(`partitionKey?`): `Promise`\<`void`\>
+
+Remove all entities from the storage.
+
+#### Parameters
+
+##### partitionKey?
+
+`string`
+
+The optional partition key.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.empty`
+
+***
+
+### remove() {#remove}
 
 > **remove**(`id`, `conditions?`): `Promise`\<`void`\>
 
@@ -259,28 +401,190 @@ The optional conditions to match for the entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.remove`
+`IEntityStorageMigrationConnector.remove`
 
 ***
 
-### dropTable()
+### removeBatch() {#removebatch}
 
-> **dropTable**(): `Promise`\<`void`\>
+> **removeBatch**(`ids`): `Promise`\<`void`\>
 
-Drops table.
+Remove multiple entities.
+
+#### Parameters
+
+##### ids
+
+`string`[]
+
+The ids of the entities to remove.
 
 #### Returns
 
 `Promise`\<`void`\>
 
+#### Implementation of
+
+`IEntityStorageMigrationConnector.removeBatch`
+
 ***
 
-### truncateTable()
+### teardown() {#teardown}
 
-> **truncateTable**(): `Promise`\<`void`\>
+> **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
 
-Truncates (clear) table.
+Teardown the entity storage by dropping the table.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True if the teardown process was successful.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.teardown`
+
+***
+
+### getPartitionContextIds() {#getpartitioncontextids}
+
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+
+Get all the distinct partition context ids from the storage.
+
+#### Returns
+
+`Promise`\<`IContextIds`[]\>
+
+An array of context id objects, one per unique partition.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### createTargetConnector() {#createtargetconnector}
+
+> **createTargetConnector**\<`U`\>(`entitySchemaName`): `Promise`\<`ScyllaDBTableConnector`\<`U`\>\>
+
+Create a new target connector for the migration.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### entitySchemaName
+
+`string`
+
+The entity schema name to use for the target connector.
+
+#### Returns
+
+`Promise`\<`ScyllaDBTableConnector`\<`U`\>\>
+
+A new connector configured with a migration table name.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.createTargetConnector`
+
+***
+
+### finalizeMigration() {#finalizemigration}
+
+> **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`ScyllaDBTableConnector`\<`U`\>\>
+
+Finalize the migration by pointing a new connector at the migration table.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`ScyllaDBTableConnector`\<`U`\>
+
+The connector pointing to the migration table.
+
+##### options?
+
+`IMigrationOptions`
+
+The optional migration options.
+
+##### loggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`ScyllaDBTableConnector`\<`U`\>\>
+
+A connector pointing to the migration table (now the live table).
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.finalizeMigration`
+
+***
+
+### cleanupMigration() {#cleanupmigration}
+
+> **cleanupMigration**\<`U`\>(`targetConnector?`, `options?`, `loggingComponentType?`): `Promise`\<`void`\>
+
+Clean up the migration by tearing down the migration table.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector?
+
+`ScyllaDBTableConnector`\<`U`\>
+
+The connector pointing to the migration table.
+
+##### options?
+
+`IMigrationOptions`
+
+The optional migration options.
+
+##### loggingComponentType?
+
+`string`
+
+The node logging component type.
 
 #### Returns
 
 `Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.cleanupMigration`

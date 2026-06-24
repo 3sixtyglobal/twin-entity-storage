@@ -9,4 +9,21 @@ export interface IFileEntityStorageConnectorConfig {
 	 * The directory to use for storage.
 	 */
 	directory: string;
+
+	/**
+	 * The number of free bytes below which the health check reports an error.
+	 * Defaults to 100 MB.
+	 */
+	diskErrorThresholdBytes?: number;
+
+	/**
+	 * The number of free bytes below which the health check reports a warning.
+	 * Defaults to 500 MB.
+	 */
+	diskWarningThresholdBytes?: number;
+
+	/**
+	 * Maximum milliseconds to wait for the per-directory write lock before throwing.
+	 */
+	mutexTimeoutMs?: number;
 }

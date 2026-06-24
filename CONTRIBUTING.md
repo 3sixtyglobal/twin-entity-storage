@@ -26,14 +26,14 @@ Thank you for your interest in contributing to this project! This guide will hel
 1. **Fork the repository** and clone your fork:
 
    ```shell
-   git clone https://github.com/your-username/framework.git
-   cd framework
+   git clone https://github.com/iotaledger/twin-<repo>.git
+   cd <repo>
    ```
 
 2. **Install dependencies**:
 
    ```shell
-   npm ci
+   npm install
    ```
 
 3. **Verify setup** by running a full build:
@@ -64,12 +64,13 @@ This command performs the following operations in sequence:
 
 Each package will have a `dist` folder containing:
 
-- **`esm/`** - ES Module format for modern bundlers and Node.js
-- **`cjs/`** - CommonJS format for Node.js compatibility
+- **`es/`** - ES Module format for modern bundlers and Node.js
 - **`types/`** - TypeScript declaration files (`.d.ts`)
 - **`docs/`** - Auto-generated API documentation in Markdown format
 
-### Development Commands
+### Development Commands for Repository
+
+These commands are available at the repository level.
 
 ```shell
 # Format code with Prettier
@@ -78,39 +79,43 @@ npm run format
 # Run ESLint checks
 npm run lint
 
-# Run tests only
-npm run test
+# Perform a complete build
+npm run dist
+```
 
+### Development Commands for Packages
+
+These command are available in each package.
+
+```shell
 # Build without tests (faster during development)
 npm run build
 
-# Clean build artifacts
-npm run clean
+# Watch the files and auto build and package when spotting changes
+npm run dev
+
+# Build the docs
+npm run docs
+
+# Run the tests
+npm run test
+
+# Run the tests with coverage
+npm run test:coverage
+
+# Complete build (build, package, test and docs)
+npm run dist
 ```
 
 ## Code Standards
 
 ### Quality Requirements
 
-Before committing code, ensure it meets our quality standards:
+Before committing code, ensure it meets our quality standards, by running the following combined commands from the repo root:
 
-1. **Format your code:**
-
-   ```shell
-   npm run format
-   ```
-
-2. **Fix linting issues:**
-
-   ```shell
-   npm run lint
-   ```
-
-3. **Run tests:**
-
-   ```shell
-   npm run test
-   ```
+```shell
+npm run format && npm run lint && npm run dist
+```
 
 ### Code Style Guidelines
 
@@ -138,7 +143,7 @@ Use descriptive names with appropriate prefixes:
 
 | Type          | Format                | Example                         |
 | ------------- | --------------------- | ------------------------------- |
-| **Features**  | `feat/description`    | `feat/user-authentication`      |
+| **Features**  | `feature/description` | `feature/user-authentication`   |
 | **Bug Fixes** | `bugfix/description`  | `bugfix/memory-leak-fix`        |
 | **Hot Fixes** | `hotfix/description`  | `hotfix/security-vulnerability` |
 | **Chores**    | `chore/description`   | `chore/update-dependencies`     |
@@ -233,61 +238,68 @@ Before submitting your PR:
 
 ## Release Process
 
+The release process is handled by dedicated GitHub Actions workflows. A maintainer triggers the appropriate workflow once, then reviews and merges the generated pull requests at each gate. Publishing starts automatically after the final gated release PR is approved and merged.
+
+### How the gate works
+
+```text
+workflow_dispatch  →  prepare PR  →  [review & approve]  →  merge PR  →  publish (auto)
+```
+
+The publish phase is gated on the release PR being **approved and merged**. If the PR is closed without merge, publishing is skipped. Nothing is published and no GitHub release is created until the PR clears the gate.
+
 ### Next (Prerelease) Versions
 
-For development/beta releases from the `next` branch:
+For development/beta releases from the `next` branch, use the **`Release Next`** workflow:
 
-1. **Prepare Release**:
-
-   - Run `Prepare Release` GitHub Action on `next` branch
-   - Set semver type to `prerelease`
-   - This creates a PR with version bumps and changelog updates
+1. **Start the Release Next workflow**:
+   - Go to `Actions → Release Next → Run workflow`
 
 2. **Review & Merge**:
+   - Review the generated release PR carefully
+   - Approve and merge it into `next`
 
-   - Review the generated PR carefully
-   - Merge the PR to `next` branch
-
-3. **Publish**:
-   - Run `Publish Release` GitHub Action
-   - Publishes packages to NPM with `next` tag
-   - Creates GitHub releases marked as prerelease
+3. **Publishing runs automatically**:
+   - Packages are published to npm with the `next` tag
+   - GitHub releases are created and marked as prerelease
 
 ### Production Versions
 
-For stable releases to the `main` branch:
+For stable releases to the `main` branch, use the **`Release Production`** workflow. One trigger drives the full path end-to-end and pauses at each review boundary until the generated pull request is approved and merged.
 
-1. **Prepare Main Branch**:
+1. **Trigger the Release Production workflow**:
+   - Go to `Actions → Release Production → Run workflow`
+   - Select the version bump: `⬆️ promote`, `🔧 patch`, `✨ minor`, or `🚀 major`
 
-   - Run `Versions Prepare` on `main` branch
-   - Set type to `production`
-   - Creates PR merging `next` to `main`
+2. **Gate 0 – Review the next-to-main PR**:
+   - If `next` is ahead of `main`, the workflow creates a PR that brings the full `next` diff into `main`
+   - Review and merge that PR to let the production release continue
+   - If `next` and `main` are already aligned, this gate is skipped automatically
 
-2. **Merge to Main**:
+3. **Gate 1 – Review the main alignment PR**:
+   - The workflow prepares `main` with the release-ready package versions and waits
+   - Review and merge the generated alignment PR
+   - The workflow advances automatically once the PR is merged
 
-   - Review and merge the preparation PR
+4. **Gate 2 – Review the release PR**:
+   - The workflow prepares the versioned release PR (version bumps and changelog) and waits
+   - Review the generated release PR carefully
+   - Approve and merge it into `main`
 
-3. **Prepare Release**:
+5. **Publishing and next-branch realignment run automatically**:
+   - Packages are published to npm with the `latest` tag
+   - Stable GitHub releases are created
+   - `Versions Prepare` is triggered on `next` automatically; review and merge the resulting PR to resume prerelease development from the published version
 
-   - Run `Prepare Release` GitHub Action on `main` branch
-   - Choose semver type: `major`, `minor`, or `patch`
-   - Creates PR with version bumps and changelog updates
+### Recovery: stale autorelease state
 
-4. **Merge Release**:
+The `Release Next` workflow and the release preparation phase in `Release Production` check for stale state before doing any work and fail immediately with the blocking PR URL if they find one.
 
-   - Review and merge the release PR
+If an open release PR still has the `autorelease: pending` label after a cancelled or failed run, a new release cannot be started until that state is cleared. To recover:
 
-5. **Publish**:
-
-   - Run `Publish Release` GitHub Action
-   - Publishes packages to NPM with `latest` tag
-   - Creates stable GitHub releases
-
-6. **Update Next Branch**:
-   - Run `Versions Prepare` on `next` branch
-   - Updates `next` branch versions to reflect published version
-
-If running `Prepare Release` fails it will most likely leave a PR in a state where it is impossible to generate a new release. If this happens then look for a PR (might be closed) that is tagged with `autorelease: pending` and remove the tag.
+1. Find the open PR labelled `autorelease: pending` on the relevant branch
+2. Remove the `autorelease: pending` label from that PR, or close the PR if it is no longer needed
+3. Re-run `Release Next` or `Release Production`, depending on the release you are preparing
 
 ### Version Strategy
 

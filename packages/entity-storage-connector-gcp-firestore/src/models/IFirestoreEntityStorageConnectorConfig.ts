@@ -26,7 +26,7 @@ export interface IFirestoreEntityStorageConnectorConfig {
 	credentials?: string;
 
 	/**
-	 * It's usually only used with an emulator (e.g., "localhost:8080").
+	 * It's usually only used with an emulator (e.g., "localhost:20200").
 	 */
 	endpoint?: string;
 

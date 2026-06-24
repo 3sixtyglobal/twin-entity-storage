@@ -10,7 +10,7 @@ Class for performing entity storage operations using Dynamo DB.
 
 ## Implements
 
-- `IEntityStorageConnector`\<`T`\>
+- `IEntityStorageMigrationConnector`\<`T`\>
 
 ## Constructors
 
@@ -34,45 +34,51 @@ The options for the connector.
 
 ## Properties
 
-### CLASS\_NAME
+### CLASS\_NAME {#class_name}
 
-> `readonly` **CLASS\_NAME**: `string`
+> `readonly` `static` **CLASS\_NAME**: `string`
 
 Runtime name for the class.
 
-#### Implementation of
-
-`IEntityStorageConnector.CLASS_NAME`
-
 ## Methods
 
-### bootstrap()
+### className() {#classname}
 
-> **bootstrap**(`nodeLoggingConnectorType?`): `Promise`\<`boolean`\>
+> **className**(): `string`
 
-Bootstrap the component by creating and initializing any resources it needs.
-
-#### Parameters
-
-##### nodeLoggingConnectorType?
-
-`string`
-
-The node logging connector type, defaults to "node-logging".
+Returns the class name of the component.
 
 #### Returns
 
-`Promise`\<`boolean`\>
+`string`
 
-True if the bootstrapping process was successful.
+The class name of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.bootstrap`
+`IEntityStorageMigrationConnector.className`
 
 ***
 
-### getSchema()
+### health() {#health}
+
+> **health**(): `Promise`\<`IHealth`[]\>
+
+Returns the health status of the component.
+
+#### Returns
+
+`Promise`\<`IHealth`[]\>
+
+The health status of the component.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.health`
+
+***
+
+### getSchema() {#getschema}
 
 > **getSchema**(): `IEntitySchema`
 
@@ -86,13 +92,39 @@ The schema for the entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.getSchema`
+`IEntityStorageMigrationConnector.getSchema`
 
 ***
 
-### get()
+### bootstrap() {#bootstrap}
 
-> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`undefined` \| `T`\>
+> **bootstrap**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+
+Bootstrap the component by creating and initializing any resources it needs.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True if the bootstrapping process was successful.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.bootstrap`
+
+***
+
+### get() {#get}
+
+> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
 
 Get an entity.
 
@@ -118,17 +150,17 @@ The optional conditions to match for the entities.
 
 #### Returns
 
-`Promise`\<`undefined` \| `T`\>
+`Promise`\<`T` \| `undefined`\>
 
 The object if it can be found or undefined.
 
 #### Implementation of
 
-`IEntityStorageConnector.get`
+`IEntityStorageMigrationConnector.get`
 
 ***
 
-### set()
+### set() {#set}
 
 > **set**(`entity`, `conditions?`): `Promise`\<`void`\>
 
@@ -156,11 +188,55 @@ The id of the entity.
 
 #### Implementation of
 
-`IEntityStorageConnector.set`
+`IEntityStorageMigrationConnector.set`
 
 ***
 
-### remove()
+### setBatch() {#setbatch}
+
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.setBatch`
+
+***
+
+### empty() {#empty}
+
+> **empty**(): `Promise`\<`void`\>
+
+Empty the entity storage.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.empty`
+
+***
+
+### remove() {#remove}
 
 > **remove**(`id`, `conditions?`): `Promise`\<`void`\>
 
@@ -188,13 +264,65 @@ Nothing.
 
 #### Implementation of
 
-`IEntityStorageConnector.remove`
+`IEntityStorageMigrationConnector.remove`
 
 ***
 
-### query()
+### removeBatch() {#removebatch}
 
-> **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `pageSize?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
+> **removeBatch**(`ids`): `Promise`\<`void`\>
+
+Remove multiple entities by their IDs in a batch.
+
+#### Parameters
+
+##### ids
+
+`string`[]
+
+The ids of the entities to remove.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.removeBatch`
+
+***
+
+### teardown() {#teardown}
+
+> **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
+
+Teardown the entity storage by deleting the underlying table.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`boolean`\>
+
+True if the teardown process was successful.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.teardown`
+
+***
+
+### query() {#query}
+
+> **query**(`conditions?`, `sortProperties?`, `properties?`, `cursor?`, `limit?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 
 Find all the entities which match the conditions.
 
@@ -222,9 +350,9 @@ The optional properties to return, defaults to all.
 
 `string`
 
-The cursor to request the next page of entities.
+The cursor to request the next chunk of entities.
 
-##### pageSize?
+##### limit?
 
 `number`
 
@@ -239,18 +367,168 @@ and a cursor which can be used to request more entities.
 
 #### Implementation of
 
-`IEntityStorageConnector.query`
+`IEntityStorageMigrationConnector.query`
 
 ***
 
-### tableDelete()
+### count() {#count}
 
-> **tableDelete**(): `Promise`\<`void`\>
+> **count**(`conditions?`): `Promise`\<`number`\>
 
-Delete the table.
+Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
+
+#### Returns
+
+`Promise`\<`number`\>
+
+The total count of entities in the storage.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.count`
+
+***
+
+### getPartitionContextIds() {#getpartitioncontextids}
+
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+
+Get a unique list of all the context ids from the storage.
+
+#### Returns
+
+`Promise`\<`IContextIds`[]\>
+
+The list of unique context ids.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### createTargetConnector() {#createtargetconnector}
+
+> **createTargetConnector**\<`U`\>(`newEntitySchema`): `Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Create the target connector for performing the migration it will use a temporary storage location.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### newEntitySchema
+
+`string`
+
+The name of the new entity schema to create the connector for.
+
+#### Returns
+
+`Promise`\<`IEntityStorageConnector`\<`U`\>\>
+
+Connector for performing the migration.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.createTargetConnector`
+
+***
+
+### finalizeMigration() {#finalizemigration}
+
+> **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`DynamoDbEntityStorageConnector`\<`U`\>\>
+
+Finalize the migration by tearing down the old connector and replacing it with the new one.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`DynamoDbEntityStorageConnector`\<`U`\>
+
+The target connector to finalize the migration with.
+
+##### options?
+
+`IMigrationOptions`
+
+The options to control how the migration is finalized.
+
+##### loggingComponentType?
+
+`string`
+
+The logging component type to use for logging during the migration finalization.
+
+#### Returns
+
+`Promise`\<`DynamoDbEntityStorageConnector`\<`U`\>\>
+
+A promise that resolves when the migration is finalized.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.finalizeMigration`
+
+***
+
+### cleanupMigration() {#cleanupmigration}
+
+> **cleanupMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`void`\>
+
+Cleanup the migration if a migration fails or needs to be aborted.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### targetConnector
+
+`IEntityStorageConnector`\<`U`\> \| `undefined`
+
+The target connector to cleanup the migration with.
+
+##### options?
+
+`IMigrationOptions`
+
+The options to control how the migration is cleaned up.
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging the migration progress.
 
 #### Returns
 
 `Promise`\<`void`\>
 
-Nothing.
+A promise that resolves when the migration is cleaned up.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.cleanupMigration`

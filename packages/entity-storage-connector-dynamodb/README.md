@@ -1,6 +1,6 @@
-# TWIN Entity Storage Connector Dynamo DB
+# Entity Storage Connector DynamoDB
 
-Entity Storage connector implementation using Dynamo DB storage.
+This package provides an Amazon DynamoDB backend for managed NoSQL storage in cloud-native deployments. It is designed to work with the wider storage ecosystem so applications can keep behaviour consistent across connectors and environments.
 
 ## Installation
 
@@ -8,18 +8,16 @@ Entity Storage connector implementation using Dynamo DB storage.
 npm install @twin.org/entity-storage-connector-dynamodb
 ```
 
-## Testing
+## Dependency versions
 
-The tests developed are functional tests and need an instance of DynamoDB up and running. To run DynamoDB locally:
+Published versions pin `@aws-sdk/client-dynamodb` and `@aws-sdk/lib-dynamodb` to releases that are at least 48 hours old on npm, so consumers with a minimum package age policy (for example pnpm `minimumReleaseAge`) can install without resolution failures.
 
-```sh
-docker run -p 8000:8000 --name twin-entity-storage-dynamodb --hostname dynamodb -d amazon/dynamodb-local
-```
+## Docker
 
-Afterwards you can run the tests as follows:
+To perform testing of this component it may be necessary to launch a local instance to communicate with.
 
-```sh
-npm run test
+```shell
+docker run -d --name twin-entity-storage-dynamodb -p 18000:8000 amazon/dynamodb-local
 ```
 
 ## Examples

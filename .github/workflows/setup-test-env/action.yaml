@@ -1,0 +1,60 @@
+name: 'Setup Testing Environment'
+description: 'Set up the testing environment for running tests from the build workflow.'
+
+inputs:
+  package:
+    description: 'The package to set up the test environment for.'
+    required: true
+    default: 'all'
+  test_env_vars:
+    description: 'Newline-separated KEY=VALUE pairs to inject as environment variables into the test services.'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    # Start PostgreSQL service only for PostgreSQL package
+    - name: Start PostgreSQL Service
+      if: inputs.package == 'packages/entity-storage-connector-postgresql' || inputs.package == 'all'
+      shell: bash
+      run: docker pull postgres:latest && docker run -d --name twin-entity-storage-postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -p 5444:5432 postgres:latest
+
+    # Start ScyllaDB service only for ScyllaDB package
+    - name: Start ScyllaDB Service
+      if: inputs.package == 'packages/entity-storage-connector-scylladb' || inputs.package == 'all'
+      shell: bash
+      run: |
+        docker run -d --name twin-entity-storage-scylladb -p 9042:9042 scylladb/scylla:5.4.9
+        echo "Waiting for ScyllaDB to be ready (may take up to 2 minutes)..."
+        timeout 120 bash -c 'until docker exec twin-entity-storage-scylladb cqlsh -e "SELECT now() FROM system.local" > /dev/null 2>&1; do sleep 5; done'
+
+    # Start DynamoDB service only for DynamoDB package
+    - name: Start DynamoDB Service
+      if: inputs.package == 'packages/entity-storage-connector-dynamodb' || inputs.package == 'all'
+      shell: bash
+      run: docker pull amazon/dynamodb-local:latest && docker run -d --name twin-entity-storage-dynamodb -p 18000:8000 amazon/dynamodb-local:latest
+
+    # Start MySQL service only for MySQL package
+    - name: Start MySQL Service
+      if: inputs.package == 'packages/entity-storage-connector-mysql' || inputs.package == 'all'
+      shell: bash
+      run: docker pull mysql:latest && docker run -d --name twin-entity-storage-mysql -e MYSQL_ROOT_PASSWORD=password -p 3400:3306 mysql:latest
+
+    # Start MongoDB service only for MongoDB package
+    - name: Start MongoDB Service
+      if: inputs.package == 'packages/entity-storage-connector-mongodb' || inputs.package == 'all'
+      shell: bash
+      run: docker pull mongo:latest && docker run -d --name twin-entity-storage-mongo -p 27500:27017 mongo:latest
+
+    # Start Firestore service only for Firestore package
+    - name: Start Firestore Emulator
+      if: inputs.package == 'packages/entity-storage-connector-gcp-firestore' || inputs.package == 'all'
+      shell: bash
+      run: docker run -d --name twin-entity-storage-firestore -p 20200:8080 gcr.io/google.com/cloudsdktool/cloud-sdk:emulators gcloud beta emulators firestore start --host-port=0.0.0.0:8080
+
+    # Start CosmosDB service only for CosmosDB package
+    - name: Run CosmosDB Emulator
+      if: inputs.package == 'packages/entity-storage-connector-cosmosdb' || inputs.package == 'all'
+      shell: bash
+      run: docker run -p 18081:8081 --name twin-entity-storage-cosmos --detach mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview

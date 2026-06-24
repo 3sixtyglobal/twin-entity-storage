@@ -1,12 +1,19 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { BaseError, Is, NotSupportedError, StringHelper, type IError } from "@twin.org/core";
+import {
+	BaseError,
+	ComponentFactory,
+	Is,
+	NotSupportedError,
+	StringHelper,
+	type IError
+} from "@twin.org/core";
 import { EntitySchemaHelper, type IEntitySchema } from "@twin.org/entity";
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { LoggingConnectorFactory } from "@twin.org/logging-models";
+import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import { AbstractScyllaDBConnector } from "./abstractScyllaDBConnector";
-import type { IScyllaDBViewConnectorConstructorOptions } from "./models/IScyllaDBViewConnectorConstructorOptions";
+import { AbstractScyllaDBConnector } from "./abstractScyllaDBConnector.js";
+import type { IScyllaDBViewConnectorConstructorOptions } from "./models/IScyllaDBViewConnectorConstructorOptions.js";
 
 /**
  * Manage entities using ScyllaDB Views.
@@ -18,7 +25,7 @@ export class ScyllaDBViewConnector<T>
 	/**
 	 * Runtime name for the class.
 	 */
-	public readonly CLASS_NAME: string = nameof<ScyllaDBViewConnector<T>>();
+	public static readonly CLASS_NAME: string = nameof<ScyllaDBViewConnector<unknown>>();
 
 	/**
 	 * The view descriptor.
@@ -38,14 +45,11 @@ export class ScyllaDBViewConnector<T>
 	 */
 	constructor(options: IScyllaDBViewConnectorConstructorOptions) {
 		// We need this conversion so that types can match in the superclass and reuse the get method
-		super(
-			{
-				loggingConnectorType: options.loggingConnectorType,
-				entitySchema: options.viewSchema,
-				config: options.config
-			},
-			nameof(ScyllaDBViewConnector)
-		);
+		super({
+			loggingComponentType: options.loggingComponentType,
+			entitySchema: options.viewSchema,
+			config: options.config
+		});
 
 		this._viewSchema = EntitySchemaHelper.getSchema<T>(options.viewSchema);
 
@@ -59,21 +63,27 @@ export class ScyllaDBViewConnector<T>
 	}
 
 	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return ScyllaDBViewConnector.CLASS_NAME;
+	}
+
+	/**
 	 * Bootstrap the component by creating and initializing any resources it needs.
-	 * @param nodeLoggingConnectorType The node logging connector type, defaults to "node-logging".
+	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the bootstrapping process was successful.
 	 */
-	public async bootstrap(nodeLoggingConnectorType?: string): Promise<boolean> {
-		const nodeLogging = LoggingConnectorFactory.getIfExists(
-			nodeLoggingConnectorType ?? "node-logging"
-		);
+	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
-		nodeLogging?.log({
+		await nodeLogging?.log({
 			level: "info",
-			source: this.CLASS_NAME,
+			source: ScyllaDBViewConnector.CLASS_NAME,
 			ts: Date.now(),
 			message: "viewCreating",
-			data: { view: this._fullTableName }
+			data: { view: super.safeTableName(this._fullTableName) }
 		});
 
 		try {
@@ -98,26 +108,26 @@ export class ScyllaDBViewConnector<T>
 
 			await this.execute(dbConnection, sql);
 
-			nodeLogging?.log({
+			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: ScyllaDBViewConnector.CLASS_NAME,
 				ts: Date.now(),
 				message: "viewCreated",
-				data: { view: this._fullTableName }
+				data: { view: super.safeTableName(this._fullTableName) }
 			});
 		} catch (err) {
 			if (BaseError.isErrorCode(err, "ResourceInUseException")) {
-				nodeLogging?.log({
+				await nodeLogging?.log({
 					level: "info",
-					source: this.CLASS_NAME,
+					source: ScyllaDBViewConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "viewExists",
-					data: { view: this._fullTableName }
+					data: { view: super.safeTableName(this._fullTableName) }
 				});
 			} else {
-				nodeLogging?.log({
+				await nodeLogging?.log({
 					level: "error",
-					source: this.CLASS_NAME,
+					source: ScyllaDBViewConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "viewCreateFailed",
 					error: err as IError,
@@ -134,7 +144,28 @@ export class ScyllaDBViewConnector<T>
 	 * @param entity The entity to set.
 	 */
 	public async set(entity: T): Promise<void> {
-		throw new NotSupportedError(this.CLASS_NAME, "set", {});
+		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
+			methodName: "set"
+		});
+	}
+
+	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
+			methodName: "setBatch"
+		});
+	}
+
+	/**
+	 * Remove all entities from the storage.
+	 */
+	public async empty(): Promise<void> {
+		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
+			methodName: "empty"
+		});
 	}
 
 	/**
@@ -142,6 +173,29 @@ export class ScyllaDBViewConnector<T>
 	 * @param id The id of the entity to remove.
 	 */
 	public async remove(id: string): Promise<void> {
-		throw new NotSupportedError(this.CLASS_NAME, "remove", {});
+		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
+			methodName: "remove"
+		});
+	}
+
+	/**
+	 * Remove multiple entities.
+	 * @param ids The ids of the entities to remove.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
+			methodName: "removeBatch"
+		});
+	}
+
+	/**
+	 * Teardown the entity storage (not supported for views).
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
+			methodName: "teardown"
+		});
 	}
 }

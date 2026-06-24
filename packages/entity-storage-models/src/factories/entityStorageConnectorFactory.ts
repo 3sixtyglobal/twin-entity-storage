@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { Factory } from "@twin.org/core";
-import type { IEntityStorageConnector } from "../models/IEntityStorageConnector";
+import type { IEntityStorageConnector } from "../models/IEntityStorageConnector.js";
 
 /**
  * Factory for creating entity storage connectors.

@@ -1,6 +1,20 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { BaseError, GeneralError, Guards, Is, ObjectHelper } from "@twin.org/core";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
+import {
+	BaseError,
+	Coerce,
+	ComponentFactory,
+	GeneralError,
+	Guards,
+	HealthStatus,
+	type IHealth,
+	Is,
+	type IValidationFailure,
+	ObjectHelper,
+	SharedStore,
+	Validation
+} from "@twin.org/core";
 import {
 	ComparisonOperator,
 	type EntityCondition,
@@ -9,30 +23,56 @@ import {
 	EntitySchemaPropertyType,
 	type IComparator,
 	type IEntitySchema,
+	type IEntitySchemaProperty,
 	LogicalOperator,
 	SortDirection
 } from "@twin.org/entity";
-import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { LoggingConnectorFactory } from "@twin.org/logging-models";
+import {
+	EntityStorageHelper,
+	type IEntityStorageConnector,
+	type IEntityStorageMigrationConnector,
+	type IMigrationOptions
+} from "@twin.org/entity-storage-models";
+import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import { createConnection, type Connection, type ConnectionOptions } from "mysql2/promise";
-import type { IMySqlEntityStorageConnectorConfig } from "./models/IMySqlEntityStorageConnectorConfig";
-import type { IMySqlEntityStorageConnectorConstructorOptions } from "./models/IMySqlEntityStorageConnectorConstructorOptions";
+import { type Pool, type PoolOptions, createPool } from "mysql2/promise";
+import type { IMySqlEntityStorageConnectorConfig } from "./models/IMySqlEntityStorageConnectorConfig.js";
+import type { IMySqlEntityStorageConnectorConstructorOptions } from "./models/IMySqlEntityStorageConnectorConstructorOptions.js";
 
 /**
  * Class for performing entity storage operations using MySql.
  */
-export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
+export class MySqlEntityStorageConnector<
+	T = unknown
+> implements IEntityStorageMigrationConnector<T> {
+	/**
+	 * Runtime name for the class.
+	 */
+	public static readonly CLASS_NAME: string = nameof<MySqlEntityStorageConnector>();
+
 	/**
 	 * Limit the number of entities when finding.
 	 * @internal
 	 */
-	private static readonly _PAGE_SIZE: number = 40;
+	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
-	 * Runtime name for the class.
+	 * Partition id field name.
+	 * @internal
 	 */
-	public readonly CLASS_NAME: string = nameof<MySqlEntityStorageConnector>();
+	private static readonly _PARTITION_KEY: string = "partitionId";
+
+	/**
+	 * Partition id field value.
+	 * @internal
+	 */
+	private static readonly _PARTITION_KEY_VALUE: string = "root";
+
+	/**
+	 * The name for the schema.
+	 * @internal
+	 */
+	private readonly _entitySchemaName: string;
 
 	/**
 	 * The schema for the entity.
@@ -41,107 +81,115 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	private readonly _entitySchema: IEntitySchema<T>;
 
 	/**
+	 * The keys to use from the context ids to create partitions.
+	 * @internal
+	 */
+	private readonly _partitionContextIds?: string[];
+
+	/**
 	 * The configuration for the connector.
 	 * @internal
 	 */
 	private readonly _config: IMySqlEntityStorageConnectorConfig;
 
 	/**
-	 * The configuration for the connector.
+	 * The connection pool for MySql.
 	 * @internal
 	 */
-	private _connection?: Connection;
+	private _pool?: Pool;
+
+	/**
+	 * The primary key property.
+	 * @internal
+	 */
+	private readonly _primaryKeyProperty: IEntitySchemaProperty<T>;
 
 	/**
 	 * Create a new instance of MySqlEntityStorageConnector.
 	 * @param options The options for the connector.
 	 */
 	constructor(options: IMySqlEntityStorageConnectorConstructorOptions) {
-		Guards.object(this.CLASS_NAME, nameof(options), options);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.entitySchema), options.entitySchema);
+		Guards.object(MySqlEntityStorageConnector.CLASS_NAME, nameof(options), options);
+		Guards.stringValue(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
+		);
 		Guards.object<IMySqlEntityStorageConnectorConfig>(
-			this.CLASS_NAME,
+			MySqlEntityStorageConnector.CLASS_NAME,
 			nameof(options.config),
 			options.config
 		);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.host), options.config.host);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.user), options.config.user);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.password), options.config.password);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.database), options.config.database);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.tableName), options.config.tableName);
+		Guards.stringValue(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.host),
+			options.config.host
+		);
+		Guards.stringValue(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.user),
+			options.config.user
+		);
+		Guards.stringValue(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.password),
+			options.config.password
+		);
+		Guards.stringValue(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.database),
+			options.config.database
+		);
+		Guards.stringValue(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.tableName),
+			options.config.tableName
+		);
 
+		this._entitySchemaName = options.entitySchema;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
+		this._partitionContextIds = options.partitionContextIds;
+		this._primaryKeyProperty = EntitySchemaHelper.getPrimaryKey(this._entitySchema);
 
 		this._config = options.config;
 	}
 
 	/**
-	 * Initialize the MySql environment.
-	 * @param nodeLoggingConnectorType Optional type of the logging connector.
-	 * @returns A promise that resolves to a boolean indicating success.
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
 	 */
-	public async bootstrap(nodeLoggingConnectorType?: string): Promise<boolean> {
-		const nodeLogging = LoggingConnectorFactory.getIfExists(
-			nodeLoggingConnectorType ?? "node-logging"
-		);
+	public className(): string {
+		return MySqlEntityStorageConnector.CLASS_NAME;
+	}
 
+	/**
+	 * Get the health of the component.
+	 * @returns The health of the component.
+	 */
+	public async health(): Promise<IHealth[]> {
 		try {
-			const dbConnection = await this.createConnection();
-
-			await nodeLogging?.log({
-				level: "info",
-				source: this.CLASS_NAME,
-				ts: Date.now(),
-				message: "databaseCreating",
-				data: {
-					database: this._config.database
-				}
-			});
-
-			// Create the database if it does not exist
-			await dbConnection.query(`CREATE DATABASE IF NOT EXISTS \`${this._config.database}\``);
-
-			await nodeLogging?.log({
-				level: "info",
-				source: this.CLASS_NAME,
-				ts: Date.now(),
-				message: "databaseExists",
-				data: {
-					database: this._config.database
-				}
-			});
-
-			await dbConnection.query(
-				`CREATE TABLE IF NOT EXISTS \`${this._config.database}\`.\`${this._config.tableName}\` (${this.mapMySqlProperties(this._entitySchema)})`
+			await this.getPool().query(
+				`SELECT 1 FROM \`${this._config.database}\`.\`${this._config.tableName}\` LIMIT 0`
 			);
-
-			await nodeLogging?.log({
-				level: "info",
-				source: this.CLASS_NAME,
-				ts: Date.now(),
-				message: "tableExists",
-				data: {
-					table: this._config.tableName
+			return [
+				{
+					source: MySqlEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Ok,
+					description: "healthDescription",
+					data: { database: this._config.database, tableName: this._config.tableName }
 				}
-			});
-		} catch (error) {
-			const errors = error instanceof AggregateError ? error.errors : [error];
-			for (const err of errors) {
-				await nodeLogging?.log({
-					level: "error",
-					source: this.CLASS_NAME,
-					ts: Date.now(),
-					message: "databaseCreateFailed",
-					error: BaseError.fromError(err),
-					data: {
-						database: this._config.database
-					}
-				});
-			}
-			return false;
+			];
+		} catch {
+			return [
+				{
+					source: MySqlEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Error,
+					description: "healthDescription",
+					message: "connectionFailed",
+					data: { database: this._config.database, tableName: this._config.tableName }
+				}
+			];
 		}
-
-		return true;
 	}
 
 	/**
@@ -150,6 +198,116 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	 */
 	public getSchema(): IEntitySchema {
 		return this._entitySchema as IEntitySchema;
+	}
+
+	/**
+	 * Initialize the MySql environment.
+	 * @param nodeLoggingComponentType Optional type of the logging component.
+	 * @returns A promise that resolves to a boolean indicating success.
+	 */
+	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+
+		try {
+			const pool = this.getPool();
+
+			const databaseExists = await this.databaseExists();
+			if (!databaseExists) {
+				await nodeLogging?.log({
+					level: "info",
+					source: MySqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "databaseCreating",
+					data: {
+						databaseName: this._config.database
+					}
+				});
+				await pool.query(`CREATE DATABASE IF NOT EXISTS \`${this._config.database}\``);
+
+				await this.waitForDatabaseExists();
+			} else {
+				await nodeLogging?.log({
+					level: "info",
+					source: MySqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "databaseExists",
+					data: {
+						databaseName: this._config.database
+					}
+				});
+			}
+
+			const tableExists = await this.tableExists();
+			if (!tableExists) {
+				await nodeLogging?.log({
+					level: "info",
+					source: MySqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "tableCreating",
+					data: {
+						tableName: this._config.tableName
+					}
+				});
+
+				await pool.query(
+					`CREATE TABLE IF NOT EXISTS \`${this._config.database}\`.\`${this._config.tableName}\` (${this.mapMySqlProperties()})`
+				);
+
+				await this.waitForTableExists();
+			} else {
+				await nodeLogging?.log({
+					level: "info",
+					source: MySqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "tableExists",
+					data: {
+						tableName: this._config.tableName
+					}
+				});
+			}
+		} catch (error) {
+			await nodeLogging?.log({
+				level: "error",
+				source: MySqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "databaseCreateFailed",
+				error: BaseError.fromError(error),
+				data: {
+					databaseName: this._config.database
+				}
+			});
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * The component needs to be stopped when the node is closed.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns Nothing.
+	 */
+	public async stop(nodeLoggingComponentType?: string): Promise<void> {
+		if (this._pool) {
+			const poolConfig = this.createPoolConfig();
+			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
+
+			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
+				"mySqlPools"
+			);
+			sharedPools ??= {};
+			if (sharedPools[poolId]) {
+				// Decrease the use counter and close the pool if no longer used
+				sharedPools[poolId].useCounter--;
+				if (sharedPools[poolId].useCounter <= 0) {
+					await this._pool.end();
+					delete sharedPools[poolId];
+				}
+				SharedStore.set("mySqlPools", sharedPools);
+			}
+
+			this._pool = undefined;
+		}
 	}
 
 	/**
@@ -164,28 +322,28 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(MySqlEntityStorageConnector.CLASS_NAME, nameof(id), id);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const dbConnection = await this.createConnection();
+			const pool = this.getPool();
 
 			const whereClauses: string[] = [];
 			const values: unknown[] = [];
 
+			whereClauses.push(`\`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ?`);
+			values.push(partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE);
+
 			if (secondaryIndex) {
 				whereClauses.push(`\`${String(secondaryIndex)}\` = ?`);
-				values.push(id);
 			} else {
-				const primaryKeyProp = this._entitySchema.properties?.find(prop => prop.isPrimary);
-				if (primaryKeyProp) {
-					whereClauses.push(`\`${String(primaryKeyProp.property)}\` = ?`);
-				} else {
-					whereClauses.push("`id` = ?");
-				}
-				values.push(id);
+				whereClauses.push(`\`${String(this._primaryKeyProperty.property)}\` = ?`);
 			}
+			values.push(id);
 
-			if (conditions) {
+			if (Is.arrayValue(conditions)) {
 				for (const condition of conditions) {
 					whereClauses.push(`\`${String(condition.property)}\` = ?`);
 					values.push(condition.value);
@@ -193,14 +351,17 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			}
 
 			const query = `SELECT * FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE ${whereClauses.join(" AND ")} LIMIT 1`;
-			const [rows] = await dbConnection.query(query, values);
+			const [rows] = await pool.query(query, values);
 
-			if (Array.isArray(rows) && rows.length === 1) {
-				return rows[0] as T;
+			if (Is.array(rows) && rows.length === 1) {
+				const item = EntityStorageHelper.unPrepareEntity<T>(rows[0] as T, [
+					MySqlEntityStorageConnector._PARTITION_KEY
+				]);
+				return this.coerceEntityTypes(item) as T;
 			}
 		} catch (err) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				MySqlEntityStorageConnector.CLASS_NAME,
 				"getFailed",
 				{
 					id
@@ -218,11 +379,24 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	 * @returns The id of the entity.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
-		Guards.object<T>(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object<T>(MySqlEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
-		EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const id = entity["id" as keyof T] as unknown as string;
+		const prepared = EntityStorageHelper.prepareEntity(
+			entity,
+			this._entitySchema,
+			[
+				{
+					property: MySqlEntityStorageConnector._PARTITION_KEY,
+					value: partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE
+				}
+			],
+			{ nullBehavior: "nullify" }
+		);
+
+		const id = prepared[this._primaryKeyProperty.property] as unknown as string;
 
 		try {
 			if (Is.arrayValue(conditions)) {
@@ -231,39 +405,133 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 					return;
 				}
 			}
-			const columns = Object.keys(entity as object)
-				.map(key => `\`${key}\``)
-				.join(", ");
-			const values = Object.values(entity as object);
-			for (const [index, value] of values.entries()) {
-				const property = Object.keys(entity as object)[index];
-				const schemaProp = this._entitySchema.properties?.find(p => p.property === property);
-				if (
-					schemaProp?.type === EntitySchemaPropertyType.Object ||
-					schemaProp?.type === EntitySchemaPropertyType.Array
+
+			const props = [...(this._entitySchema.properties ?? [])];
+			props.unshift({
+				property: MySqlEntityStorageConnector._PARTITION_KEY as keyof T,
+				type: EntitySchemaPropertyType.String
+			});
+
+			const keys: string[] = [];
+			const values = [];
+
+			for (const prop of props) {
+				keys.push(prop.property as string);
+				const val = prepared[prop.property];
+				if (val === null || val === undefined) {
+					values.push(null);
+				} else if (
+					prop.type === EntitySchemaPropertyType.Object ||
+					prop.type === EntitySchemaPropertyType.Array
 				) {
-					values[index] = JSON.stringify(value);
+					values.push(JSON.stringify(val));
+				} else {
+					values.push(val);
 				}
 			}
-			const placeholders = values.map(() => "?").join(", ");
 
-			const dbConnection = await this.createConnection();
-			await dbConnection.query(
-				`INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\` (${columns}) VALUES (${placeholders}) ON DUPLICATE KEY UPDATE ${columns
-					.split(", ")
-					.map(col => `${col} = VALUES(${col})`)
-					.join(", ")};`,
-				values
-			);
+			let sql = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\``;
+			sql += ` (${keys.map(key => `\`${key}\``).join(", ")})`;
+			sql += ` VALUES (${values.map(() => "?").join(", ")})`;
+			sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
+
+			const pool = this.getPool();
+			await pool.query(sql, values);
 		} catch (err) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				MySqlEntityStorageConnector.CLASS_NAME,
 				"setFailed",
 				{
 					id
 				},
 				err
 			);
+		}
+	}
+
+	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(MySqlEntityStorageConnector.CLASS_NAME, nameof(entities), entities);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const preparedEntities = entities.map(entity =>
+			EntityStorageHelper.prepareEntity(
+				entity,
+				this._entitySchema,
+				[
+					{
+						property: MySqlEntityStorageConnector._PARTITION_KEY,
+						value: partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE
+					}
+				],
+				{ nullBehavior: "nullify" }
+			)
+		);
+
+		try {
+			const props = [...(this._entitySchema.properties ?? [])];
+			props.unshift({
+				property: MySqlEntityStorageConnector._PARTITION_KEY as keyof T,
+				type: EntitySchemaPropertyType.String
+			});
+
+			const keys = props.map(p => p.property as string);
+			const allValues: unknown[] = [];
+
+			for (const prepared of preparedEntities) {
+				for (const prop of props) {
+					const val = prepared[prop.property];
+					if (
+						prop.type === EntitySchemaPropertyType.Object ||
+						prop.type === EntitySchemaPropertyType.Array
+					) {
+						allValues.push(Is.empty(val) ? null : JSON.stringify(val));
+					} else {
+						allValues.push(Is.empty(val) ? null : val);
+					}
+				}
+			}
+
+			const rowPlaceholder = `(${keys.map(() => "?").join(", ")})`;
+			let sql = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\``;
+			sql += ` (${keys.map(key => `\`${key}\``).join(", ")})`;
+			sql += ` VALUES ${entities.map(() => rowPlaceholder).join(", ")}`;
+			sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
+
+			const pool = this.getPool();
+			await pool.query(sql, allValues);
+		} catch (err) {
+			throw new GeneralError(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				"setBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Empty the entity storage.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const pool = this.getPool();
+			await pool.query(
+				`DELETE FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ?`,
+				[partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE]
+			);
+		} catch (err) {
+			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "emptyFailed", undefined, err);
 		}
 	}
 
@@ -277,29 +545,40 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		id: string,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(MySqlEntityStorageConnector.CLASS_NAME, nameof(id), id);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const dbConnection = await this.createConnection();
+			const pool = this.getPool();
 
-			const itemData = await this.get(id);
+			const itemData = await this.get(id, undefined, conditions);
 			if (Is.notEmpty(itemData)) {
-				const values: unknown[] = [id];
-				let whereClauses: string[] = [];
+				const values: unknown[] = [];
+				const whereClauses: string[] = [];
+
+				whereClauses.push(`\`${this._primaryKeyProperty.property as string}\` = ?`);
+				values.push(id);
+
+				whereClauses.push(`\`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ?`);
+				values.push(partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE);
 
 				if (Is.arrayValue(conditions)) {
-					whereClauses = conditions.map(condition => {
-						values.push(condition.value);
-						return `\`${String(condition.property)}\` = ?`;
-					});
+					whereClauses.push(
+						...conditions.map(condition => {
+							values.push(condition.value);
+							return `\`${String(condition.property)}\` = ?`;
+						})
+					);
 				}
 
-				const query = `DELETE FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE \`id\` = ?${whereClauses.length > 0 ? ` AND ${whereClauses.join(" AND ")}` : ""}`;
-				await dbConnection.query(query, values);
+				const query = `DELETE FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE ${whereClauses.join(" AND ")}`;
+				await pool.query(query, values);
 			}
 		} catch (err) {
 			throw new GeneralError(
-				this.CLASS_NAME,
+				MySqlEntityStorageConnector.CLASS_NAME,
 				"removeFailed",
 				{
 					id
@@ -310,12 +589,84 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 	}
 
 	/**
+	 * Teardown the entity storage by dropping the table.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: MySqlEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "tableDropping",
+			data: { tableName: this._config.tableName }
+		});
+
+		try {
+			if (await this.tableExists()) {
+				const pool = this.getPool();
+				await pool.query(`DROP TABLE \`${this._config.database}\`.\`${this._config.tableName}\`;`);
+				await this.waitForTableNotExists();
+			}
+
+			await nodeLogging?.log({
+				level: "info",
+				source: MySqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "tableDropped",
+				data: { tableName: this._config.tableName }
+			});
+
+			return true;
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: MySqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "teardownFailed",
+				error: BaseError.fromError(err)
+			});
+			return false;
+		}
+	}
+
+	/**
+	 * Remove multiple entities by their primary key IDs.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(MySqlEntityStorageConnector.CLASS_NAME, nameof(ids), ids);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			const pool = this.getPool();
+			const sql = `DELETE FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ? AND \`${String(this._primaryKeyProperty.property)}\` IN (?)`;
+			await pool.query(sql, [
+				partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE,
+				ids
+			]);
+		} catch (err) {
+			throw new GeneralError(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				"removeBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
 	 * Find all the entities which match the conditions.
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -324,14 +675,30 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		sortProperties?: { property: keyof T; sortDirection: SortDirection }[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{ entities: Partial<T>[]; cursor?: string }> {
-		const sql = "";
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
+		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+
+		if (!Is.empty(limit)) {
+			const validationFailures: IValidationFailure[] = [];
+			Validation.integer(nameof(limit), limit, validationFailures, undefined, { minValue: 1 });
+			Validation.asValidationError(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				"query",
+				validationFailures
+			);
+		}
+
+		let sql = "";
 		try {
-			const returnSize = pageSize ?? MySqlEntityStorageConnector._PAGE_SIZE;
+			const returnSize = limit ?? MySqlEntityStorageConnector._DEFAULT_LIMIT;
 
 			let orderByClause: string = "";
-			if (Array.isArray(sortProperties)) {
+			if (Is.array(sortProperties)) {
 				const orderClauses: string[] = [];
 				for (const sortProperty of sortProperties) {
 					const direction = sortProperty.sortDirection === SortDirection.Ascending ? "ASC" : "DESC";
@@ -340,70 +707,378 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 				orderByClause = `ORDER BY ${orderClauses.join(", ")}`;
 			}
 
-			const whereClauses: string[] = [];
-			const values: unknown[] = [];
+			const { whereClauses, values } = this.buildWhereClause(conditions, partitionKey);
 
-			if (conditions) {
-				this.buildQueryParameters("", conditions, whereClauses, values);
+			const startIndex = Coerce.number(cursor) ?? 0;
+
+			sql = `SELECT ${properties ? properties.map(p => `\`${String(p)}\``).join(", ") : "*"} FROM \`${this._config.database}\`.\`${this._config.tableName}\``;
+			if (whereClauses.length > 0) {
+				sql += ` WHERE ${whereClauses.join(" AND ")}`;
+			}
+			sql += ` ${orderByClause} LIMIT ${returnSize + 1} OFFSET ${startIndex}`;
+
+			const pool = this.getPool();
+			const [rows] = (await pool.query(sql, values)) ?? [];
+
+			const hasMore = Is.array(rows) && rows.length > returnSize;
+			const resultRows = hasMore ? (rows as unknown[]).slice(0, returnSize) : rows;
+			const entities = resultRows as Partial<T>[];
+			for (let i = 0; i < entities.length; i++) {
+				entities[i] = EntityStorageHelper.unPrepareEntity(entities[i], [
+					MySqlEntityStorageConnector._PARTITION_KEY
+				]);
+				entities[i] = this.coerceEntityTypes(entities[i]);
 			}
 
-			const query = `SELECT ${properties ? properties.map(p => `\`${String(p)}\``).join(", ") : "*"} FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE ${whereClauses.length > 0 ? whereClauses.join(" AND ") : "1"} ${orderByClause} LIMIT ${returnSize} OFFSET ${cursor ? Number(cursor) : 0}`;
-			const dbConnection = await this.createConnection();
-			const [rows] = (await dbConnection?.query(query, values)) ?? [];
-
 			return {
-				entities: rows as Partial<T>[],
-				cursor:
-					Array.isArray(rows) && rows.length === returnSize
-						? String((cursor ? Number(cursor) : 0) + returnSize)
-						: undefined
+				entities,
+				cursor: hasMore ? Coerce.string(startIndex + returnSize) : undefined
 			};
 		} catch (err) {
-			throw new GeneralError(this.CLASS_NAME, "queryFailed", { sql }, err);
+			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "queryFailed", { sql }, err);
 		}
 	}
 
 	/**
-	 * Drop the table.
+	 * Count all the entities which match the conditions.
+	 * @param conditions The optional conditions to match for the entities.
+	 * @returns The total count of entities in the storage.
+	 */
+	public async count(conditions?: EntityCondition<T>): Promise<number> {
+		let sql: string | undefined;
+		try {
+			const pool = this.getPool();
+
+			const contextIds = await ContextIdStore.getContextIds();
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				contextIds,
+				this._partitionContextIds
+			);
+
+			const { whereClauses, values } = this.buildWhereClause(conditions, partitionKey);
+
+			sql = `SELECT COUNT(*) AS count FROM \`${this._config.database}\`.\`${this._config.tableName}\``;
+			if (whereClauses.length > 0) {
+				sql += ` WHERE ${whereClauses.join(" AND ")}`;
+			}
+
+			const [rows] = await pool.query(sql, values);
+			return Number((rows as { count: number }[])[0].count);
+		} catch (err) {
+			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "countFailed", { sql }, err);
+		}
+	}
+
+	/**
+	 * Get all unique partition context ids present in the table.
+	 * @returns An array of context id objects, one per unique partition.
+	 */
+	public async getPartitionContextIds(): Promise<IContextIds[]> {
+		if (!Is.arrayValue(this._partitionContextIds)) {
+			return [];
+		}
+
+		try {
+			const pool = this.getPool();
+			const [rows] = await pool.query(
+				`SELECT DISTINCT \`${MySqlEntityStorageConnector._PARTITION_KEY}\` FROM \`${this._config.database}\`.\`${this._config.tableName}\``
+			);
+			return (rows as { [key: string]: string }[])
+				.map(row => row[MySqlEntityStorageConnector._PARTITION_KEY])
+				.filter((id): id is string => Is.stringValue(id))
+				.map(id => ContextIdHelper.shortSplit(this._partitionContextIds ?? [], id));
+		} catch (err) {
+			throw new GeneralError(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				"getPartitionContextIdsFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Create the target connector for performing the migration using a temporary table.
+	 * @param newEntitySchema The name of the new entity schema to create the connector for.
+	 * @returns Connector for performing the migration.
+	 */
+	public async createTargetConnector<U>(
+		newEntitySchema: string
+	): Promise<IEntityStorageConnector<U>> {
+		const migrationTableName = `${this._config.tableName}Migration${Date.now()}`;
+		return new MySqlEntityStorageConnector<U>({
+			entitySchema: newEntitySchema,
+			config: {
+				...this._config,
+				tableName: migrationTableName
+			},
+			partitionContextIds: this._partitionContextIds
+		});
+	}
+
+	/**
+	 * Finalize the migration by dropping the source table and renaming the migration table to the original name.
+	 * @param targetConnector The connector holding the migrated data in a temporary table.
+	 * @param options The options to control how the migration is finalized.
+	 * @param loggingComponentType The logging component type to use during finalization.
+	 * @returns The final connector using the original table name with the new schema.
+	 */
+	public async finalizeMigration<U>(
+		targetConnector: MySqlEntityStorageConnector<U>,
+		options?: IMigrationOptions,
+		loggingComponentType?: string
+	): Promise<MySqlEntityStorageConnector<U>> {
+		// Teardown the existing table with the original name to free up the name for the new table
+		await this.teardown(loggingComponentType);
+
+		// RENAME TABLE is an atomic metadata-only operation in MySQL — no data copying needed.
+		const pool = this.getPool();
+		await pool.query(
+			`RENAME TABLE \`${targetConnector._config.database}\`.\`${targetConnector._config.tableName}\` TO \`${this._config.database}\`.\`${this._config.tableName}\``
+		);
+
+		const finalConnector = new MySqlEntityStorageConnector<U>({
+			entitySchema: targetConnector._entitySchemaName,
+			config: this._config,
+			partitionContextIds: this._partitionContextIds
+		});
+
+		if (await finalConnector.bootstrap(loggingComponentType)) {
+			await targetConnector.stop();
+			return finalConnector;
+		}
+
+		throw new GeneralError(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			"finalizeMigrationFailedBootstrap",
+			undefined
+		);
+	}
+
+	/**
+	 * Cleanup a failed or aborted migration by dropping the temporary migration table.
+	 * @param targetConnector The target connector to cleanup.
+	 * @param options The options to control how the migration is cleaned up.
+	 * @param loggingComponentType The optional component type to use for logging.
+	 * @returns A promise that resolves when the cleanup is complete.
+	 */
+	public async cleanupMigration<U>(
+		targetConnector: IEntityStorageConnector<U> | undefined,
+		options?: IMigrationOptions,
+		loggingComponentType?: string
+	): Promise<void> {
+		// If something failed the only thing to cleanup is the migration table
+		await targetConnector?.teardown?.(loggingComponentType);
+	}
+
+	/**
+	 * Check if the database exists.
+	 * @returns True if the database exists, false otherwise.
+	 */
+	public async databaseExists(): Promise<boolean> {
+		try {
+			const pool = this.getPool();
+			const [rows] = await pool.query("SHOW DATABASES LIKE ?;", [this._config.database]);
+			return Is.arrayValue(rows);
+		} catch {
+			return false;
+		}
+	}
+
+	/**
+	 * Close the connection pool and release all connections.
+	 * Should be called when the connector is no longer needed.
 	 * @returns Nothing.
 	 */
-	public async tableDrop(): Promise<void> {
-		try {
-			const dbConnection = await this.createConnection();
-			await dbConnection?.query(
-				`DROP TABLE \`${this._config.database}\`.\`${this._config.tableName}\`;`
+	public async close(): Promise<void> {
+		if (this._pool) {
+			const poolConfig = this.createPoolConfig();
+			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
+
+			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
+				"mySqlPools"
 			);
+			sharedPools ??= {};
+			if (sharedPools[poolId]) {
+				// Decrease the use counter and close the pool if no longer used
+				sharedPools[poolId].useCounter--;
+				if (sharedPools[poolId].useCounter <= 0) {
+					await this._pool.end();
+					delete sharedPools[poolId];
+				}
+				SharedStore.set("mySqlPools", sharedPools);
+			}
+
+			this._pool = undefined;
+		}
+	}
+
+	/**
+	 * Coerce MySQL raw row values back to proper TypeScript types based on the entity schema.
+	 * MySQL returns TINYINT(1) as 0/1 rather than false/true; this method converts those.
+	 * @param entity The raw entity row from MySQL.
+	 * @returns The entity with schema-correct types.
+	 * @internal
+	 */
+	private coerceEntityTypes(entity: Partial<T>): Partial<T> {
+		for (const prop of this._entitySchema.properties ?? []) {
+			const value = entity[prop.property];
+			if (prop.type === EntitySchemaPropertyType.Boolean && !Is.empty(value)) {
+				ObjectHelper.propertySet(entity, prop.property as string, Boolean(value));
+			}
+		}
+		return entity;
+	}
+
+	/**
+	 * Wait for a database to exist.
+	 * @returns Nothing.
+	 * @internal
+	 */
+	private async waitForDatabaseExists(): Promise<void> {
+		for (let attempt = 0; attempt < 20; attempt++) {
+			const databaseExists = await this.databaseExists();
+			if (databaseExists) {
+				break;
+			}
+			await new Promise(resolve => setTimeout(resolve, 250));
+		}
+	}
+
+	/**
+	 * Check if the table exists.
+	 * @returns True if the table exists, false otherwise.
+	 * @internal
+	 */
+	private async tableExists(): Promise<boolean> {
+		try {
+			const pool = this.getPool();
+			const [rows] = await pool.query("SHOW TABLES FROM ?? LIKE ?", [
+				this._config.database,
+				this._config.tableName
+			]);
+			return Is.arrayValue(rows);
 		} catch {
-			// Ignore errors
+			return false;
 		}
 	}
 
 	/**
-	 * Create a new DB connection.
-	 * @returns The MySql connection.
+	 * Wait for a table to exist.
+	 * @returns Nothing.
 	 * @internal
 	 */
-	private async createConnection(): Promise<Connection> {
-		if (this._connection) {
-			return this._connection;
+	private async waitForTableExists(): Promise<void> {
+		for (let attempt = 0; attempt < 20; attempt++) {
+			const tableExists = await this.tableExists();
+			if (tableExists) {
+				break;
+			}
+			await new Promise(resolve => setTimeout(resolve, 250));
 		}
-		const newConnection = await createConnection(this.createConnectionConfig());
-		this._connection = newConnection;
-		return newConnection;
 	}
 
 	/**
-	 * Create a new DB connection configuration.
-	 * @returns The MySql connection configuration.
+	 * Wait for a table to not exist.
+	 * @returns Nothing.
 	 * @internal
 	 */
-	private createConnectionConfig(): ConnectionOptions {
+	private async waitForTableNotExists(): Promise<void> {
+		for (let attempt = 0; attempt < 20; attempt++) {
+			const tableExists = await this.tableExists();
+			if (!tableExists) {
+				break;
+			}
+			await new Promise(resolve => setTimeout(resolve, 250));
+		}
+	}
+
+	/**
+	 * Get or create the connection pool.
+	 * @returns The MySql connection pool.
+	 * @internal
+	 */
+	private getPool(): Pool {
+		if (!this._pool) {
+			const poolConfig = this.createPoolConfig();
+			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
+
+			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
+				"mySqlPools"
+			);
+			sharedPools ??= {};
+
+			// If there is no pool for the id, create it
+			if (!sharedPools[poolId]) {
+				sharedPools[poolId] = {
+					pool: createPool(poolConfig),
+					useCounter: 0
+				};
+				SharedStore.set("mySqlPools", sharedPools);
+			}
+			// Increase the use counter and return the pool
+			sharedPools[poolId].useCounter++;
+			this._pool = sharedPools[poolId].pool;
+		}
+		return this._pool;
+	}
+
+	/**
+	 * Create the connection pool configuration.
+	 * @returns The MySql pool configuration.
+	 * @internal
+	 */
+	private createPoolConfig(): PoolOptions {
+		const poolConfig = this._config.pool ?? {};
+
 		return {
 			host: this._config.host,
 			port: this._config.port ?? 3306,
 			user: this._config.user,
-			password: this._config.password
+			password: this._config.password,
+
+			connectionLimit: poolConfig.connectionLimit ?? 10,
+			maxIdle: poolConfig.maxIdle ?? 10,
+			idleTimeout: poolConfig.idleTimeout ?? 60000,
+			enableKeepAlive: poolConfig.enableKeepAlive ?? true,
+			keepAliveInitialDelay: 0,
+			waitForConnections: poolConfig.waitForConnections ?? true,
+			queueLimit: poolConfig.queueLimit ?? 0
 		};
+	}
+
+	/**
+	 * Build where clause arrays for a query, combining partition key and optional conditions.
+	 * @param conditions The optional entity conditions to include.
+	 * @param partitionKey The partition key value.
+	 * @returns The where clauses and bound values.
+	 * @internal
+	 */
+	private buildWhereClause(
+		conditions: EntityCondition<T> | undefined,
+		partitionKey: string | undefined
+	): { whereClauses: string[]; values: unknown[] } {
+		const whereClauses: string[] = [];
+		const values: unknown[] = [];
+
+		const finalConditions: EntityCondition<T> = {
+			conditions: [],
+			logicalOperator: LogicalOperator.And
+		};
+
+		finalConditions.conditions.push({
+			property: MySqlEntityStorageConnector._PARTITION_KEY,
+			comparison: ComparisonOperator.Equals,
+			value: partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE
+		});
+
+		if (!Is.empty(conditions)) {
+			finalConditions.conditions.push(conditions);
+		}
+
+		this.buildQueryParameters("", finalConditions, whereClauses, values);
+
+		return { whereClauses, values };
 	}
 
 	/**
@@ -471,38 +1146,121 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			prop += ".";
 		}
 
-		prop += comparator.property as string;
-		// prop = prop.replace(/\./g, "->");
+		prop += comparator.property;
+
 		if (comparator.comparison === ComparisonOperator.In) {
-			const inValues = Array.isArray(comparator.value) ? comparator.value : [comparator.value];
+			const inValues = Is.array(comparator.value) ? comparator.value : [comparator.value];
+			if (inValues.length === 0) {
+				// MySQL rejects `IN ()` as a syntax error — short-circuit to a condition
+				// that is always false so the query returns zero rows cleanly (#141).
+				return "1 = 0";
+			}
 			values.push(...inValues.map(val => this.propertyToDbValue(val, type)));
 			const placeholders = inValues.map(() => "?").join(", ");
 			return `\`${prop}\` IN (${placeholders})`;
 		}
+
+		// null/undefined must use IS NULL / IS NOT NULL — never a parameterised placeholder.
+		// Passing undefined through propertyToDbValue() coerces it to NaN for number fields
+		// (Number(undefined) === NaN), and null coerces to 0 (Number(null) === 0), both of
+		// which produce semantically wrong or invalid SQL.
+		if (comparator.value === null || comparator.value === undefined) {
+			if (
+				comparator.comparison === ComparisonOperator.Equals ||
+				comparator.comparison === ComparisonOperator.NotEquals
+			) {
+				const nullCheck =
+					comparator.comparison === ComparisonOperator.Equals ? "IS NULL" : "IS NOT NULL";
+
+				if (comparator.property.split(".").length > 1) {
+					const rootProp = comparator.property.split(".")[0];
+					const nestedPath = comparator.property.split(".").slice(1).join(".");
+					const rootSchema = this._entitySchema.properties?.find(p => p.property === rootProp);
+					const isArray = rootSchema?.type === EntitySchemaPropertyType.Array;
+					const jsonPath = isArray ? `$[*].${nestedPath}` : `$.${nestedPath}`;
+					const jsonExpr = `JSON_UNQUOTE(JSON_EXTRACT(\`${rootProp}\`, '${jsonPath}'))`;
+					return `${jsonExpr} ${nullCheck}`;
+				}
+				return `\`${prop}\` ${nullCheck}`;
+			}
+		}
+
 		const dbValue = this.propertyToDbValue(comparator.value, type);
 		values.push(dbValue);
 
 		if (comparator.property.split(".").length > 1) {
-			return `JSON_UNQUOTE(JSON_EXTRACT(\`${comparator.property.split(".")[0]}\`, '$.${comparator.property.split(".").slice(1).join(".")}')) = ?`;
-		} else if (comparator.comparison === ComparisonOperator.Equals) {
-			return `\`${prop}\` = ?`;
-		} else if (comparator.comparison === ComparisonOperator.NotEquals) {
-			return `\`${prop}\` <> ?`;
-		} else if (comparator.comparison === ComparisonOperator.GreaterThan) {
-			return `\`${prop}\` > ?`;
-		} else if (comparator.comparison === ComparisonOperator.LessThan) {
-			return `\`${prop}\` < ?`;
-		} else if (comparator.comparison === ComparisonOperator.GreaterThanOrEqual) {
-			return `\`${prop}\` >= ?`;
-		} else if (comparator.comparison === ComparisonOperator.LessThanOrEqual) {
-			return `\`${prop}\` <= ?`;
-		} else if (comparator.comparison === ComparisonOperator.Includes) {
-			return `JSON_CONTAINS(\`${prop}\`, ?)`;
+			const rootProp = comparator.property.split(".")[0];
+			const nestedPath = comparator.property.split(".").slice(1).join(".");
+			const rootSchema = this._entitySchema.properties?.find(p => p.property === rootProp);
+			const isArray = rootSchema?.type === EntitySchemaPropertyType.Array;
+			const jsonPath = isArray ? `$[*].${nestedPath}` : `$.${nestedPath}`;
+			const jsonExpr = `JSON_UNQUOTE(JSON_EXTRACT(\`${rootProp}\`, '${jsonPath}'))`;
+
+			switch (comparator.comparison) {
+				case ComparisonOperator.Includes: {
+					values.pop();
+					values.push(`%${String(comparator.value).toLowerCase()}%`);
+					return `LOWER(${jsonExpr}) LIKE ?`;
+				}
+				case ComparisonOperator.NotEquals:
+					return `${jsonExpr} <> ?`;
+				case ComparisonOperator.GreaterThan:
+					return `${jsonExpr} > ?`;
+				case ComparisonOperator.LessThan:
+					return `${jsonExpr} < ?`;
+				case ComparisonOperator.GreaterThanOrEqual:
+					return `${jsonExpr} >= ?`;
+				case ComparisonOperator.LessThanOrEqual:
+					return `${jsonExpr} <= ?`;
+				default:
+					return `${jsonExpr} = ?`;
+			}
 		}
 
-		throw new GeneralError(this.CLASS_NAME, "comparisonNotSupported", {
-			comparison: comparator.comparison
-		});
+		switch (comparator.comparison) {
+			case ComparisonOperator.Equals:
+				if (Is.object(comparator.value) || Is.array(comparator.value)) {
+					return `JSON_CONTAINS(\`${prop}\`, ?)`;
+				}
+				return `\`${prop}\` = ?`;
+			case ComparisonOperator.NotEquals:
+				if (Is.object(comparator.value) || Is.array(comparator.value)) {
+					return `NOT JSON_CONTAINS(\`${prop}\`, ?)`;
+				}
+				return `\`${prop}\` <> ?`;
+			case ComparisonOperator.GreaterThan:
+				return `\`${prop}\` > ?`;
+			case ComparisonOperator.LessThan:
+				return `\`${prop}\` < ?`;
+			case ComparisonOperator.GreaterThanOrEqual:
+				return `\`${prop}\` >= ?`;
+			case ComparisonOperator.LessThanOrEqual:
+				return `\`${prop}\` <= ?`;
+			case ComparisonOperator.Includes: {
+				if (type === EntitySchemaPropertyType.String) {
+					values.pop();
+					values.push(`%${String(comparator.value).toLowerCase()}%`);
+					return `LOWER(\`${prop}\`) LIKE ?`;
+				}
+				values.pop();
+				values.push(JSON.stringify(comparator.value));
+				return `JSON_CONTAINS(\`${prop}\`, ?)`;
+			}
+			case ComparisonOperator.NotIncludes: {
+				if (type === EntitySchemaPropertyType.String) {
+					values.pop();
+					values.push(`%${String(comparator.value).toLowerCase()}%`);
+					return `LOWER(\`${prop}\`) NOT LIKE ?`;
+				}
+				values.pop();
+				values.push(JSON.stringify(comparator.value));
+				return `NOT JSON_CONTAINS(\`${prop}\`, ?)`;
+			}
+			default:
+				throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {
+					comparison: comparator.comparison
+				});
+		}
 	}
 
 	/**
@@ -522,7 +1280,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		} else if (type === "number") {
 			return Number(value);
 		} else if (type === "boolean") {
-			return Boolean(value);
+			return value ? 1 : 0;
 		}
 
 		return value;
@@ -542,12 +1300,16 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 			return "OR";
 		}
 
-		throw new GeneralError(this.CLASS_NAME, "conditionalNotSupported", { operator });
+		throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "conditionalNotSupported", {
+			operator
+		});
 	}
 
 	/**
 	 * Verify the conditions for the entity.
 	 * @param conditions The conditions to verify.
+	 * @param obj The object to verify the conditions against.
+	 * @returns True if all conditions are met, false otherwise.
 	 * @internal
 	 */
 	private verifyConditions(
@@ -561,11 +1323,14 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 
 	/**
 	 * Map entity schema properties to SQL properties.
-	 * @param entitySchema The schema of the entity.
+	 * @param schema The schema to use, defaults to the connector's own schema.
 	 * @returns The SQL properties as a string.
 	 * @throws GeneralError if the entity properties do not exist.
+	 * @internal
 	 */
-	private mapMySqlProperties(entitySchema: IEntitySchema<T>): string {
+	private mapMySqlProperties(schema?: IEntitySchema<T>): string {
+		const entitySchema = schema ?? this._entitySchema;
+
 		const sqlTypeMap: { [key in EntitySchemaPropertyType]: string } = {
 			[EntitySchemaPropertyType.String]: "LONGTEXT",
 			[EntitySchemaPropertyType.Number]: "FLOAT",
@@ -576,17 +1341,28 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 		};
 
 		if (!entitySchema.properties) {
-			throw new GeneralError(this.CLASS_NAME, "entitySchemaPropertiesUndefined");
+			throw new GeneralError(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				"entitySchemaPropertiesUndefined"
+			);
 		}
 
 		const primaryKeys: string[] = [];
 
-		const columnDefinitions = entitySchema.properties
+		const props: IEntitySchemaProperty<T>[] = [...entitySchema.properties];
+
+		props.unshift({
+			property: MySqlEntityStorageConnector._PARTITION_KEY as keyof T,
+			type: EntitySchemaPropertyType.String,
+			isPrimary: true
+		});
+
+		const columnDefinitions = props
 			.map(prop => {
 				let sqlType = sqlTypeMap[prop.type] || "TEXT";
 				if (prop.format) {
 					switch (prop.type) {
-						case "string":
+						case EntitySchemaPropertyType.String:
 							sqlType = "LONGTEXT";
 							switch (prop.format) {
 								case "uuid":
@@ -598,7 +1374,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 									break;
 							}
 							break;
-						case "number":
+						case EntitySchemaPropertyType.Number:
 							sqlType = "FLOAT";
 							switch (prop.format) {
 								case "float":
@@ -609,7 +1385,7 @@ export class MySqlEntityStorageConnector<T = unknown> implements IEntityStorageC
 									break;
 							}
 							break;
-						case "integer":
+						case EntitySchemaPropertyType.Integer:
 							sqlType = "INT";
 							switch (prop.format) {
 								case "int8":

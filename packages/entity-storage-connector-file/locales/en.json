@@ -3,12 +3,28 @@
 		"fileEntityStorageConnector": {
 			"directoryCreating": "Creating directory \"{directory}\"",
 			"directoryCreated": "Created directory \"{directory}\"",
-			"directoryExists": "Skipping create directory \"{directory}\" as it already exists"
+			"directoryExists": "Skipping create directory \"{directory}\" as it already exists",
+			"storeTearingDown": "Tearing down entity storage",
+			"storeTornDown": "Entity storage torn down"
 		}
 	},
 	"error": {
 		"fileEntityStorageConnector": {
-			"directoryCreateFailed": "Creating directory \"{directory}\" failed"
+			"directoryCreateFailed": "Creating directory \"{directory}\" failed",
+			"emptyFailed": "Unable to empty entity storage",
+			"readStoreCorrupt": "The entity storage store file in directory \"{directory}\" contains corrupt JSON",
+			"readStoreFailed": "Unable to read the entity storage store file in directory \"{directory}\"",
+			"removeBatchFailed": "Unable to remove batch of entities",
+			"teardownFailed": "Unable to teardown entity storage",
+			"writeStoreFailed": "Unable to write the entity storage store file in directory \"{directory}\""
+		}
+	},
+	"health": {
+		"fileEntityStorageConnector": {
+			"healthDescription": "Checks if there is sufficient disk space in directory \"{directory}\" for the file entity storage connector to operate properly",
+			"diskSpaceError": "Disk space critically low in directory \"{directory}\", {freeBytes} bytes free, threshold is {thresholdBytes} bytes",
+			"diskSpaceCheckFailed": "Failed to check disk space in directory \"{directory}\"",
+			"diskSpaceWarning": "Disk space low in directory \"{directory}\", {freeBytes} bytes free, threshold is {thresholdBytes} bytes"
 		}
 	}
 }

@@ -4,15 +4,15 @@ Options for the ScyllaDB View Connector constructor.
 
 ## Properties
 
-### loggingConnectorType?
+### loggingComponentType? {#loggingcomponenttype}
 
-> `optional` **loggingConnectorType**: `string`
+> `optional` **loggingComponentType?**: `string`
 
-The type of logging connector to use, defaults to no logging.
+The type of logging component to use, defaults to no logging.
 
 ***
 
-### entitySchema
+### entitySchema {#entityschema}
 
 > **entitySchema**: `string`
 
@@ -20,7 +20,15 @@ The name of the entity schema.
 
 ***
 
-### viewSchema
+### partitionContextIds? {#partitioncontextids}
+
+> `optional` **partitionContextIds?**: `string`[]
+
+The keys to use from the context ids to create partitions.
+
+***
+
+### viewSchema {#viewschema}
 
 > **viewSchema**: `string`
 
@@ -28,7 +36,7 @@ The name of the view schema.
 
 ***
 
-### config
+### config {#config}
 
 > **config**: [`IScyllaDBViewConfig`](IScyllaDBViewConfig.md)
 

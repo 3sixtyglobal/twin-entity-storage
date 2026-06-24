@@ -4,7 +4,7 @@ import { entity, EntitySchemaFactory, EntitySchemaHelper, property } from "@twin
 import { MemoryEntityStorageConnector } from "@twin.org/entity-storage-connector-memory";
 import { EntityStorageConnectorFactory } from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
-import { EntityStorageService } from "../src/entityStorageService";
+import { EntityStorageService } from "../src/entityStorageService.js";
 
 /**
  * Test Type Definition.
@@ -30,20 +30,12 @@ class TestType {
 	public value2!: number;
 
 	/**
-	 * Node Identity.
-	 */
-	@property({ type: "string", optional: true })
-	public nodeIdentity?: string;
-
-	/**
 	 * User Identity.
 	 */
 	@property({ type: "string", optional: true })
 	public userIdentity?: string;
 }
 
-const TEST_USER_IDENTITY = "test-user-identity";
-const TEST_NODE_IDENTITY = "test-node-identity";
 let storage: MemoryEntityStorageConnector<TestType>;
 
 describe("EntityStorageService", () => {
@@ -51,10 +43,15 @@ describe("EntityStorageService", () => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 
 		storage = new MemoryEntityStorageConnector<TestType>({
-			entitySchema: nameof<TestType>()
+			entitySchema: nameof<TestType>(),
+			config: { storageKey: "test-type" }
 		});
 
 		EntityStorageConnectorFactory.register("test-type", () => storage);
+	});
+
+	afterEach(async () => {
+		await storage.teardown();
 	});
 
 	test("can create the service", async () => {
@@ -62,160 +59,83 @@ describe("EntityStorageService", () => {
 		expect(service).toBeDefined();
 	});
 
-	test("can set an entity with no nodeIdentity or userIdentity", async () => {
+	test("can set an entity", async () => {
 		const service = new EntityStorageService({
-			entityStorageType: "test-type",
-			config: { includeNodeIdentity: false, includeUserIdentity: false }
+			entityStorageType: "test-type"
 		});
 		await service.set({ id: "1", value1: "value1", value2: 42 });
 
-		expect(storage.getStore()).toEqual([{ id: "1", value1: "value1", value2: 42 }]);
+		const store = await storage.getStore();
+		expect(store).toEqual([{ id: "1", value1: "value1", value2: 42 }]);
 	});
 
-	test("can fail to set an entity with no userIdentity", async () => {
-		const service = new EntityStorageService({ entityStorageType: "test-type" });
-
-		await expect(service.set({ id: "1", value1: "value1", value2: 42 })).rejects.toMatchObject({
-			name: "GuardError",
-			message: "guard.string",
-			properties: {
-				property: "userIdentity",
-				value: "undefined"
-			}
+	test("can set batch of entities", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
 		});
-	});
-
-	test("can fail to set an entity with no nodeIdentity", async () => {
-		const service = new EntityStorageService({ entityStorageType: "test-type" });
-
-		await expect(
-			service.set({ id: "1", value1: "value1", value2: 42 }, TEST_USER_IDENTITY)
-		).rejects.toMatchObject({
-			name: "GuardError",
-			message: "guard.string",
-			properties: {
-				property: "nodeIdentity",
-				value: "undefined"
-			}
-		});
-	});
-
-	test("can set an entity with user and node identity", async () => {
-		const service = new EntityStorageService({ entityStorageType: "test-type" });
-
-		await service.set(
+		await service.setBatch([
 			{ id: "1", value1: "value1", value2: 42 },
-			TEST_USER_IDENTITY,
-			TEST_NODE_IDENTITY
-		);
-
-		expect(storage.getStore()).toEqual([
-			{
-				id: "1",
-				value1: "value1",
-				value2: 42,
-				userIdentity: TEST_USER_IDENTITY,
-				nodeIdentity: TEST_NODE_IDENTITY
-			}
+			{ id: "2", value1: "value2", value2: 43 },
+			{ id: "3", value1: "value3", value2: 44 }
 		]);
+
+		const store = await storage.getStore();
+		expect(store).toHaveLength(3);
+		expect(store[0]).toEqual({ id: "1", value1: "value1", value2: 42 });
+		expect(store[2]).toEqual({ id: "3", value1: "value3", value2: 44 });
 	});
 
-	test("can get an entity with no user and node identity", async () => {
+	test("can fail to set batch with no entities", async () => {
 		const service = new EntityStorageService({
-			entityStorageType: "test-type",
-			config: { includeNodeIdentity: false, includeUserIdentity: false }
+			entityStorageType: "test-type"
+		});
+		await expect(service.setBatch(undefined as unknown as TestType[])).rejects.toMatchObject({
+			name: "GuardError",
+			message: "guard.array",
+			properties: { property: "entities", value: "undefined" }
+		});
+	});
+
+	test("can get an entity", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
 		});
 
 		await service.set({ id: "1", value1: "value1", value2: 42 });
 
-		const item = await service.get("1");
+		const result = await service.get("1");
 
-		expect(item).toEqual({
-			id: "1",
-			value1: "value1",
-			value2: 42
-		});
+		expect(result).toEqual({ id: "1", value1: "value1", value2: 42 });
 	});
 
-	test("can get an entity with user and node identity", async () => {
-		const service = new EntityStorageService({ entityStorageType: "test-type" });
-
-		await service.set(
-			{ id: "1", value1: "value1", value2: 42 },
-			TEST_USER_IDENTITY,
-			TEST_NODE_IDENTITY
-		);
-
-		const item = await service.get("1", undefined, TEST_USER_IDENTITY, TEST_NODE_IDENTITY);
-
-		expect(item).toEqual({
-			id: "1",
-			value1: "value1",
-			value2: 42
-		});
-	});
-
-	test("can remove an entity with user and node identity", async () => {
-		const service = new EntityStorageService({ entityStorageType: "test-type" });
-
-		await service.set(
-			{ id: "1", value1: "value1", value2: 42 },
-			TEST_USER_IDENTITY,
-			TEST_NODE_IDENTITY
-		);
-
-		await service.remove("1", TEST_USER_IDENTITY, TEST_NODE_IDENTITY);
-
-		expect(storage.getStore()).toEqual([]);
-	});
-
-	test("can remove an entity with no user and node identity", async () => {
+	test("can get an entity using a secondary index", async () => {
 		const service = new EntityStorageService({
-			entityStorageType: "test-type",
-			config: { includeNodeIdentity: false, includeUserIdentity: false }
+			entityStorageType: "test-type"
+		});
+
+		await service.set({ id: "1", value1: "secondary-value", value2: 42 });
+
+		const result = await service.get("secondary-value", "value1");
+
+		expect(result).toEqual({ id: "1", value1: "secondary-value", value2: 42 });
+	});
+
+	test("can remove an entity", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
 		});
 
 		await service.set({ id: "1", value1: "value1", value2: 42 });
 
 		await service.remove("1");
 
-		expect(storage.getStore()).toEqual([]);
+		const store = await storage.getStore();
+		expect(store).toEqual([]);
 	});
 
-	test("can query entities with user and node identity", async () => {
-		const service = new EntityStorageService({ entityStorageType: "test-type" });
-
-		for (let i = 0; i < 10; i++) {
-			await service.set(
-				{ id: (i + 1).toString(), value1: "value1", value2: 42 },
-				TEST_USER_IDENTITY,
-				TEST_NODE_IDENTITY
-			);
-		}
-
-		const result = await service.query(
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			TEST_USER_IDENTITY,
-			TEST_NODE_IDENTITY
-		);
-
-		expect(result.entities.length).toEqual(10);
-		expect(result.entities[0]).toEqual({
-			id: "1",
-			value1: "value1",
-			value2: 42
-		});
-	});
-
-	test("can query entities with no user and node identity", async () => {
+	test("can query entities", async () => {
 		const service = new EntityStorageService({
-			entityStorageType: "test-type",
-			config: { includeNodeIdentity: false, includeUserIdentity: false }
+			entityStorageType: "test-type"
 		});
 
 		for (let i = 0; i < 10; i++) {
@@ -230,5 +150,47 @@ describe("EntityStorageService", () => {
 			value1: "value1",
 			value2: 42
 		});
+	});
+
+	test("can empty with no items", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
+		});
+		await service.empty();
+		expect(await service.count()).toEqual(0);
+	});
+
+	test("can empty the store", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
+		});
+		await service.set({ id: "1", value1: "value1", value2: 42 });
+		await service.set({ id: "2", value1: "value2", value2: 43 });
+		await service.set({ id: "3", value1: "value3", value2: 44 });
+		await service.empty();
+		expect(await service.count()).toEqual(0);
+	});
+
+	test("can fail to remove batch with no ids", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
+		});
+		await expect(service.removeBatch(undefined as unknown as string[])).rejects.toMatchObject({
+			name: "GuardError",
+			message: "guard.array",
+			properties: { property: "ids", value: "undefined" }
+		});
+	});
+
+	test("can remove batch of items", async () => {
+		const service = new EntityStorageService({
+			entityStorageType: "test-type"
+		});
+		await service.set({ id: "1", value1: "value1", value2: 42 });
+		await service.set({ id: "2", value1: "value2", value2: 43 });
+		await service.set({ id: "3", value1: "value3", value2: 44 });
+		await service.removeBatch(["1", "2"]);
+		expect(await service.count()).toEqual(1);
+		expect(await service.get("3")).toBeDefined();
 	});
 });

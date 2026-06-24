@@ -1,0 +1,35 @@
+name: Project Add Issue
+
+# TWIN_GHA_RELEASE_TOKEN requires org project read/write.
+# The issue label step uses the workflow GITHUB_TOKEN with issues: write.
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  add-to-project:
+    runs-on:
+      labels: ${{ github.event.repository.private && 'self-hosted-small' || 'ubuntu-latest' }}
+      group: ${{ github.event.repository.private && 'twin' || 'default' }}
+
+    steps:
+      - uses: actions/add-to-project@v2
+        with:
+          project-url: https://github.com/orgs/iotaledger/projects/104
+          github-token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+
+      - uses: actions/github-script@v9
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['needs-triage'],
+            })

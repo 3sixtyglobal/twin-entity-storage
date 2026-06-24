@@ -3,7 +3,9 @@
 		"mongoDbEntityStorageConnector": {
 			"databaseCreating": "Database \"{databaseName}\" creating",
 			"databaseExists": "Database \"{databaseName}\" created or it already exists",
-			"collectionExists": "Database \"{collectionName}\" created or it already exists"
+			"collectionExists": "Database \"{collectionName}\" created or it already exists",
+			"collectionDropping": "Dropping collection \"{collection}\"",
+			"collectionDropped": "Collection \"{collection}\" dropped"
 		}
 	},
 	"error": {
@@ -11,11 +13,21 @@
 			"setFailed": "Unable to set entity \"{id}\"",
 			"getFailed": "Unable to get entity \"{id}\"",
 			"removeFailed": "Unable to remove entity \"{id}\"",
-			"queryFailed": "The query failed",
-			"comparisonNotSupported": "Comparison operator \"{comparison}\" is not supported",
-			"conditionalNotSupported": "Conditional operator \"{operator}\" is not supported",
-			"sortSingle": "You can only sort by a single property",
-			"sortNotIndexed": "The property \"{property}\" is not indexed and cannot be used for sorting"
+			"databaseCreateFailed": "The database creation failed for \"{databaseName}\"",
+			"unsupportedComparisonOperator": "Comparison operator \"{comparison}\" is not supported",
+			"setBatchFailed": "Unable to set batch of entities",
+			"removeBatchFailed": "Unable to remove batch of entities",
+			"emptyFailed": "Unable to empty entity storage",
+			"countFailed": "Unable to count entities",
+			"teardownFailed": "Unable to teardown entity storage",
+			"getPartitionContextIdsFailed": "Unable to get partition context ids",
+			"finalizeMigrationFailedBootstrap": "Finalizing migration failed during bootstrap phase"
+		}
+	},
+	"health": {
+		"mongoDbEntityStorageConnector": {
+			"healthDescription": "Checks if the MongoDB collection \"{collection}\" in database \"{database}\" is available",
+			"connectionFailed": "Failed to connect to MongoDB collection \"{collection}\" in database \"{database}\""
 		}
 	}
 }

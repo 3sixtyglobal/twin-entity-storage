@@ -4,7 +4,7 @@ Response to getting the list of entries from a query.
 
 ## Properties
 
-### body
+### body {#body}
 
 > **body**: `object`
 
@@ -18,6 +18,6 @@ The entities from the query.
 
 #### cursor?
 
-> `optional` **cursor**: `string`
+> `optional` **cursor?**: `string`
 
 The cursor for the next page.

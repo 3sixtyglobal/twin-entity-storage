@@ -4,7 +4,7 @@ Options for the File Entity Storage Connector constructor.
 
 ## Properties
 
-### entitySchema
+### entitySchema {#entityschema}
 
 > **entitySchema**: `string`
 
@@ -12,7 +12,15 @@ The name of the entity schema.
 
 ***
 
-### config
+### partitionContextIds? {#partitioncontextids}
+
+> `optional` **partitionContextIds?**: `string`[]
+
+The keys to use from the context ids to create partitions.
+
+***
+
+### config {#config}
 
 > **config**: [`IFileEntityStorageConnectorConfig`](IFileEntityStorageConnectorConfig.md)
 

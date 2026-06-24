@@ -14,9 +14,9 @@ Interface describing an entity storage component.
 
 ## Methods
 
-### set()
+### set() {#set}
 
-> **set**(`entity`, `userIdentity?`, `nodeIdentity?`): `Promise`\<`void`\>
+> **set**(`entity`, `conditions?`): `Promise`\<`void`\>
 
 Set an entity.
 
@@ -28,17 +28,11 @@ Set an entity.
 
 The entity to set.
 
-##### userIdentity?
+##### conditions?
 
-`string`
+`object`[]
 
-The user identity to use with storage operations.
-
-##### nodeIdentity?
-
-`string`
-
-The node identity to use with storage operations.
+The optional conditions to match for the entities.
 
 #### Returns
 
@@ -48,9 +42,31 @@ The id of the entity.
 
 ***
 
-### get()
+### setBatch() {#setbatch}
 
-> **get**(`id`, `secondaryIndex?`, `userIdentity?`, `nodeIdentity?`): `Promise`\<`undefined` \| `T`\>
+> **setBatch**(`entities`): `Promise`\<`void`\>
+
+Set multiple entities in a batch.
+
+#### Parameters
+
+##### entities
+
+`T`[]
+
+The entities to set.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+***
+
+### get() {#get}
+
+> **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
 
 Get an entity.
 
@@ -68,29 +84,23 @@ keyof `T`
 
 Get the item using a secondary index.
 
-##### userIdentity?
+##### conditions?
 
-`string`
+`object`[]
 
-The user identity to use with storage operations.
-
-##### nodeIdentity?
-
-`string`
-
-The node identity to use with storage operations.
+The optional conditions to match for the entities.
 
 #### Returns
 
-`Promise`\<`undefined` \| `T`\>
+`Promise`\<`T` \| `undefined`\>
 
 The object if it can be found or undefined.
 
 ***
 
-### remove()
+### remove() {#remove}
 
-> **remove**(`id`, `userIdentity?`, `nodeIdentity?`): `Promise`\<`void`\>
+> **remove**(`id`, `conditions?`): `Promise`\<`void`\>
 
 Remove the entity.
 
@@ -102,17 +112,11 @@ Remove the entity.
 
 The id of the entity to remove.
 
-##### userIdentity?
+##### conditions?
 
-`string`
+`object`[]
 
-The user identity to use with storage operations.
-
-##### nodeIdentity?
-
-`string`
-
-The node identity to use with storage operations.
+The optional conditions to match for the entities.
 
 #### Returns
 
@@ -122,9 +126,31 @@ Nothing.
 
 ***
 
-### query()
+### removeBatch() {#removebatch}
 
-> **query**(`conditions?`, `orderBy?`, `orderByDirection?`, `properties?`, `cursor?`, `pageSize?`, `userIdentity?`, `nodeIdentity?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
+> **removeBatch**(`ids`): `Promise`\<`void`\>
+
+Remove multiple entities by id.
+
+#### Parameters
+
+##### ids
+
+`string`[]
+
+The ids of the entities to remove.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+***
+
+### query() {#query}
+
+> **query**(`conditions?`, `orderBy?`, `orderByDirection?`, `properties?`, `cursor?`, `limit?`): `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 
 Query all the entities which match the conditions.
 
@@ -158,25 +184,13 @@ The optional properties to return, defaults to all.
 
 `string`
 
-The cursor to request the next page of entities.
+The cursor to request the next chunk of entities.
 
-##### pageSize?
+##### limit?
 
 `number`
 
 The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
-
-##### userIdentity?
-
-`string`
-
-The user identity to use with storage operations.
-
-##### nodeIdentity?
-
-`string`
-
-The node identity to use with storage operations.
 
 #### Returns
 
@@ -184,3 +198,39 @@ The node identity to use with storage operations.
 
 All the entities for the storage matching the conditions,
 and a cursor which can be used to request more entities.
+
+***
+
+### empty() {#empty}
+
+> **empty**(): `Promise`\<`void`\>
+
+Remove all entities from the storage.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+***
+
+### count() {#count}
+
+> **count**(`conditions?`): `Promise`\<`number`\>
+
+Count all the entities which match the conditions.
+
+#### Parameters
+
+##### conditions?
+
+`EntityCondition`\<`T`\>
+
+The optional conditions to match for the entities.
+
+#### Returns
+
+`Promise`\<`number`\>
+
+The total count of entities in the storage.

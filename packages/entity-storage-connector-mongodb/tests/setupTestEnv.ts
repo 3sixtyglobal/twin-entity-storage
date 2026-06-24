@@ -3,9 +3,12 @@
 import path from "node:path";
 import { Coerce, Guards } from "@twin.org/core";
 import * as dotenv from "dotenv";
-import type { IMongoDbEntityStorageConnectorConfig } from "../src/models/IMongoDbEntityStorageConnectorConfig";
+import type { IMongoDbEntityStorageConnectorConfig } from "../src/models/IMongoDbEntityStorageConnectorConfig.js";
 
-dotenv.config({ path: [path.join(__dirname, ".env"), path.join(__dirname, ".env.dev")] });
+dotenv.config({
+	path: [path.join(__dirname, ".env"), path.join(__dirname, ".env.dev")],
+	quiet: true
+});
 
 console.debug("Setting up test environment from .env and .env.dev files");
 
@@ -13,8 +16,6 @@ Guards.stringValue("TestEnv", "TEST_MONGODB_ENDPOINT", process.env.TEST_MONGODB_
 Guards.stringValue("TestEnv", "TEST_MONGODB_PORT", process.env.TEST_MONGODB_PORT);
 Guards.stringValue("TestEnv", "TEST_MONGODB_DATABASE", process.env.TEST_MONGODB_DATABASE);
 Guards.stringValue("TestEnv", "TEST_MONGODB_COLLECTION", process.env.TEST_MONGODB_COLLECTION);
-
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 export const TEST_MONGODB_CONFIG: IMongoDbEntityStorageConnectorConfig = {
 	host: process.env.TEST_MONGODB_ENDPOINT,

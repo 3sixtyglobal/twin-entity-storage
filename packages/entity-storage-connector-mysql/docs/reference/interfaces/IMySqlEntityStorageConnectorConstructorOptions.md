@@ -4,7 +4,7 @@ The options for the MySql entity storage connector constructor.
 
 ## Properties
 
-### entitySchema
+### entitySchema {#entityschema}
 
 > **entitySchema**: `string`
 
@@ -12,21 +12,23 @@ The schema for the entity.
 
 ***
 
-### loggingConnectorType?
+### partitionContextIds? {#partitioncontextids}
 
-> `optional` **loggingConnectorType**: `string`
+> `optional` **partitionContextIds?**: `string`[]
 
-The type of logging connector to use.
-
-#### Default
-
-```ts
-logging
-```
+The keys to use from the context ids to create partitions.
 
 ***
 
-### config
+### loggingComponentType? {#loggingcomponenttype}
+
+> `optional` **loggingComponentType?**: `string`
+
+The type of logging component to use.
+
+***
+
+### config {#config}
 
 > **config**: [`IMySqlEntityStorageConnectorConfig`](IMySqlEntityStorageConnectorConfig.md)
 

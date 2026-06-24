@@ -1,6 +1,6 @@
-# TWIN Entity Storage REST Client
+# Entity Storage REST Client
 
-Entity Storage contract implementation which can connect to REST endpoints.
+This package provides a client layer for calling storage service endpoints through a consistent REST interface. It is designed to work with the wider storage ecosystem so applications can keep behaviour consistent across connectors and environments.
 
 ## Installation
 

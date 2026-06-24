@@ -1,8 +1,9 @@
 {
 	"compilerOptions": {
-		"module": "ESNext",
-		"moduleResolution": "Bundler",
+		"module": "nodenext",
+		"moduleResolution": "nodenext",
 		"target": "ES2022",
+		"rootDir": "./src",
 		"outDir": "dist/es",
 		"strict": true,
 		"forceConsistentCasingInFileNames": true,
@@ -12,9 +13,10 @@
 		"emitDecoratorMetadata": true,
 		"erasableSyntaxOnly": true,
 		"sourceMap": true,
+		"inlineSources": true,
 		"declaration": true,
 		"declarationDir": "dist/types",
-		"types": [],
+		"types": ["node"],
 		"plugins": [{ "transform": "@twin.org/nameof-transformer" }],
 		"skipLibCheck": true
 	},

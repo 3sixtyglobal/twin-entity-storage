@@ -4,7 +4,7 @@ Get an entry from entity storage.
 
 ## Properties
 
-### pathParams
+### pathParams {#pathparams}
 
 > **pathParams**: `object`
 
@@ -18,14 +18,20 @@ The id of the entity to get.
 
 ***
 
-### query?
+### query? {#query}
 
-> `optional` **query**: `object`
+> `optional` **query?**: `object`
 
 The query parameters.
 
 #### secondaryIndex?
 
-> `optional` **secondaryIndex**: `string`
+> `optional` **secondaryIndex?**: `string`
 
 The secondary index to query with the id.
+
+#### conditions?
+
+> `optional` **conditions?**: `string`
+
+The optional conditions to match for the entity, JSON encoded array of property/value pairs.

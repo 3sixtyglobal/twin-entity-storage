@@ -1,6 +1,6 @@
-# TWIN Entity Storage Connector PostgreSql
+# Entity Storage Connector PostgreSQL
 
-Entity Storage connector implementation using PostgreSql storage.
+This package provides a PostgreSQL backend for relational persistence, transactions and advanced SQL features. It is designed to work with the wider storage ecosystem so applications can keep behaviour consistent across connectors and environments.
 
 ## Installation
 
@@ -8,18 +8,13 @@ Entity Storage connector implementation using PostgreSql storage.
 npm install @twin.org/entity-storage-connector-postgresql
 ```
 
-## Testing
+## Docker
 
-The tests developed are functional tests and need an instance of PostgreSql up and running. To run PostgreSql locally:
+To perform testing of this component it may be necessary to launch a local instance to communicate with.
 
-```sh
-docker run -p 5432:5432 --name twin-entity-storage-postgresql --hostname postgres -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -d postgres
-```
-
-Afterwards you can run the tests as follows:
-
-```sh
-npm run test
+```shell
+docker pull postgres:latest
+docker run -d --name twin-entity-storage-postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -p 5444:5432 postgres:latest
 ```
 
 ## Examples

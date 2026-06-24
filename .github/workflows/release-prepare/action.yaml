@@ -1,0 +1,243 @@
+name: Release Prepare
+description: Refresh docs, run release-please, and create an approved release PR for the target branch.
+
+inputs:
+  branch:
+    description: 'Target branch to prepare the release on'
+    required: true
+  semver_type:
+    description: 'Semver bump strategy for production releases, or prerelease for next'
+    required: true
+  gpg_private_key:
+    description: 'Base64-encoded GPG private key for signing commits'
+    required: true
+  gpg_key_id:
+    description: 'GPG key ID'
+    required: true
+  github_token:
+    description: 'GitHub token for creating PRs as github-actions'
+    required: true
+  release_token:
+    description: 'GitHub token for checkout and PR approval'
+    required: true
+
+outputs:
+  pr_number:
+    description: 'Number of the created release PR'
+    value: ${{ steps.release-please.outputs.pr_number }}
+  pr_url:
+    description: 'URL of the created release PR'
+    value: ${{ steps.release-please.outputs.pr_url }}
+
+runs:
+  using: composite
+  steps:
+    # Fail fast if an existing release PR is already blocking this branch.
+    - name: Check for stale autorelease state
+      shell: bash
+      run: |
+        BRANCH="${{ inputs.branch }}"
+        STALE_COUNT=$(gh pr list \
+          --repo "${{ github.repository }}" \
+          --base "$BRANCH" \
+          --label "autorelease: pending" \
+          --state open \
+          --json number \
+          --jq 'length')
+
+        if [ "$STALE_COUNT" -gt 0 ]; then
+          STALE_PRS=$(gh pr list \
+            --repo "${{ github.repository }}" \
+            --base "$BRANCH" \
+            --label "autorelease: pending" \
+            --state open \
+            --json number,url \
+            --jq '.[] | "#\(.number) \(.url)"')
+          echo "::error::Found $STALE_COUNT open release PR(s) with 'autorelease: pending' targeting $BRANCH:"
+          echo "$STALE_PRS"
+          echo "Remove the 'autorelease: pending' label from the existing PR (or close it) before starting a new release."
+          exit 1
+        fi
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
+    # Refresh generated docs before release-please snapshots package state.
+    - name: Docs Update
+      uses: ./.github/workflows/docs-update
+      with:
+        branch: ${{ inputs.branch }}
+        gpg_private_key: ${{ inputs.gpg_private_key }}
+        gpg_key_id: ${{ inputs.gpg_key_id }}
+        github_token: ${{ inputs.github_token }}
+        release_token: ${{ inputs.release_token }}
+
+      # Switch to the target branch content for release preparation work.
+    - name: Checkout target branch
+      uses: actions/checkout@v6
+      with:
+        token: ${{ inputs.release_token }}
+        ref: ${{ inputs.branch }}
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: 24
+
+    # Install and prepare the tooling release-please depends on.
+    - name: Install dependencies
+      shell: bash
+      run: |
+        for i in {1..5}; do
+          npm ci && break || {
+            if [ $i -eq 5 ]; then
+              echo "npm ci failed after 3 attempts"
+              exit 1
+            fi
+            echo "npm ci failed, retrying in 30 seconds (attempt $i/3)..."
+            sleep 30
+          }
+        done
+
+    - name: Patch release-please prerelease versioning strategy
+      shell: bash
+      run: npx patch-package --patch-dir release
+
+    - name: Import GPG key
+      shell: bash
+      run: |
+        echo "${{ inputs.gpg_private_key }}" | base64 --decode | gpg --import
+        echo "TWIN_GPG_KEY_ID=${{ inputs.gpg_key_id }}" >> "$GITHUB_ENV"
+
+    - name: Configure Git
+      shell: bash
+      run: |
+        git config --global user.email "github@twindev.org"
+        git config --global user.name "TWIN GitHub Bot"
+        git config --global user.signingkey "$TWIN_GPG_KEY_ID"
+        git config --global commit.gpgsign true
+        git config --global tag.gpgsign true
+
+    # Production releases may need an empty conventional commit so release-please
+    # sees a releasable commit since the last release. Push via a short-lived
+    # branch + auto-merged PR to satisfy the "Changes must be made through a
+    # pull request" branch protection rule on main.
+    - name: Force release via PR
+      if: ${{ inputs.branch == 'main' }}
+      shell: bash
+      run: |
+        PROD_VERSION=$(node -e "
+          const m = JSON.parse(require('fs').readFileSync('release/release-please-manifest.prod.json', 'utf8'));
+          console.log(Object.values(m)[0]);
+        ")
+        echo "Release-As version: $PROD_VERSION"
+
+        FORCE_BRANCH="release/force-commit-$(date +%s)"
+        git checkout -b "$FORCE_BRANCH"
+        git commit -S --allow-empty -m "feat: release to production" -m "Release-As: $PROD_VERSION"
+        git push origin "$FORCE_BRANCH"
+        git checkout main
+
+        PR_URL=$(gh pr create \
+          --title "feat: release to production" \
+          --body "Automated force commit to trigger release-please for this production release." \
+          --base main \
+          --head "$FORCE_BRANCH")
+        PR_NUMBER=$(echo "$PR_URL" | grep -o '[0-9]\+$')
+        echo "FORCE_COMMIT_PR_NUMBER=$PR_NUMBER" >> "$GITHUB_ENV"
+        echo "Force commit PR created: #$PR_NUMBER – $PR_URL"
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
+
+    - name: Approve and merge force commit PR
+      if: ${{ inputs.branch == 'main' }}
+      shell: bash
+      run: |
+        PR_NUMBER="$FORCE_COMMIT_PR_NUMBER"
+
+        gh pr review "$PR_NUMBER" --approve
+
+        MERGE_STATE=$(gh pr view "$PR_NUMBER" \
+          --repo "${{ github.repository }}" \
+          --json mergeStateStatus --jq '.mergeStateStatus')
+
+        if [ "$MERGE_STATE" = "CLEAN" ]; then
+          gh pr merge "$PR_NUMBER" --squash
+        else
+          gh pr merge "$PR_NUMBER" --squash --auto
+          for i in {1..30}; do
+            MERGED_AT=$(gh pr view "$PR_NUMBER" \
+              --repo "${{ github.repository }}" \
+              --json mergedAt --jq '.mergedAt')
+            if [ -n "$MERGED_AT" ] && [ "$MERGED_AT" != "null" ]; then
+              echo "Force commit PR #$PR_NUMBER merged."
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::error::Timed out waiting for force commit PR #$PR_NUMBER to merge."
+              exit 1
+            fi
+            sleep 10
+          done
+        fi
+
+        git pull origin main
+      env:
+        GH_TOKEN: ${{ inputs.release_token }}
+
+    # Production releases swap the versioning strategy based on the selected bump.
+    - name: Update release-please prod config
+      if: ${{ inputs.branch == 'main' }}
+      shell: bash
+      run: |
+        node -e "
+          const fs = require('fs');
+          const config = JSON.parse(fs.readFileSync('release/release-please-config.prod.json', 'utf8'));
+          config['versioning'] = 'always-bump-${{ inputs.semver_type }}';
+          fs.writeFileSync('release/release-please-config.prod.json', JSON.stringify(config, null, 2));
+        "
+
+    # Create the release PR and surface its URL back to the caller.
+    - name: Release Please
+      id: release-please
+      shell: bash
+      run: |
+        CONFIG_FILE=release/release-please-config.${{ inputs.branch == 'next' && 'prerelease' || 'prod' }}.json
+        MANIFEST_FILE=release/release-please-manifest.${{ inputs.branch == 'next' && 'prerelease' || 'prod' }}.json
+
+        OUTPUT=$(node_modules/.bin/release-please release-pr \
+          --config-file=${CONFIG_FILE} \
+          --manifest-file=${MANIFEST_FILE} \
+          --repo-url=${{ github.repository }} \
+          --target-branch=${{ inputs.branch }} \
+          --token=${{ inputs.github_token }})
+
+        echo "Release-please output: $OUTPUT"
+
+        if [[ "$OUTPUT" == *"Successfully opened pull request:"* ]]; then
+          PR_NUMBER=$(echo "$OUTPUT" | grep -o "Successfully opened pull request: [0-9]\+" | sed 's/Successfully opened pull request: //')
+          PR_URL="https://github.com/${{ github.repository }}/pull/$PR_NUMBER"
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+          echo "Release PR created: #$PR_NUMBER"
+          echo ""
+          echo "Next steps:"
+          echo "  1. Review the release PR: $PR_URL"
+          echo "  2. Approve and merge it."
+          echo "  3. Publishing will start automatically once the PR is merged."
+        else
+          echo "::error::release-please did not create a PR. Either there are no releasable commits since the last release, or a stale 'autorelease: pending' PR is blocking a new one. Check for open PRs labelled 'autorelease: pending' on the ${{ inputs.branch }} branch."
+          exit 1
+        fi
+
+    # Approval must come from a second identity because the PR author cannot self-approve.
+    # If the approval token is rate-limited, continue and let the reviewer approve manually.
+    - name: Attempt PR approval
+      if: ${{ steps.release-please.outputs.pr_number != '' }}
+      shell: bash
+      run: |
+        if ! gh pr review ${{ steps.release-please.outputs.pr_number }} --approve; then
+          echo "::warning title=Release PR auto-approval skipped::Automatic approval failed. This is usually caused by API rate limiting or missing review permissions. Approve the PR manually to continue: ${{ steps.release-please.outputs.pr_url }}"
+        fi
+      env:
+        GH_TOKEN: ${{ inputs.release_token }}

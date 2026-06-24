@@ -3,9 +3,12 @@
 import path from "node:path";
 import { Guards } from "@twin.org/core";
 import * as dotenv from "dotenv";
-import type { IDynamoDbEntityStorageConnectorConfig } from "../src/models/IDynamoDbEntityStorageConnectorConfig";
+import type { IDynamoDbEntityStorageConnectorConfig } from "../src/models/IDynamoDbEntityStorageConnectorConfig.js";
 
-dotenv.config({ path: [path.join(__dirname, ".env"), path.join(__dirname, ".env.dev")] });
+dotenv.config({
+	path: [path.join(__dirname, ".env"), path.join(__dirname, ".env.dev")],
+	quiet: true
+});
 
 console.debug("Setting up test environment from .env and .env.dev files");
 
@@ -28,5 +31,7 @@ export const TEST_DYNAMODB_CONFIG: IDynamoDbEntityStorageConnectorConfig = {
 	accessKeyId: process.env.TEST_DYNAMODB_ACCESS_KEY_ID,
 	secretAccessKey: process.env.TEST_DYNAMODB_SECRET_ACCESS_KEY,
 	tableName: process.env.TEST_DYNAMODB_TABLE_NAME,
-	endpoint: process.env.TEST_DYNAMODB_ENDPOINT
+	endpoint: process.env.TEST_DYNAMODB_ENDPOINT,
+	connectionTimeoutMs: 10000,
+	maxAttempts: 1
 };

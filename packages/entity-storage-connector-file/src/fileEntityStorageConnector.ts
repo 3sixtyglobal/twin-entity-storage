@@ -1,44 +1,96 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, rename, rm, statfs, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { BaseError, Coerce, Guards, Is, ObjectHelper } from "@twin.org/core";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
+import {
+	BaseError,
+	Coerce,
+	ComponentFactory,
+	GeneralError,
+	Guards,
+	HealthStatus,
+	type IHealth,
+	Is,
+	type IValidationFailure,
+	Mutex,
+	ObjectHelper,
+	Validation
+} from "@twin.org/core";
 import {
 	ComparisonOperator,
+	type EntityCondition,
 	EntityConditions,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
 	EntitySorter,
-	type EntityCondition,
 	type IEntitySchema,
 	type IEntitySchemaProperty,
+	LogicalOperator,
 	type SortDirection
 } from "@twin.org/entity";
-import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { LoggingConnectorFactory } from "@twin.org/logging-models";
+import {
+	EntityStorageHelper,
+	type IEntityStorageConnector,
+	type IEntityStorageMigrationConnector,
+	type IMigrationOptions
+} from "@twin.org/entity-storage-models";
+import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
-import type { IFileEntityStorageConnectorConstructorOptions } from "./models/IFileEntityStorageConnectorConstructorOptions";
+import type { IFileEntityStorageConnectorConstructorOptions } from "./models/IFileEntityStorageConnectorConstructorOptions.js";
 
 /**
  * Class for performing entity storage operations in file.
  */
-export class FileEntityStorageConnector<T = unknown> implements IEntityStorageConnector<T> {
-	/**
-	 * Default Page Size for cursor.
-	 * @internal
-	 */
-	private static readonly _DEFAULT_PAGE_SIZE: number = 20;
-
+export class FileEntityStorageConnector<
+	T = unknown
+> implements IEntityStorageMigrationConnector<T> {
 	/**
 	 * Runtime name for the class.
 	 */
-	public readonly CLASS_NAME: string = nameof<FileEntityStorageConnector>();
+	public static readonly CLASS_NAME: string = nameof<FileEntityStorageConnector>();
+
+	/**
+	 * Default limit for number of items to return.
+	 * @internal
+	 */
+	private static readonly _DEFAULT_LIMIT: number = 20;
+
+	/**
+	 * Partition key for the operation.
+	 * @internal
+	 */
+	private static readonly _PARTITION_KEY: string = "partitionId";
+
+	/**
+	 * Default disk space warning threshold: 500 MB.
+	 * @internal
+	 */
+	private static readonly _DEFAULT_DISK_WARNING_THRESHOLD_BYTES: number = 500 * 1024 * 1024;
+
+	/**
+	 * Default disk space error threshold: 100 MB.
+	 * @internal
+	 */
+	private static readonly _DEFAULT_DISK_ERROR_THRESHOLD_BYTES: number = 100 * 1024 * 1024;
+
+	/**
+	 * The name for the schema.
+	 * @internal
+	 */
+	private readonly _entitySchemaName: string;
 
 	/**
 	 * The schema for the entity.
 	 * @internal
 	 */
 	private readonly _entitySchema: IEntitySchema<T>;
+
+	/**
+	 * The keys to use from the context ids to create partitions.
+	 * @internal
+	 */
+	private readonly _partitionContextIds?: string[];
 
 	/**
 	 * The primary key.
@@ -53,33 +105,66 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	private readonly _directory: string;
 
 	/**
+	 * Free bytes below which health reports an error.
+	 * @internal
+	 */
+	private readonly _diskErrorThresholdBytes: number;
+
+	/**
+	 * Free bytes below which health reports a warning.
+	 * @internal
+	 */
+	private readonly _diskWarningThresholdBytes: number;
+
+	/**
+	 * Milliseconds to wait for the directory lock before throwing.
+	 * @internal
+	 */
+	private readonly _mutexTimeoutMs?: number;
+
+	/**
 	 * Create a new instance of FileEntityStorageConnector.
 	 * @param options The options for the connector.
 	 */
 	constructor(options: IFileEntityStorageConnectorConstructorOptions) {
-		Guards.object(this.CLASS_NAME, nameof(options), options);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.entitySchema), options.entitySchema);
-		Guards.object(this.CLASS_NAME, nameof(options.config), options.config);
-		Guards.stringValue(this.CLASS_NAME, nameof(options.config.directory), options.config.directory);
+		Guards.object(FileEntityStorageConnector.CLASS_NAME, nameof(options), options);
+		Guards.stringValue(
+			FileEntityStorageConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
+		);
+		Guards.object(FileEntityStorageConnector.CLASS_NAME, nameof(options.config), options.config);
+		Guards.stringValue(
+			FileEntityStorageConnector.CLASS_NAME,
+			nameof(options.config.directory),
+			options.config.directory
+		);
+		this._entitySchemaName = options.entitySchema;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
+		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 		this._directory = path.resolve(options.config.directory);
+		this._diskErrorThresholdBytes =
+			options.config.diskErrorThresholdBytes ??
+			FileEntityStorageConnector._DEFAULT_DISK_ERROR_THRESHOLD_BYTES;
+		this._diskWarningThresholdBytes =
+			options.config.diskWarningThresholdBytes ??
+			FileEntityStorageConnector._DEFAULT_DISK_WARNING_THRESHOLD_BYTES;
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 	}
 
 	/**
 	 * Bootstrap the connector by creating and initializing any resources it needs.
-	 * @param nodeLoggingConnectorType The node logging connector type, defaults to "node-logging".
+	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the bootstrapping process was successful.
 	 */
-	public async bootstrap(nodeLoggingConnectorType?: string): Promise<boolean> {
-		const nodeLogging = LoggingConnectorFactory.getIfExists(
-			nodeLoggingConnectorType ?? "node-logging"
-		);
+	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		if (!(await this.dirExists(this._directory))) {
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: FileEntityStorageConnector.CLASS_NAME,
 				message: "directoryCreating",
 				data: {
 					directory: this._directory
@@ -91,7 +176,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 
 				await nodeLogging?.log({
 					level: "info",
-					source: this.CLASS_NAME,
+					source: FileEntityStorageConnector.CLASS_NAME,
 					message: "directoryCreated",
 					data: {
 						directory: this._directory
@@ -100,7 +185,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 			} catch (err) {
 				await nodeLogging?.log({
 					level: "error",
-					source: this.CLASS_NAME,
+					source: FileEntityStorageConnector.CLASS_NAME,
 					message: "directoryCreateFailed",
 					data: {
 						directory: this._directory
@@ -112,7 +197,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		} else {
 			await nodeLogging?.log({
 				level: "info",
-				source: this.CLASS_NAME,
+				source: FileEntityStorageConnector.CLASS_NAME,
 				message: "directoryExists",
 				data: {
 					directory: this._directory
@@ -120,6 +205,73 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 			});
 		}
 		return true;
+	}
+
+	/**
+	 * Returns the class name of the component.
+	 * @returns The class name of the component.
+	 */
+	public className(): string {
+		return FileEntityStorageConnector.CLASS_NAME;
+	}
+
+	/**
+	 * Returns the health status of the component.
+	 * @returns The health status of the component, can return multiple entries for elements within the component.
+	 */
+	public async health(): Promise<IHealth[]> {
+		try {
+			const stats = await statfs(this._directory);
+			const freeBytes = stats.bavail * stats.bsize;
+
+			if (freeBytes < this._diskErrorThresholdBytes) {
+				return [
+					{
+						source: FileEntityStorageConnector.CLASS_NAME,
+						status: HealthStatus.Error,
+						description: "healthDescription",
+						message: "diskSpaceError",
+						data: {
+							directory: this._directory,
+							freeBytes,
+							thresholdBytes: this._diskErrorThresholdBytes
+						}
+					}
+				];
+			} else if (freeBytes < this._diskWarningThresholdBytes) {
+				return [
+					{
+						source: FileEntityStorageConnector.CLASS_NAME,
+						status: HealthStatus.Warning,
+						description: "healthDescription",
+						message: "diskSpaceWarning",
+						data: {
+							directory: this._directory,
+							freeBytes,
+							thresholdBytes: this._diskWarningThresholdBytes
+						}
+					}
+				];
+			}
+			return [
+				{
+					source: FileEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Ok,
+					description: "healthDescription",
+					data: { directory: this._directory, freeBytes }
+				}
+			];
+		} catch {
+			return [
+				{
+					source: FileEntityStorageConnector.CLASS_NAME,
+					status: HealthStatus.Error,
+					description: "healthDescription",
+					message: "diskSpaceCheckFailed",
+					data: { directory: this._directory }
+				}
+			];
+		}
 	}
 
 	/**
@@ -142,13 +294,31 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		secondaryIndex?: keyof T,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(FileEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
-		const store = await this.readStore();
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const foundIndex = this.findItem(store, id, secondaryIndex, conditions);
+		const store = await this.readStoreWithLock();
 
-		return foundIndex === -1 ? undefined : store[foundIndex];
+		const finalConditions = conditions ?? [];
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.push({
+				property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
+				value: partitionKey
+			});
+		}
+
+		const index = this.findItem(store, id, secondaryIndex, finalConditions);
+		const item = store[index];
+
+		if (Is.objectValue(item)) {
+			return EntityStorageHelper.unPrepareEntity<T>(item, [
+				FileEntityStorageConnector._PARTITION_KEY
+			]);
+		}
+
+		return undefined;
 	}
 
 	/**
@@ -158,25 +328,197 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	 * @returns The id of the entity.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
-		Guards.object<T>(this.CLASS_NAME, nameof(entity), entity);
+		Guards.object<T>(FileEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 
-		EntitySchemaHelper.validateEntity(entity, this.getSchema());
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const store = await this.readStore();
-
-		const existingIndex = this.findItem(
-			store,
-			entity[this._primaryKey.property] as string,
-			undefined,
-			conditions
+		const prepared = EntityStorageHelper.prepareEntity(
+			entity,
+			this._entitySchema,
+			Is.stringValue(partitionKey)
+				? [{ property: FileEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
+				: undefined,
+			{ nullBehavior: "omit" }
 		);
-		if (existingIndex >= 0) {
-			store[existingIndex] = entity;
-		} else {
-			store.push(entity);
-		}
 
-		await this.writeStore(store);
+		await this.withLock(async () => {
+			const store = await this.readStore();
+
+			const finalConditions = conditions ?? [];
+			if (Is.stringValue(partitionKey)) {
+				finalConditions.push({
+					property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
+					value: partitionKey
+				});
+			}
+
+			const existingIndex = this.findItem(
+				store,
+				prepared[this._primaryKey.property] as string,
+				undefined,
+				finalConditions
+			);
+			if (existingIndex >= 0) {
+				store[existingIndex] = prepared;
+			} else {
+				store.push(prepared);
+			}
+
+			await this.writeStore(store);
+		});
+	}
+
+	/**
+	 * Set multiple entities in a batch.
+	 * @param entities The entities to set.
+	 * @returns Nothing.
+	 */
+	public async setBatch(entities: T[]): Promise<void> {
+		Guards.arrayValue(FileEntityStorageConnector.CLASS_NAME, nameof(entities), entities);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		await this.withLock(async () => {
+			const store = await this.readStore();
+
+			for (const entity of entities) {
+				Guards.object<T>(FileEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
+
+				const prepared = EntityStorageHelper.prepareEntity(
+					entity,
+					this._entitySchema,
+					Is.stringValue(partitionKey)
+						? [{ property: FileEntityStorageConnector._PARTITION_KEY, value: partitionKey }]
+						: undefined,
+					{ nullBehavior: "omit" }
+				);
+
+				const existingIndex = this.findItem(
+					store,
+					prepared[this._primaryKey.property] as string,
+					undefined,
+					Is.stringValue(partitionKey)
+						? [
+								{
+									property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
+									value: partitionKey
+								}
+							]
+						: []
+				);
+				if (existingIndex >= 0) {
+					store[existingIndex] = prepared;
+				} else {
+					store.push(prepared);
+				}
+			}
+
+			await this.writeStore(store);
+		});
+	}
+
+	/**
+	 * Remove all entities from the storage.
+	 * @returns Nothing.
+	 */
+	public async empty(): Promise<void> {
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			await this.withLock(async () => {
+				const store = await this.readStore();
+				const remaining = Is.stringValue(partitionKey)
+					? store.filter(
+							item =>
+								ObjectHelper.propertyGet(
+									item as object,
+									FileEntityStorageConnector._PARTITION_KEY
+								) !== partitionKey
+						)
+					: [];
+				await this.writeStore(remaining);
+			});
+		} catch (err) {
+			throw new GeneralError(FileEntityStorageConnector.CLASS_NAME, "emptyFailed", undefined, err);
+		}
+	}
+
+	/**
+	 * Remove multiple entities by id.
+	 * @param ids The ids of the entities to remove.
+	 * @returns Nothing.
+	 */
+	public async removeBatch(ids: string[]): Promise<void> {
+		Guards.arrayValue(FileEntityStorageConnector.CLASS_NAME, nameof(ids), ids);
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		try {
+			await this.withLock(async () => {
+				const store = await this.readStore();
+				const idSet = new Set(ids);
+				const remaining = store.filter(item => {
+					if (
+						Is.stringValue(partitionKey) &&
+						ObjectHelper.propertyGet(item, FileEntityStorageConnector._PARTITION_KEY) !==
+							partitionKey
+					) {
+						return true;
+					}
+					return !idSet.has(item[this._primaryKey.property] as string);
+				});
+				await this.writeStore(remaining);
+			});
+		} catch (err) {
+			throw new GeneralError(
+				FileEntityStorageConnector.CLASS_NAME,
+				"removeBatchFailed",
+				undefined,
+				err
+			);
+		}
+	}
+
+	/**
+	 * Teardown the storage by deleting the underlying store file.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns True if the teardown process was successful.
+	 */
+	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: FileEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "storeTearingDown"
+		});
+
+		try {
+			await rm(this._directory, { recursive: true, force: true });
+
+			await nodeLogging?.log({
+				level: "info",
+				source: FileEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "storeTornDown"
+			});
+
+			return true;
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: FileEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "teardownFailed",
+				error: BaseError.fromError(err)
+			});
+			return false;
+		}
 	}
 
 	/**
@@ -189,16 +531,29 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		id: string,
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
-		Guards.stringValue(this.CLASS_NAME, nameof(id), id);
+		Guards.stringValue(FileEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
-		const store = await this.readStore();
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const index = this.findItem(store, id, undefined, conditions);
+		await this.withLock(async () => {
+			const store = await this.readStore();
 
-		if (index >= 0) {
-			store.splice(index, 1);
-			await this.writeStore(store);
-		}
+			const finalConditions = conditions ?? [];
+			if (Is.stringValue(partitionKey)) {
+				finalConditions.push({
+					property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
+					value: partitionKey
+				});
+			}
+
+			const index = this.findItem(store, id, undefined, finalConditions);
+
+			if (index >= 0) {
+				store.splice(index, 1);
+				await this.writeStore(store);
+			}
+		});
 	}
 
 	/**
@@ -206,8 +561,8 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
 	 * @param properties The optional properties to return, defaults to all.
-	 * @param cursor The cursor to request the next page of entities.
-	 * @param pageSize The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
+	 * @param cursor The cursor to request the next chunk of entities.
+	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
 	 */
@@ -219,7 +574,7 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		}[],
 		properties?: (keyof T)[],
 		cursor?: string,
-		pageSize?: number
+		limit?: number
 	): Promise<{
 		/**
 		 * The entities, which can be partial if a limited keys list was provided.
@@ -230,10 +585,43 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 		 */
 		cursor?: string;
 	}> {
-		let allEntities = await this.readStore();
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
+		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+
+		if (!Is.empty(limit)) {
+			const validationFailures: IValidationFailure[] = [];
+			Validation.integer(nameof(limit), limit, validationFailures, undefined, { minValue: 1 });
+			Validation.asValidationError(
+				FileEntityStorageConnector.CLASS_NAME,
+				"query",
+				validationFailures
+			);
+		}
+
+		let allEntities = await this.readStoreWithLock();
+
+		const finalConditions: EntityCondition<T> = {
+			conditions: [],
+			logicalOperator: LogicalOperator.And
+		};
+
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.conditions.push({
+				property: FileEntityStorageConnector._PARTITION_KEY,
+				comparison: ComparisonOperator.Equals,
+				value: partitionKey
+			});
+		}
+
+		if (!Is.empty(conditions)) {
+			finalConditions.conditions.push(EntityStorageHelper.normalizeConditionValues(conditions));
+		}
 
 		const entities = [];
-		const finalPageSize = pageSize ?? FileEntityStorageConnector._DEFAULT_PAGE_SIZE;
+		const finalLimit = limit ?? FileEntityStorageConnector._DEFAULT_LIMIT;
 		let nextCursor: string | undefined;
 
 		if (allEntities.length > 0) {
@@ -246,9 +634,19 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 			const startIndex = Coerce.number(cursor) ?? 0;
 
 			for (let i = startIndex; i < allEntities.length; i++) {
-				if (EntityConditions.check(allEntities[i], conditions) && entities.length < finalPageSize) {
-					entities.push(ObjectHelper.pick(allEntities[i], properties));
-					if (entities.length >= finalPageSize) {
+				if (
+					EntityConditions.check(allEntities[i], finalConditions) &&
+					entities.length < finalLimit
+				) {
+					const entity = Is.arrayValue(properties)
+						? ObjectHelper.pick(allEntities[i], properties)
+						: allEntities[i];
+					entities.push(
+						EntityStorageHelper.unPrepareEntity<T>(entity, [
+							FileEntityStorageConnector._PARTITION_KEY
+						])
+					);
+					if (entities.length >= finalLimit) {
 						if (i < allEntities.length - 1) {
 							nextCursor = (i + 1).toString();
 						}
@@ -265,22 +663,190 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	}
 
 	/**
-	 * Read the store from file.
+	 * Count all the entities which match the conditions.
+	 * @param conditions The optional conditions to match for the entities.
+	 * @returns The total count of entities in the storage.
+	 */
+	public async count(conditions?: EntityCondition<T>): Promise<number> {
+		const store = await this.readStoreWithLock();
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const finalConditions: EntityCondition<T> = {
+			conditions: [],
+			logicalOperator: LogicalOperator.And
+		};
+
+		if (Is.stringValue(partitionKey)) {
+			finalConditions.conditions.push({
+				property: FileEntityStorageConnector._PARTITION_KEY,
+				comparison: ComparisonOperator.Equals,
+				value: partitionKey
+			});
+		}
+
+		if (!Is.empty(conditions)) {
+			finalConditions.conditions.push(EntityStorageHelper.normalizeConditionValues(conditions));
+		}
+
+		if (finalConditions.conditions.length === 0) {
+			return store.length;
+		}
+
+		return store.filter(item => EntityConditions.check(item, finalConditions)).length;
+	}
+
+	/**
+	 * Get a unique list of all the context ids from the storage.
+	 * @returns The list of unique context ids.
+	 */
+	public async getPartitionContextIds(): Promise<IContextIds[]> {
+		const contextIds: { [id: string]: IContextIds } = {};
+
+		const store = await this.readStoreWithLock();
+
+		for (const entity of store) {
+			const partitionId = ObjectHelper.propertyGet(
+				entity,
+				FileEntityStorageConnector._PARTITION_KEY
+			);
+			if (Is.stringValue(partitionId)) {
+				contextIds[partitionId] = ContextIdHelper.shortSplit(
+					this._partitionContextIds ?? [],
+					partitionId
+				);
+			}
+		}
+
+		return Object.values(contextIds);
+	}
+
+	/**
+	 * Create the target connector for performing the migration it will use a temporary storage location.
+	 * @param newEntitySchema The name of the new entity schema to create the connector for.
+	 * @returns Connector for performing the migration.
+	 */
+	public async createTargetConnector<U>(
+		newEntitySchema: string
+	): Promise<IEntityStorageConnector<U>> {
+		const baseName = path.basename(this._directory);
+		const parentDir = path.resolve(this._directory, "..");
+		const migrationDir = path.join(parentDir, `${baseName}_migration_${Date.now()}`);
+
+		return new FileEntityStorageConnector<U>({
+			entitySchema: newEntitySchema,
+			partitionContextIds: this._partitionContextIds,
+			config: {
+				directory: migrationDir,
+				diskErrorThresholdBytes: this._diskErrorThresholdBytes,
+				diskWarningThresholdBytes: this._diskWarningThresholdBytes
+			}
+		});
+	}
+
+	/**
+	 * Finalize the migration by tearing down the old connector and replacing it with the target connector.
+	 * @param targetConnector The target connector to finalize the migration with.
+	 * @param options The options to control how the migration is finalized.
+	 * @param loggingComponentType The optional component type to use for logging the migration progress.
+	 * @returns A promise that resolves when the migration is finalized.
+	 */
+	public async finalizeMigration<U>(
+		targetConnector: FileEntityStorageConnector<U>,
+		options?: IMigrationOptions,
+		loggingComponentType?: string
+	): Promise<IEntityStorageConnector<U>> {
+		const originalDir = this._directory;
+		const migrationDir = targetConnector._directory;
+
+		// Teardown the original connector, removing the entire source directory.
+		await this.teardown(loggingComponentType);
+
+		// Rename the migration directory into the original location.
+		await rename(migrationDir, originalDir);
+
+		return new FileEntityStorageConnector<U>({
+			entitySchema: targetConnector._entitySchemaName,
+			partitionContextIds: targetConnector._partitionContextIds,
+			config: {
+				directory: this._directory,
+				diskErrorThresholdBytes: targetConnector._diskErrorThresholdBytes,
+				diskWarningThresholdBytes: targetConnector._diskWarningThresholdBytes
+			}
+		});
+	}
+
+	/**
+	 * Cleanup the migration if a migration fails or needs to be aborted.
+	 * @param targetConnector The target connector to cleanup the migration with.
+	 * @param options The options to control how the migration is cleaned up.
+	 * @param loggingComponentType The optional component type to use for logging the migration progress.
+	 * @returns A promise that resolves when the migration is cleaned up.
+	 */
+	public async cleanupMigration<U>(
+		targetConnector: IEntityStorageConnector<U> | undefined,
+		options?: IMigrationOptions,
+		loggingComponentType?: string
+	): Promise<void> {
+		await targetConnector?.teardown?.(loggingComponentType);
+	}
+
+	/**
+	 * Read the store from file while holding the directory mutex.
+	 * Use this for standalone reads (get, query, count, getPartitionContextIds) where
+	 * no outer lock is held. Do not call from inside a withLock callback —
+	 * use readStore instead to avoid a re-entrant deadlock.
+	 * @returns The store.
+	 * @internal
+	 */
+	private async readStoreWithLock(): Promise<T[]> {
+		return this.withLock(async () => this.readStore());
+	}
+
+	/**
+	 * Read the store from file without acquiring the directory mutex.
+	 * Must only be called from inside a withLock callback, where the mutex
+	 * is already held. Performing the read under the held lock prevents a race with
+	 * the atomic rename(tmp→store.json) window on Windows that would otherwise
+	 * return ENOENT and be misinterpreted as an empty store.
 	 * @returns The store.
 	 * @internal
 	 */
 	private async readStore(): Promise<T[]> {
+		const filename = path.join(this._directory, "store.json");
+
+		let store;
 		try {
-			const filename = path.join(this._directory, "store.json");
-			const store = await readFile(filename, "utf8");
+			store = await readFile(filename, "utf8");
+		} catch (err) {
+			if (ObjectHelper.propertyGet(err, "code") === "ENOENT") {
+				// The store has not been written yet, which is valid for a new store.
+				return [];
+			}
+			throw new GeneralError(
+				FileEntityStorageConnector.CLASS_NAME,
+				"readStoreFailed",
+				{ directory: this._directory },
+				err
+			);
+		}
+
+		try {
 			return JSON.parse(store) as T[];
-		} catch {
-			return [];
+		} catch (err) {
+			throw new GeneralError(
+				FileEntityStorageConnector.CLASS_NAME,
+				"readStoreCorrupt",
+				{ directory: this._directory },
+				err
+			);
 		}
 	}
 
 	/**
-	 * Write the store to the file.
+	 * Write the store to the file, atomically replacing the previous version so
+	 * a reader can never observe a partially written store.
 	 * @param store The store to write.
 	 * @returns Nothing.
 	 * @internal
@@ -288,8 +854,38 @@ export class FileEntityStorageConnector<T = unknown> implements IEntityStorageCo
 	private async writeStore(store: T[]): Promise<void> {
 		try {
 			const filename = path.join(this._directory, "store.json");
-			await writeFile(filename, JSON.stringify(store, undefined, "\t"), "utf8");
-		} catch {}
+			const tempFilename = `${filename}.tmp`;
+			await writeFile(tempFilename, JSON.stringify(store, undefined, "\t"), "utf8");
+			await rename(tempFilename, filename);
+		} catch (err) {
+			throw new GeneralError(
+				FileEntityStorageConnector.CLASS_NAME,
+				"writeStoreFailed",
+				{ directory: this._directory },
+				err
+			);
+		}
+	}
+
+	/**
+	 * Serialize an update so that concurrent modifications cannot interleave
+	 * their read-modify-write cycles, which would lose updates or tear the
+	 * store file. The mutex is keyed on the storage directory, so every
+	 * connector or worker using the same store serializes with the others.
+	 * @param update The update operation to perform.
+	 * @returns The result of the update.
+	 * @internal
+	 */
+	private async withLock<U>(update: () => Promise<U>): Promise<U> {
+		await Mutex.lock(this._directory, {
+			throwOnTimeout: true,
+			timeoutMs: this._mutexTimeoutMs
+		});
+		try {
+			return await update();
+		} finally {
+			Mutex.unlock(this._directory);
+		}
 	}
 
 	/**

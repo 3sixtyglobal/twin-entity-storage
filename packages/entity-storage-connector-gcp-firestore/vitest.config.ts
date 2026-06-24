@@ -1,4 +1,4 @@
-// Copyright 2024 IOTA Stiftung.
+// Copyright 2025 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { NameOfPlugin } from "@twin.org/nameof-vitest-plugin";
 import { defineConfig } from "vitest/config";
@@ -11,6 +11,8 @@ export default defineConfig({
 		testTimeout: 300000,
 		hookTimeout: 300000,
 		bail: 1,
+		reporters: ["verbose"],
+		disableConsoleIntercept: true,
 		coverage: {
 			reporter: ["text", "lcov"],
 			include: ["src/**/*.ts"],

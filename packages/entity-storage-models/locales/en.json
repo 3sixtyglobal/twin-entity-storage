@@ -1,3 +1,20 @@
 {
-	"error": {}
+	"error": {
+		"entityStorageHelper": {
+			"sortNotIndexed": "The property \"{property}\" is not indexed and cannot be used for sorting",
+			"propertyNotInSchema": "The property \"{property}\" does not exist in the schema and cannot be used for projection"
+		},
+		"migrationHelper": {
+			"migrateSchemaFailed": "Migration failed for schema \"{schemaName}\".",
+			"transformRequiredForProperty": "A transformation function is required to migrate property \"{from}\" to \"{to}\" of type \"{type}\"",
+			"coercionProducedUndefined": "Coercion of property \"{property}\" to type \"{type}\" produced undefined but the property is not optional"
+		}
+	},
+	"info": {
+		"migrationHelper": {
+			"migrateSchemaStarting": "Migrating schema \"{schemaName}\"",
+			"migrateSchemaFinalizing": "Finalizing migration of schema \"{schemaName}\"",
+			"migrateSchemaComplete": "Migration of schema \"{schemaName}\" complete"
+		}
+	}
 }

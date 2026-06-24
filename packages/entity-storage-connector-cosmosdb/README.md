@@ -1,6 +1,6 @@
-# TWIN Entity Storage Connector Cosmos DB
+# Entity Storage Connector Cosmos DB
 
-Entity Storage connector implementation using Cosmos DB storage.
+This package provides an Azure Cosmos DB backend for globally distributed persistence across regions. It is designed to work with the wider storage ecosystem so applications can keep behaviour consistent across connectors and environments.
 
 ## Installation
 
@@ -8,24 +8,13 @@ Entity Storage connector implementation using Cosmos DB storage.
 npm install @twin.org/entity-storage-connector-cosmosdb
 ```
 
-## Testing
+## Docker
 
-The tests developed are functional tests and need an instance of CosmosDB up and running. To run CosmosDB locally there are two possibilities:
+To perform testing of this component it may be necessary to launch a local instance to communicate with.
 
-To run a Docker image of Azure CosmosDB:
-
-```sh
-docker run -d --platform=linux/amd64 -p 8081:8081 -p 10250:10250 -p 10251:10251 -p 10252:10252 -p 10253:10253 -p 10254:10254 -m 3g --name twin-entity-storage-cosmos -e AZURE_COSMOS_EMULATOR_PARTITION_COUNT=10 -e AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE=true -e AZURE_COSMOS_EMULATOR_IP_ADDRESS_OVERRIDE='127.0.0.1' mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator
-```
-
-Or
-
-To install and run the Azure CosmosDB Emulator [Azure CosmosDB Emulator](https://learn.microsoft.com/en-us/azure/cosmos-db/how-to-develop-emulator)
-
-Afterwards you can run the tests as follows:
-
-```sh
-npm run test
+```shell
+docker pull mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
+docker run -p 18081:8081 --detach --name twin-entity-storage-cosmos mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
 ```
 
 ## Examples

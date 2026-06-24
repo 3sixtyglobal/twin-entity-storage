@@ -1,6 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import type { IDynamoDbEntityStorageConnectorConfig } from "./IDynamoDbEntityStorageConnectorConfig";
+import type { IDynamoDbEntityStorageConnectorConfig } from "./IDynamoDbEntityStorageConnectorConfig.js";
 
 /**
  * Options for the Dynamo DB Entity Storage Connector constructor.
@@ -12,9 +12,14 @@ export interface IDynamoDbEntityStorageConnectorConstructorOptions {
 	entitySchema: string;
 
 	/**
-	 * The type of logging connector to use, defaults to no logging.
+	 * The keys to use from the context ids to create partitions.
 	 */
-	loggingConnectorType?: string;
+	partitionContextIds?: string[];
+
+	/**
+	 * The type of logging component to use, defaults to no logging.
+	 */
+	loggingComponentType?: string;
 
 	/**
 	 * The configuration for the connector.

@@ -1,10 +1,10 @@
 {
 	"name": "@twin.org/entity-storage",
 	"version": "0.0.0",
-	"description": "Entity Storage",
+	"description": "Unified packages for modelling, serving and connecting entity storage across multiple backends.",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/twinfoundation/entity-storage.git"
+		"url": "git+https://github.com/iotaledger/twin-entity-storage.git"
 	},
 	"author": "martyn.janes@iota.org",
 	"license": "Apache-2.0",
@@ -13,38 +13,45 @@
 		"node": ">=20.0.0"
 	},
 	"scripts": {
+		"build": "node ./scripts/workspaces.mjs build",
 		"dist": "node ./scripts/workspaces.mjs dist",
-		"format": "prettier --config .prettierrc --write .",
-		"lint:format": "prettier --config .prettierrc --check .",
-		"lint:code": "eslint . --ext .js,.mjs,.ts",
+		"dist:no-test": "node ./scripts/workspaces.mjs dist:no-test",
+		"test": "node ./scripts/workspaces.mjs test",
+		"format": "prettier --config prettier.config.mjs --write .",
+		"lint:format": "prettier --config prettier.config.mjs --check .",
+		"lint:code": "eslint . --cache --cache-location .eslintcache",
 		"lint:markdown": "markdownlint **/*.md --ignore **/node_modules/** --ignore **/docs/reference/**  --ignore **/changelog.md",
 		"lint:spell": "cspell ** --no-progress",
 		"lint": "npm run lint:format && npm run lint:code && npm run lint:markdown && npm run lint:spell",
+		"docs": "node ./scripts/workspaces.mjs docs",
 		"local-link": "node ./scripts/local-link.mjs",
 		"commitlint": "commitlint --edit",
 		"generate-release-configs": "node scripts/generate-release-configs.mjs release",
 		"prepare": "husky"
 	},
 	"devDependencies": {
-		"@commitlint/cli": "19.8.1",
-		"@commitlint/config-conventional": "19.8.1",
-		"@typescript-eslint/eslint-plugin": "7.13.1",
-		"cspell": "9.0.2",
-		"eslint": "8.57.0",
-		"eslint-config-prettier": "10.1.5",
-		"eslint-plugin-header": "3.1.1",
-		"eslint-plugin-import": "2.31.0",
-		"eslint-plugin-jsdoc": "50.8.0",
-		"eslint-plugin-prettier": "5.4.1",
-		"eslint-plugin-promise": "7.2.1",
-		"eslint-plugin-simple-import-sort": "12.1.1",
-		"eslint-plugin-unicorn": "56.0.1",
-		"eslint-plugin-unused-imports": "3.2.0",
-		"fast-glob": "3.3.3",
+		"@commitlint/cli": "21.0.2",
+		"@commitlint/config-conventional": "21.0.2",
+		"@eslint/eslintrc": "3.3.5",
+		"@eslint/js": "10.0.1",
+		"@stylistic/eslint-plugin": "5.10.0",
+		"@typescript-eslint/eslint-plugin": "8.61.1",
+		"cspell": "10.0.1",
+		"eslint": "10.5.0",
+		"eslint-config-prettier": "10.1.8",
+		"@tony.ganchev/eslint-plugin-header": "3.4.4",
+		"eslint-plugin-import-x": "4.16.2",
+		"eslint-plugin-jsdoc": "63.0.7",
+		"eslint-plugin-prettier": "5.5.6",
+		"eslint-plugin-promise": "7.3.0",
+		"eslint-plugin-simple-import-sort": "13.0.0",
+		"eslint-plugin-unicorn": "68.0.0",
+		"eslint-plugin-unused-imports": "4.4.1",
+		"globals": "17.6.0",
 		"husky": "9.1.7",
-		"markdownlint-cli": "0.45.0",
-		"prettier": "3.5.3",
-		"release-please": "17.1.0"
+		"markdownlint-cli": "0.49.0",
+		"prettier": "3.8.4",
+		"release-please": "17.9.0"
 	},
 	"workspaces": [
 		"packages/entity-storage-models",
@@ -53,12 +60,16 @@
 		"packages/entity-storage-rest-client",
 		"packages/entity-storage-connector-file",
 		"packages/entity-storage-connector-scylladb",
-		"packages/entity-storage-connector-dynamodb",
 		"packages/entity-storage-connector-gcp-firestore",
 		"packages/entity-storage-connector-mysql",
 		"packages/entity-storage-connector-mongodb",
 		"packages/entity-storage-connector-postgresql",
-		"packages/entity-storage-connector-cosmosdb"
+		"packages/entity-storage-connector-cosmosdb",
+		"packages/entity-storage-connector-dynamodb"
 	],
-	"type": "module"
+	"type": "module",
+	"bugs": {
+		"url": "git+https://github.com/iotaledger/twin-entity-storage/issues"
+	},
+	"homepage": "https://twindev.org"
 }

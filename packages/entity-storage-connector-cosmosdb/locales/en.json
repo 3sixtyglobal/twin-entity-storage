@@ -1,9 +1,12 @@
 {
 	"info": {
 		"cosmosDbEntityStorageConnector": {
-			"databaseCreating": "Database \"{databaseName}\" creating",
-			"databaseExists": "Database \"{databaseName}\" created or it already exists",
-			"containerExists": "Container \"{containerName}\" created or it already exists"
+			"databaseCreating": "Database \"{databaseId}\" creating",
+			"databaseExists": "Database \"{databaseId}\" created or it already exists",
+			"containerCreating": "Container \"{containerId}\" creating",
+			"containerExists": "Container \"{containerId}\" created or it already exists",
+			"containerDeleting": "Deleting container \"{containerId}\"",
+			"containerDeleted": "Container \"{containerId}\" deleted"
 		}
 	},
 	"error": {
@@ -15,9 +18,22 @@
 			"comparisonNotSupported": "Comparison operator \"{comparison}\" is not supported",
 			"conditionalNotSupported": "Conditional operator \"{operator}\" is not supported",
 			"sortSingle": "You can only sort by a single property",
-			"sortNotIndexed": "The property \"{property}\" is not indexed and cannot be used for sorting",
-			"containerNotExisting": "The expected container definition is undefined",
-			"containerNotCreated": "The container couldn't be created"
+			"containerCreateFailed": "The container couldn't be created \"{containerId}\"",
+			"databaseCreateFailed": "Unable to create database \"{databaseId}\"",
+			"containerDoesNotExist": "Container \"{containerId}\" does not exist",
+			"getPartitionContextIdsFailed": "Unable to get partition context ids",
+			"setBatchFailed": "Unable to set batch of entities",
+			"countFailed": "Unable to count entities",
+			"emptyFailed": "Unable to empty entity storage",
+			"removeBatchFailed": "Unable to remove batch of entities",
+			"teardownFailed": "Unable to teardown entity storage",
+			"finalizeMigrationFailedBootstrap": "Finalizing migration failed during bootstrap phase"
+		}
+	},
+	"health": {
+		"cosmosDbEntityStorageConnector": {
+			"healthDescription": "Checks if the Cosmos DB container \"{containerId}\" in database \"{databaseId}\" is available",
+			"connectionFailed": "Failed to connect to Cosmos DB container \"{containerId}\" in database \"{databaseId}\""
 		}
 	}
 }
