@@ -356,15 +356,11 @@ async function processDependencies(
 				}
 				dependencies[name] = `^${versionCache[name] ?? prodVersion}`;
 			} else if (!isProduction) {
-				// NEXT MODE: Convert fixed versions back to "next" references
-				// For development, use either the cached version which will be a local package
-				// or "next" to get latest prerelease
-				if (version.startsWith('^')) {
-					dependencies[name] = versionCache[name] ?? 'next';
-				} else {
-					await getPackageVersion(name, 'next', versionCache);
-					dependencies[name] = versionCache[name];
-				}
+				// NEXT MODE: Use the cached version for local workspace packages
+				// (already processed in this run), or "next" for all external deps.
+				// Do NOT fetch from npm -- external deps must stay as "next", not a
+				// resolved specific version like "0.9.0-next.1".
+				dependencies[name] = versionCache[name] ?? 'next';
 			}
 		}
 	}
