@@ -847,3 +847,6 @@ jobs:
           closed_error_message: Next alignment PR #__PR_NUMBER__ (__PR_URL__) was closed without merging. Next branch realignment incomplete.
           closed_follow_up: Re-run the Realign Next Branch job or manually merge the next alignment PR.
           github_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+
+      - name: Workflow complete
+        run: echo "::notice title=Workflow Complete::Production release finished. Packages published to npm, GitHub releases created, and next branch realigned."
