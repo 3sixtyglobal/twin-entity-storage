@@ -427,16 +427,16 @@ jobs:
       - name: Announce release PR
         if: ${{ steps.release-prepare.outputs.pr_url != '' }}
         run: |
-          echo "::notice title=Gate 2 – Release PR::Review and merge to publish: ${{ steps.release-prepare.outputs.pr_url }}"
+          echo "::notice title=Gate 3 – Release PR::Review and merge to publish: ${{ steps.release-prepare.outputs.pr_url }}"
 
   # ──────────────────────────────────────────────────────────────────────────
-  # GATE 2 – WAIT FOR RELEASE PR
+  # GATE 3 – WAIT FOR RELEASE PR
   # Polls until the release PR (labelled autorelease: pending) is merged.
   # Once merged, the Release workflow's publish phase fires automatically
   # and the next branch is realigned after publishing completes.
   # ──────────────────────────────────────────────────────────────────────────
   gate-release-pr:
-    name: 'Gate 2 · Merge release PR'
+    name: 'Gate 3 · Merge release PR'
     needs: prepare-release
     if: |
       always() &&
@@ -468,7 +468,7 @@ jobs:
             Release PR #__PR_NUMBER__ merged.
             The Release workflow is now publishing packages to npm and creating GitHub releases.
             The next branch will be realigned automatically after publishing completes.
-          closed_error_title: Gate 2 Failed
+          closed_error_title: Gate 3 Failed
           closed_error_message: Release PR #__PR_NUMBER__ (__PR_URL__) was closed without merging. Publishing aborted.
           closed_follow_up: "To recover: remove the 'autorelease: pending' label from the PR, then re-run this workflow."
           github_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
@@ -814,13 +814,13 @@ jobs:
           GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
 
   # ──────────────────────────────────────────────────────────────────────────
-  # GATE 3 – WAIT FOR NEXT ALIGNMENT PR
+  # GATE 2 – WAIT FOR NEXT ALIGNMENT PR
   # Polls until the realignment PR for the next branch is merged. The PR is
   # pre-approved and auto-merge is enabled, so it merges as soon as all
   # required status checks pass. Skipped when versions-prepare was a no-op.
   # ──────────────────────────────────────────────────────────────────────────
   gate-realign-next:
-    name: 'Gate 3 · Merge next alignment PR'
+    name: 'Gate 2 · Merge next alignment PR'
     needs: realign-next
     if: ${{ needs.realign-next.outputs.has_changes == 'true' }}
     runs-on:
@@ -843,7 +843,7 @@ jobs:
           pr_url: ${{ needs.realign-next.outputs.pr_url }}
           waiting_message: Waiting for next alignment PR #__PR_NUMBER__ to merge (auto-merge enabled)...
           success_message: Next alignment PR #__PR_NUMBER__ merged. Next branch is realigned to the released version.
-          closed_error_title: Gate 3 Failed
+          closed_error_title: Gate 2 Failed
           closed_error_message: Next alignment PR #__PR_NUMBER__ (__PR_URL__) was closed without merging. Next branch realignment incomplete.
           closed_follow_up: Re-run the Realign Next Branch job or manually merge the next alignment PR.
           github_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
