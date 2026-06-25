@@ -1525,6 +1525,26 @@ describe("MongoDbEntityStorageConnector", () => {
 		}
 	);
 
+	test.skipIf(!SUPPORT_DOT_NOTATION)(
+		"can query with Equals empty string on nested object subproperty returns no entries",
+		async () => {
+			const connector = await createConnector<NestedSearchType>(nameof<NestedSearchType>());
+			await connector.set({ id: "1", consignor: { name: "Alice" } });
+			await connector.set({ id: "2", consignor: { name: "Bob" } });
+			await connector.set({ id: "3", consignor: { name: "Charlie" } });
+			const result = await connector.query({
+				conditions: [
+					{
+						property: "consignor.name",
+						value: "",
+						comparison: ComparisonOperator.Equals
+					}
+				]
+			});
+			expect(result.entities.length).toEqual(0);
+		}
+	);
+
 	test("can query sub items in array", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());
 		for (let i = 0; i < 5; i++) {
