@@ -10,12 +10,19 @@ name: Release Production
 # review boundary until the generated pull request is approved and merged.
 #
 # Flow:
-#   Phase 1 – Run the versions-prepare composite action for main and create the alignment PR.
-#   Gate  1 – Poll until the main alignment PR is approved and merged.
-#   Phase 2 – Run the release-prepare composite action for main and wait for the release PR.
-#   Gate  2 – Poll until the release PR is approved and merged.
-#             Publishing and next-branch realignment proceed automatically via
-#             the Release workflow once the release PR is merged.
+#   Phase – Merge next into main (optional):
+#     Creates a signed merge branch and opens a PR from next into main.
+#   Gate  – Merge next into main PR (optional):
+#     Polls until the PR is approved and merged.
+#   Phase – Prepare and build main branch:
+#     Runs versions-prepare on main and opens the alignment PR.
+#   Gate  – Merge main alignment PR:
+#     Polls until the alignment PR is approved and merged.
+#   Phase – Prepare release PR:
+#     Runs release-prepare on main and opens the production release PR.
+#   Gate  – Merge release PR:
+#     Polls until the release PR is merged. Publishing and next-branch
+#     realignment then proceed automatically.
 #
 # Event-driven note: The gate jobs poll the GitHub API every 60 seconds for up
 # to 6 hours each. For repositories where holding a runner for that duration is
@@ -52,17 +59,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ──────────────────────────────────────────────────────────────────────────
-  # GUARD – VALIDATE CUSTOM VERSION
   # When customVersion is provided, validates it against the current production
   # and prerelease manifests before any PRs are created. Checks:
   #   • X.Y.Z format with each component ≤ 999
   #   • Strictly greater than the current published production version
   #   • At least equal to the current development (prerelease) version stripped
   #   • Major version does not jump by more than 1 from current prod
-  # ──────────────────────────────────────────────────────────────────────────
   validate-custom-version:
-    name: 'Guard · Validate custom version'
+    name: 'Guard: Validate custom version'
     if: github.event_name == 'workflow_dispatch' && inputs.customVersion != ''
     runs-on:
       labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
@@ -85,8 +89,6 @@ jobs:
       - name: Validate custom version against current manifests
         run: node scripts/validate-custom-version.mjs prod "${{ inputs.customVersion }}"
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # PHASE 0 – MERGE NEXT INTO MAIN
   # Creates a branch from main and applies the exact diff of main → next as a
   # single signed commit. Using diff|apply rather than a merge algorithm
   # guarantees next's full content is present (no merge conflicts, no missing
@@ -94,9 +96,8 @@ jobs:
   # fail a "Commits must have verified signatures" push ruleset). A human merges
   # the PR; GitHub creates and signs the merge commit on main. Skipped when the
   # branches are already in sync.
-  # ──────────────────────────────────────────────────────────────────────────
   merge-next-to-main:
-    name: 'Phase 0 · Merge next into main'
+    name: 'Phase: Merge next into main'
     needs: [validate-custom-version]
     if: |
       github.event_name == 'workflow_dispatch' &&
@@ -178,7 +179,7 @@ jobs:
           PR_NUMBER=$(echo "$PR_URL" | grep -o '[0-9]\+$')
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
-          echo "::notice title=Gate 0 – Next to Main PR::Approve and merge to continue the production release: $PR_URL"
+          echo "::notice title=Gate – Next to Main PR::Approve and merge to continue the production release: $PR_URL"
           echo "Created PR #$PR_NUMBER: $PR_URL"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -199,12 +200,9 @@ jobs:
             gpg --batch --yes --delete-keys "$FINGERPRINT" || true
           fi
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # GATE 0 – WAIT FOR NEXT → MAIN PR
   # Polls until the PR is merged. Skipped when branches are already in sync.
-  # ──────────────────────────────────────────────────────────────────────────
   gate-next-to-main:
-    name: 'Gate 0 · Merge next into main PR'
+    name: 'Gate: Merge next into main PR'
     needs: merge-next-to-main
     if: |
       always() &&
@@ -231,17 +229,13 @@ jobs:
           pr_url: ${{ needs.merge-next-to-main.outputs.pr_url }}
           waiting_message: Waiting for PR #__PR_NUMBER__ to be merged...
           success_message: PR #__PR_NUMBER__ merged. Advancing to version preparation.
-          closed_error_title: Gate 0 Failed
+          closed_error_title: Gate Failed
           closed_error_message: PR #__PR_NUMBER__ (__PR_URL__) was closed without merging. Production release aborted.
           github_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # PHASE 1 – PREPARE MAIN
-  # Runs the Versions Prepare steps inline on main and creates the alignment
-  # PR.
-  # ──────────────────────────────────────────────────────────────────────────
+  # Runs the Versions Prepare steps inline on main and creates the alignment PR.
   prepare-main:
-    name: 'Phase 1 · Prepare and build main branch'
+    name: 'Phase: Prepare and build main branch'
     needs: [merge-next-to-main, gate-next-to-main]
     if: |
       github.event_name == 'workflow_dispatch' &&
@@ -309,7 +303,7 @@ jobs:
       - name: Announce main alignment PR
         if: ${{ steps.versions-prepare.outputs.has_changes == 'true' && steps.versions-prepare.outputs.pr_url != '' }}
         run: |
-          echo "::notice title=Gate 1 – Main Alignment PR::Approve and merge to continue the production release: ${{ steps.versions-prepare.outputs.pr_url }}"
+          echo "::notice title=Gate – Main Alignment PR::Approve and merge to continue the production release: ${{ steps.versions-prepare.outputs.pr_url }}"
 
       # Our self-hosted runner clears the workspace after local composite
       # actions, so restore the workflow ref before the job completes.
@@ -317,13 +311,10 @@ jobs:
         if: ${{ always() }}
         uses: actions/checkout@v6
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # GATE 1 – WAIT FOR MAIN ALIGNMENT PR
   # Polls until the PR is merged. Fails hard if the PR is closed without merge
   # so the release does not proceed on a misaligned main branch.
-  # ──────────────────────────────────────────────────────────────────────────
   gate-main-alignment:
-    name: 'Gate 1 · Merge main alignment PR'
+    name: 'Gate: Merge main alignment PR'
     needs: prepare-main
     if: |
       always() &&
@@ -350,19 +341,16 @@ jobs:
           pr_url: ${{ needs.prepare-main.outputs.pr_url }}
           waiting_message: Waiting for PR #__PR_NUMBER__ to be approved and merged...
           success_message: PR #__PR_NUMBER__ merged. Advancing to release preparation.
-          closed_error_title: Gate 1 Failed
+          closed_error_title: Gate Failed
           closed_error_message: PR #__PR_NUMBER__ (__PR_URL__) was closed without merging. Production release aborted.
           closed_follow_up: Re-run this workflow to restart.
           github_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # PHASE 2 – PREPARE RELEASE PR
   # Maps the semver input to the target branch and semver strategy, then runs
   # the release-prepare composite directly to create the release PR. Runs
-  # whether Phase 1 produced a PR or was a no-op.
-  # ──────────────────────────────────────────────────────────────────────────
+  # whether Phase produced a PR or was a no-op.
   prepare-release:
-    name: 'Phase 2 · Prepare release PR'
+    name: 'Phase: Prepare release PR'
     needs: gate-main-alignment
     if: |
       github.event_name == 'workflow_dispatch' &&
@@ -427,16 +415,13 @@ jobs:
       - name: Announce release PR
         if: ${{ steps.release-prepare.outputs.pr_url != '' }}
         run: |
-          echo "::notice title=Gate 3 – Release PR::Review and merge to publish: ${{ steps.release-prepare.outputs.pr_url }}"
+          echo "::notice title=Gate – Release PR::Review and merge to publish: ${{ steps.release-prepare.outputs.pr_url }}"
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # GATE 3 – WAIT FOR RELEASE PR
   # Polls until the release PR (labelled autorelease: pending) is merged.
   # Once merged, the Release workflow's publish phase fires automatically
   # and the next branch is realigned after publishing completes.
-  # ──────────────────────────────────────────────────────────────────────────
   gate-release-pr:
-    name: 'Gate 3 · Merge release PR'
+    name: 'Gate: Merge release PR'
     needs: prepare-release
     if: |
       always() &&
@@ -468,17 +453,14 @@ jobs:
             Release PR #__PR_NUMBER__ merged.
             The Release workflow is now publishing packages to npm and creating GitHub releases.
             The next branch will be realigned automatically after publishing completes.
-          closed_error_title: Gate 3 Failed
+          closed_error_title: Gate Failed
           closed_error_message: Release PR #__PR_NUMBER__ (__PR_URL__) was closed without merging. Publishing aborted.
           closed_follow_up: "To recover: remove the 'autorelease: pending' label from the PR, then re-run this workflow."
           github_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # SUMMARY
   # Prints the final handoff state once both gates have passed.
   # Publishing and next-branch realignment are already underway via the
   # Release workflow at this point.
-  # ──────────────────────────────────────────────────────────────────────────
   summary:
     name: 'Production release handoff complete'
     needs: [merge-next-to-main, prepare-main, prepare-release, gate-release-pr]
@@ -547,12 +529,8 @@ jobs:
             echo ":rocket: **[View publish run]($PUBLISH_RUN_URL)**"
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # PHASE 3 – PUBLISH
   # Triggered automatically when the release PR (autorelease: pending) merges
   # into main. Publishes packages to npm and creates GitHub releases.
-  # ──────────────────────────────────────────────────────────────────────────
-
   process-workspaces:
     name: Process Workspaces
     if: >-
@@ -589,8 +567,9 @@ jobs:
           echo "Found packages: $PACKAGES"
           echo "packages=$PACKAGES" >> $GITHUB_OUTPUT
 
+  # Only runs on the pull_request path; 'later phase only' is the fallback name shown on workflow_dispatch where this job is skipped.
   publish-packages:
-    name: Publish Package (${{ matrix.package || 'phase 3 only' }})
+    name: Publish Package (${{ matrix.package || 'later phase only' }})
     runs-on:
       labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
       group: ${{ github.event.repository.private && 'twin' || 'default' }}
@@ -599,7 +578,7 @@ jobs:
       id-token: write
     needs: process-workspaces
     strategy:
-      max-parallel: 1
+      max-parallel: 1 # one package at a time — parallel dist builds can share global node_modules
       matrix:
         package: ${{ fromJson(needs.process-workspaces.outputs.packages) }}
 
@@ -629,6 +608,7 @@ jobs:
 
       - name: Remove Mono-Repo Node Modules
         run: |
+          # Root package.json declares workspace paths that conflict with per-package npm install.
           rm package.json
           rm package-lock.json
 
@@ -654,6 +634,7 @@ jobs:
       - name: Cleanup package.json properties
         run: |
           cd ${{ matrix.package }}
+          # Strip dev-only fields so they are absent from the published tarball.
           npm pkg delete scripts
           npm pkg delete devDependencies
 
@@ -704,7 +685,7 @@ jobs:
 
             if [ "$attempt" -eq "$MAX_ATTEMPTS" ]; then
               echo "Timed out waiting for ${PACKAGE_NAME}@${PACKAGE_VERSION} to appear on npm."
-              exit 0
+              exit 0  # non-fatal: publish succeeded; registry propagation lag is acceptable
             fi
 
             echo "Not available yet (attempt ${attempt}/${MAX_ATTEMPTS}); retrying in ${SLEEP_SECONDS}s..."
@@ -715,6 +696,7 @@ jobs:
         if: always()
         uses: ./.github/workflows/teardown-test-env
 
+  # Creates GitHub releases from the production manifest after all packages are on npm.
   publish-gh-releases:
     name: Publish GitHub Releases
     runs-on:
@@ -747,6 +729,7 @@ jobs:
             --target-branch=main \
             --token=${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
 
+  # Triggers twin-workspace to update its submodule pointer to the new main SHA.
   notify-workspace:
     name: Notify Workspace
     runs-on:
@@ -800,6 +783,7 @@ jobs:
         uses: ./.github/workflows/versions-prepare
         with:
           branch: next
+          # semver_type intentionally omitted — composite defaults to prerelease, always correct post-release
           gpg_private_key: ${{ secrets.TWIN_GPG_PRIVATE_KEY }}
           gpg_key_id: ${{ secrets.TWIN_GPG_KEY_ID }}
           test_env_vars: ${{ secrets.TWIN_TEST_ENV_VARS }}
@@ -813,14 +797,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
 
-  # ──────────────────────────────────────────────────────────────────────────
-  # GATE 2 – WAIT FOR NEXT ALIGNMENT PR
   # Polls until the realignment PR for the next branch is merged. The PR is
   # pre-approved and auto-merge is enabled, so it merges as soon as all
   # required status checks pass. Skipped when versions-prepare was a no-op.
-  # ──────────────────────────────────────────────────────────────────────────
   gate-realign-next:
-    name: 'Gate 2 · Merge next alignment PR'
+    name: 'Gate: Merge next alignment PR'
     needs: realign-next
     if: ${{ needs.realign-next.outputs.has_changes == 'true' }}
     runs-on:
@@ -843,7 +824,7 @@ jobs:
           pr_url: ${{ needs.realign-next.outputs.pr_url }}
           waiting_message: Waiting for next alignment PR #__PR_NUMBER__ to merge (auto-merge enabled)...
           success_message: Next alignment PR #__PR_NUMBER__ merged. Next branch is realigned to the released version.
-          closed_error_title: Gate 2 Failed
+          closed_error_title: Gate Failed
           closed_error_message: Next alignment PR #__PR_NUMBER__ (__PR_URL__) was closed without merging. Next branch realignment incomplete.
           closed_follow_up: Re-run the Realign Next Branch job or manually merge the next alignment PR.
           github_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
