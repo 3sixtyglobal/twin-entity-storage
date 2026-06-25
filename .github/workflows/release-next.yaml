@@ -7,19 +7,19 @@ name: Release Next
 
 # Orchestrates the full prerelease lifecycle in a single run.
 #
-# Phase – Reset next branch versions (optional):
+# Reset next branch versions (optional):
 #   Sets all packages to <customVersion>-next.0; skipped when customVersion is blank.
 #
 # Gate  – Merge version reset PR (optional):
 #   Polls until the version reset PR is approved and merged.
 #
-# Phase – Prepare prerelease PR:
+# Prepare prerelease PR:
 #   Runs release-please to create a versioned prerelease PR. Stops here.
 #
 # Gate  – Merge prerelease PR:
 #   Polls until the release PR (autorelease: pending) is approved and merged.
 #
-# Phase – Publish:
+# Publish:
 #   Publishes packages to npm (next tag) and creates GitHub releases.
 
 on:
@@ -66,7 +66,7 @@ jobs:
   # set all packages to <customVersion>-next.0 and updates the prerelease
   # manifest. Creates a PR on next for review before the release PR is opened.
   reset-next-versions:
-    name: 'Phase: Reset next branch versions'
+    name: Reset next branch versions
     needs: [validate-custom-version]
     if: |
       always() &&
@@ -144,7 +144,7 @@ jobs:
 
   # Prepare
   prepare:
-    name: 'Phase: Prepare prerelease PR'
+    name: Prepare prerelease PR
     needs: [gate-reset-pr, reset-next-versions]
     if: |
       always() &&

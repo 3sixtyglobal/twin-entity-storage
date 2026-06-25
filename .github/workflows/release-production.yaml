@@ -10,15 +10,15 @@ name: Release Production
 # review boundary until the generated pull request is approved and merged.
 #
 # Flow:
-#   Phase – Merge next into main (optional):
+#   Merge next into main (optional):
 #     Creates a signed merge branch and opens a PR from next into main.
 #   Gate  – Merge next into main PR (optional):
 #     Polls until the PR is approved and merged.
-#   Phase – Prepare and build main branch:
+#   Prepare and build main branch:
 #     Runs versions-prepare on main and opens the alignment PR.
 #   Gate  – Merge main alignment PR:
 #     Polls until the alignment PR is approved and merged.
-#   Phase – Prepare release PR:
+#   Prepare release PR:
 #     Runs release-prepare on main and opens the production release PR.
 #   Gate  – Merge release PR:
 #     Polls until the release PR is merged. Publishing and next-branch
@@ -97,7 +97,7 @@ jobs:
   # the PR; GitHub creates and signs the merge commit on main. Skipped when the
   # branches are already in sync.
   merge-next-to-main:
-    name: 'Phase: Merge next into main'
+    name: Merge next into main
     needs: [validate-custom-version]
     if: |
       github.event_name == 'workflow_dispatch' &&
@@ -235,7 +235,7 @@ jobs:
 
   # Runs the Versions Prepare steps inline on main and creates the alignment PR.
   prepare-main:
-    name: 'Phase: Prepare and build main branch'
+    name: Prepare and build main branch
     needs: [merge-next-to-main, gate-next-to-main]
     if: |
       github.event_name == 'workflow_dispatch' &&
@@ -350,7 +350,7 @@ jobs:
   # the release-prepare composite directly to create the release PR. Runs
   # whether Phase produced a PR or was a no-op.
   prepare-release:
-    name: 'Phase: Prepare release PR'
+    name: Prepare release PR
     needs: gate-main-alignment
     if: |
       github.event_name == 'workflow_dispatch' &&
