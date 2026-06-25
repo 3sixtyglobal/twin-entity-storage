@@ -145,11 +145,12 @@ jobs:
   # Prepare
   prepare:
     name: Prepare prerelease PR
-    needs: [gate-reset-pr, reset-next-versions]
+    needs: [validate-custom-version, reset-next-versions, gate-reset-pr]
     if: |
       always() &&
       !cancelled() &&
-      (needs.reset-next-versions.result == 'skipped' || needs.reset-next-versions.result == 'success') &&
+      (needs.validate-custom-version.result == 'success' || needs.validate-custom-version.result == 'skipped') &&
+      (needs.reset-next-versions.result == 'success' || needs.reset-next-versions.result == 'skipped') &&
       (needs.gate-reset-pr.result == 'success' || needs.gate-reset-pr.result == 'skipped')
     runs-on:
       labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}

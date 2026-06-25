@@ -236,11 +236,12 @@ jobs:
   # Runs the Versions Prepare steps inline on main and creates the alignment PR.
   prepare-main:
     name: Prepare and build main branch
-    needs: [merge-next-to-main, gate-next-to-main]
+    needs: [validate-custom-version, merge-next-to-main, gate-next-to-main]
     if: |
       github.event_name == 'workflow_dispatch' &&
       always() &&
       !cancelled() &&
+      (needs.validate-custom-version.result == 'success' || needs.validate-custom-version.result == 'skipped') &&
       (needs.merge-next-to-main.result == 'success' || needs.merge-next-to-main.result == 'skipped') &&
       (needs.gate-next-to-main.result == 'success' || needs.gate-next-to-main.result == 'skipped')
     runs-on:
@@ -351,11 +352,22 @@ jobs:
   # whether Phase produced a PR or was a no-op.
   prepare-release:
     name: Prepare release PR
-    needs: gate-main-alignment
+    needs:
+      [
+        validate-custom-version,
+        merge-next-to-main,
+        gate-next-to-main,
+        prepare-main,
+        gate-main-alignment
+      ]
     if: |
       github.event_name == 'workflow_dispatch' &&
       always() &&
       !cancelled() &&
+      (needs.validate-custom-version.result == 'success' || needs.validate-custom-version.result == 'skipped') &&
+      (needs.merge-next-to-main.result == 'success' || needs.merge-next-to-main.result == 'skipped') &&
+      (needs.gate-next-to-main.result == 'success' || needs.gate-next-to-main.result == 'skipped') &&
+      (needs.prepare-main.result == 'success' || needs.prepare-main.result == 'skipped') &&
       (needs.gate-main-alignment.result == 'success' || needs.gate-main-alignment.result == 'skipped')
     runs-on:
       labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
