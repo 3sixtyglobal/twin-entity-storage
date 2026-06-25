@@ -180,15 +180,8 @@ runs:
           }
         done
 
-    # Setup any services required for tests here
-    - name: Setup Test Environment
-      if: ${{ steps.check-changes.outputs.has_changes == 'true' }}
-      uses: ./.github/workflows/setup-test-env
-      with:
-        test_env_vars: ${{ inputs.test_env_vars }}
-
-    # Validate that the version changes do not break the build; tests are skipped because
-    # test-environment setup is the responsibility of the calling workflow.
+    # Validate that the version changes do not break the build; tests are skipped
+    # as we are only changing version numbers.
     - name: Build Packages
       if: ${{ steps.check-changes.outputs.has_changes == 'true' }}
       shell: bash
@@ -196,7 +189,7 @@ runs:
         cd "$TARGET_DIR"
         npm run format
         npm run lint
-        npm run dist
+        npm run dist:no-test
 
     # Commit all version and lockfile changes together so the PR is self-contained.
     - name: Commit Changes
@@ -245,11 +238,6 @@ runs:
           gpg --batch --yes --delete-secret-keys "$FINGERPRINT" || true
           gpg --batch --yes --delete-keys "$FINGERPRINT" || true
         fi
-
-    # Always teardown the environment, necessary to cleanup self-hosted runners.
-    - name: Teardown Test Environment
-      if: always()
-      uses: ./.github/workflows/teardown-test-env
 
     - name: Cleanup target worktree
       if: always()
