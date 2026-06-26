@@ -7,7 +7,7 @@ runs:
     - name: Teardown Docker Test Environment
       shell: bash
       run: |
-        docker stop $(docker ps -aq) || true
-        docker rm $(docker ps -aq) || true
-        docker rmi -f $(docker images -aq) || true
+        docker ps -aq | xargs -r docker stop
+        docker ps -aq | xargs -r docker rm
+        docker images -aq | xargs -r docker rmi -f
         docker system prune -a --volumes -f || true
