@@ -632,10 +632,12 @@ export class FileEntityStorageConnector<
 			allEntities = EntitySorter.sort(allEntities, finalSortKeys);
 
 			const startIndex = Coerce.number(cursor) ?? 0;
+			const effectiveConditions =
+				finalConditions.conditions.length > 0 ? finalConditions : undefined;
 
 			for (let i = startIndex; i < allEntities.length; i++) {
 				if (
-					EntityConditions.check(allEntities[i], finalConditions) &&
+					EntityConditions.check(allEntities[i], effectiveConditions) &&
 					entities.length < finalLimit
 				) {
 					const entity = Is.arrayValue(properties)

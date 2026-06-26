@@ -292,10 +292,10 @@ export class MySqlEntityStorageConnector<
 			const poolConfig = this.createPoolConfig();
 			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
 
-			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
-				"mySqlPools"
+			const sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
+				"mySqlPools",
+				() => ({})
 			);
-			sharedPools ??= {};
 			if (sharedPools[poolId]) {
 				// Decrease the use counter and close the pool if no longer used
 				sharedPools[poolId].useCounter--;
@@ -895,10 +895,10 @@ export class MySqlEntityStorageConnector<
 			const poolConfig = this.createPoolConfig();
 			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
 
-			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
-				"mySqlPools"
+			const sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
+				"mySqlPools",
+				() => ({})
 			);
-			sharedPools ??= {};
 			if (sharedPools[poolId]) {
 				// Decrease the use counter and close the pool if no longer used
 				sharedPools[poolId].useCounter--;
@@ -1003,10 +1003,10 @@ export class MySqlEntityStorageConnector<
 			const poolConfig = this.createPoolConfig();
 			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
 
-			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
-				"mySqlPools"
+			const sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
+				"mySqlPools",
+				() => ({})
 			);
-			sharedPools ??= {};
 
 			// If there is no pool for the id, create it
 			if (!sharedPools[poolId]) {
