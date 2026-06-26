@@ -435,12 +435,10 @@ export class MemoryEntityStorageConnector<T = unknown>
 				allEntities = EntitySorter.sort(allEntities, finalSortKeys);
 
 				const startIndex = Coerce.number(cursor) ?? 0;
-				const effectiveConditions =
-					finalConditions.conditions.length > 0 ? finalConditions : undefined;
 
 				for (let i = startIndex; i < allEntities.length; i++) {
 					if (
-						EntityConditions.check(allEntities[i], effectiveConditions) &&
+						EntityConditions.check(allEntities[i], finalConditions) &&
 						resultEntities.length < finalLimit
 					) {
 						const entity = Is.arrayValue(properties)
