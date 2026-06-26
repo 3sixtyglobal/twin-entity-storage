@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.9.1-next.1](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-dynamodb-v0.9.1-next.0...entity-storage-connector-dynamodb-v0.9.1-next.1) (2026-06-26)
+
+
+### Features
+
+* add AWS pod authentication mode ([caaae36](https://github.com/iotaledger/twin-entity-storage/commit/caaae368ca104cd9994e1af7b6c4c20e603c2021))
+* add context id features ([#55](https://github.com/iotaledger/twin-entity-storage/issues/55)) ([99c15a2](https://github.com/iotaledger/twin-entity-storage/commit/99c15a257539b61d9da63649ce573ebf47699fc9))
+* add ISchemaMigration chain, SchemaVersionMigrator runner and version store ([#110](https://github.com/iotaledger/twin-entity-storage/issues/110)) ([2dac924](https://github.com/iotaledger/twin-entity-storage/commit/2dac9244a752cb58304d1649ff03c3a2469783dd))
+* add production release automation ([1eb4c8e](https://github.com/iotaledger/twin-entity-storage/commit/1eb4c8ee3eb099defdfc2d063ae44935276dcae8))
+* add support for connection timeout config ([96d0025](https://github.com/iotaledger/twin-entity-storage/commit/96d0025bc11d27138bfd845e0248ba19382c3fd9))
+* add support for connection timeout config ([64f987e](https://github.com/iotaledger/twin-entity-storage/commit/64f987e1ddfd0f09cb24eb0bd5fc3739e9b58a00))
+* add support for object comparison conditions ([eb505a1](https://github.com/iotaledger/twin-entity-storage/commit/eb505a17a3642e95c4e3cf137a77a0a8fb388c97))
+* add synchronised to release configs ([e1e749c](https://github.com/iotaledger/twin-entity-storage/commit/e1e749cf261b58c8c36729686861e29c7d5e068e))
+* add validate-locales ([e66ef0d](https://github.com/iotaledger/twin-entity-storage/commit/e66ef0de26ca2f82b3fe89bb5c7a15a0978a9644))
+* adding schema migration functionality to all the connectors ([#85](https://github.com/iotaledger/twin-entity-storage/issues/85)) ([fd1555a](https://github.com/iotaledger/twin-entity-storage/commit/fd1555a34380158214a577586dafae821e72a578))
+* additional information in health ([1e658b7](https://github.com/iotaledger/twin-entity-storage/commit/1e658b74288e9411538286d25b81823df80703e9))
+* disable endpoint discovery for cosmos ([49df2a2](https://github.com/iotaledger/twin-entity-storage/commit/49df2a254f385dc42e2e1f7e26e71f89b5bf5bcf))
+* entity storage conditions ([#115](https://github.com/iotaledger/twin-entity-storage/issues/115)) ([7a53884](https://github.com/iotaledger/twin-entity-storage/commit/7a53884f6acb856d77733e4e0f23ec1c00b74cb4))
+* entity storage enhancements ([#86](https://github.com/iotaledger/twin-entity-storage/issues/86)) ([1279af4](https://github.com/iotaledger/twin-entity-storage/commit/1279af42615c6497bb06539842cee44842dd1f75))
+* eslint migration to flat config ([f033b64](https://github.com/iotaledger/twin-entity-storage/commit/f033b64984c0e6a8129d929c9dd816dcc1b8dab0))
+* logging naming consistency ([f99d12d](https://github.com/iotaledger/twin-entity-storage/commit/f99d12dea04b6d4f2b5632ff5473e9ec7d5f9055))
+* migration progress ([#121](https://github.com/iotaledger/twin-entity-storage/issues/121)) ([d032162](https://github.com/iotaledger/twin-entity-storage/commit/d032162768b6b7d4ccca7e39b80f8bc3ba46440e))
+* synchronised storage ([#44](https://github.com/iotaledger/twin-entity-storage/issues/44)) ([94e10e2](https://github.com/iotaledger/twin-entity-storage/commit/94e10e26d1feec801449dc04af7a9757ac7495ff))
+* typescript 6 update ([995a0c6](https://github.com/iotaledger/twin-entity-storage/commit/995a0c6fa9a6813bfdc7200779ce3664236e59e9))
+* update dependencies ([7ccc0c4](https://github.com/iotaledger/twin-entity-storage/commit/7ccc0c429125d073dc60b3de6cf101abc8cc6cba))
+* update docs ([5203e62](https://github.com/iotaledger/twin-entity-storage/commit/5203e621c3ae368f6fefb29ea5146f024f4a1b0d))
+* update framework core ([b59a380](https://github.com/iotaledger/twin-entity-storage/commit/b59a380bb7fba2b43610f69074dcdee24a4737da))
+* use shared store mechanism ([#34](https://github.com/iotaledger/twin-entity-storage/issues/34)) ([68b6b71](https://github.com/iotaledger/twin-entity-storage/commit/68b6b71e7a96d7d016cd57bfff36775b56bf3f93))
+
+
+### Bug Fixes
+
+* add missing dependency ([3282535](https://github.com/iotaledger/twin-entity-storage/commit/328253516e0d13b276406fb4de97dab8ee5e8ba7))
+* add missing dependency ([2b848f3](https://github.com/iotaledger/twin-entity-storage/commit/2b848f3a345522c869b798d7a1cb64112dd8e3e3))
+* adding tests and fixes for dot notation ([#76](https://github.com/iotaledger/twin-entity-storage/issues/76)) ([3879337](https://github.com/iotaledger/twin-entity-storage/commit/387933797e33543e4d8b2d49b8beeb792512a4ff))
+* adding tests and support when neccesary for string include operator when needed ([#72](https://github.com/iotaledger/twin-entity-storage/issues/72)) ([3c723dd](https://github.com/iotaledger/twin-entity-storage/commit/3c723dd5694814398099d9d4594089dc6c66ba97))
+* document AWS SDK pins for minimum release age consumers ([#96](https://github.com/iotaledger/twin-entity-storage/issues/96)) ([c4bcc26](https://github.com/iotaledger/twin-entity-storage/commit/c4bcc26f962da6f6bd090630f48d26ab58946c4e))
+* dynamodb get with condition ignores primary key ([d2d0ec2](https://github.com/iotaledger/twin-entity-storage/commit/d2d0ec21023bc22f0e5a35c2d49396d90b42a4ce))
+* dynamodb includes operator ([a003a0f](https://github.com/iotaledger/twin-entity-storage/commit/a003a0f7b949e48c3af40f996fdf071899f382d8))
+* dynamodb or conditions ([7a28b07](https://github.com/iotaledger/twin-entity-storage/commit/7a28b0702e03ec1fed04424136aca8a8c40cb28a))
+* dynamodb query gsi ([#140](https://github.com/iotaledger/twin-entity-storage/issues/140)) ([45b56d6](https://github.com/iotaledger/twin-entity-storage/commit/45b56d6260c9876012030cc6c85026ea84aebff5))
+* guard against empty IN list in all SQL-style connectors ([#101](https://github.com/iotaledger/twin-entity-storage/issues/101)) ([fb2bf8b](https://github.com/iotaledger/twin-entity-storage/commit/fb2bf8beb148f0c9b92661c4899e28cd4559f39a))
+* null secondary indexes ([#103](https://github.com/iotaledger/twin-entity-storage/issues/103)) ([5e44f11](https://github.com/iotaledger/twin-entity-storage/commit/5e44f11bb5af5bf2c27d6f1d56aba5851116ff89))
+* query params force coercion ([dd6aa87](https://github.com/iotaledger/twin-entity-storage/commit/dd6aa87efdfb60bab7d6756a86888863c45c51a7))
+* route GSI sort-key conditions to KeyConditionExpression and cross-connector cursor-walk tests ([#127](https://github.com/iotaledger/twin-entity-storage/issues/127)) ([6a24e1b](https://github.com/iotaledger/twin-entity-storage/commit/6a24e1b5f3b8b426987e43da3af6766d8cb68afb))
+* tests and fixes for the comparisons for null and undefined ([#79](https://github.com/iotaledger/twin-entity-storage/issues/79)) ([e7ffd62](https://github.com/iotaledger/twin-entity-storage/commit/e7ffd62e9ec40ef31498e6e2350bb25d9c84638a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.1-next.0 to 0.9.1-next.1
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.1-next.0 to 0.9.1-next.1
+
 ## [0.9.0](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-dynamodb-v0.9.0...entity-storage-connector-dynamodb-v0.9.0) (2026-06-24)
 
 
