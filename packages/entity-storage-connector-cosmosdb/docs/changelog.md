@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.1-next.4](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-cosmosdb-v0.9.1-next.3...entity-storage-connector-cosmosdb-v0.9.1-next.4) (2026-06-29)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-connector-cosmosdb:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.1-next.3 to 0.9.1-next.4
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.1-next.3 to 0.9.1-next.4
+
 ## [0.9.1-next.3](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-cosmosdb-v0.9.1-next.2...entity-storage-connector-cosmosdb-v0.9.1-next.3) (2026-06-26)
 
 
