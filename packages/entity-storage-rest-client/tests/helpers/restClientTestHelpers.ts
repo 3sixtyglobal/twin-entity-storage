@@ -68,7 +68,7 @@ export function createdResponse(location: string): object {
 	return {
 		ok: true,
 		status: HttpStatusCode.created,
-		headers: new Headers({ [HeaderTypes.Location]: encodeURIComponent(location) }),
+		headers: new Headers({ [HeaderTypes.Location]: location }),
 		arrayBuffer: async () => new ArrayBuffer(0)
 	};
 }
