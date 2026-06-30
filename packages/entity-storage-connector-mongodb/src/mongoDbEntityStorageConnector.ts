@@ -804,6 +804,14 @@ export class MongoDbEntityStorageConnector<
 		}
 
 		if ("conditions" in condition) {
+			if (condition.conditions.length === 0) {
+				// Empty AND group → match all (leave filter as {}; no constraint).
+				// Empty OR group → match none; { $nor: [{}] } negates the match-all document.
+				if (condition.logicalOperator === LogicalOperator.Or) {
+					(filter as { [key: string]: unknown }).$nor = [{}];
+				}
+				return;
+			}
 			const subConditions: Filter<T>[] = condition.conditions.map(c => {
 				const subFilter: Filter<T> = {};
 				this.buildQueryParameters(objectPath, c, subFilter);

@@ -789,6 +789,28 @@ export abstract class AbstractScyllaDBConnector<T> {
 	}
 
 	/**
+	 * Recursively flatten nested AND-only groups into a flat list of comparators.
+	 * @param conditions The group's conditions array to flatten.
+	 * @returns A flat list of leaf comparators.
+	 * @throws GeneralError if any OR group is encountered.
+	 * @internal
+	 */
+	private flattenConditions(conditions: EntityCondition<T>[]): IComparator[] {
+		const result: IComparator[] = [];
+		for (const cond of conditions) {
+			if ("conditions" in cond) {
+				if (cond.logicalOperator === LogicalOperator.Or) {
+					throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "orConditionNotSupported");
+				}
+				result.push(...this.flattenConditions(cond.conditions));
+			} else {
+				result.push(cond);
+			}
+		}
+		return result;
+	}
+
+	/**
 	 * Parse, validate, and build a CQL WHERE clause from an EntityCondition tree.
 	 * The partition key equality is always the first clause; user conditions follow.
 	 * @param conditions The optional conditions to match for the entities.
@@ -801,21 +823,21 @@ export abstract class AbstractScyllaDBConnector<T> {
 		conditions: EntityCondition<T> | undefined,
 		partitionKey: string | undefined
 	): { whereClause: string; params: unknown[]; noResults?: boolean } {
-		let conditionsList: EntityCondition<T>[] = [];
+		let conditionsList: IComparator[] = [];
 		if (conditions !== undefined) {
 			if ("conditions" in conditions) {
-				if ((conditions as IComparatorGroup).logicalOperator === LogicalOperator.Or) {
+				if (conditions.logicalOperator === LogicalOperator.Or) {
 					throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "orConditionNotSupported");
 				}
-				conditionsList = conditions.conditions;
+				conditionsList = this.flattenConditions(conditions.conditions);
 			} else {
 				conditionsList = [conditions];
 			}
 		}
 
 		for (const cond of conditionsList) {
-			const comparator = cond as IComparator;
-			if (String(comparator.property).includes(".")) {
+			const comparator = cond;
+			if (comparator.property.includes(".")) {
 				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "comparisonNotSupported", {
 					property: comparator.property,
 					reason: "dot-notation nested property paths are not supported in CQL"
@@ -847,7 +869,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 		const params: unknown[] = [partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE];
 
 		for (const cond of conditionsList) {
-			const condition = cond as IComparator;
+			const condition = cond;
 			const descriptor = this._entitySchema.properties?.find(
 				p => p.property === condition.property
 			);

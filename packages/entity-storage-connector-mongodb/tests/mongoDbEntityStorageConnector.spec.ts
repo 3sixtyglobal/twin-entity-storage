@@ -1352,6 +1352,200 @@ describe("MongoDbEntityStorageConnector", () => {
 		);
 	});
 
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with single-child AND group wrapping a multi-child OR group",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "alpha", value2: 1 });
+			await connector.set({ id: "2", value1: "beta", value2: 2 });
+			await connector.set({ id: "3", value1: "gamma", value2: 3 });
+			// AND[ OR[value1==alpha, value1==beta] ] — single-child AND wrapping a multi-child OR.
+			// Without the fix DynamoDB rejects the generated ( (expr) ) as redundant parens.
+			const result = await connector.query({
+				logicalOperator: LogicalOperator.And,
+				conditions: [
+					{
+						logicalOperator: LogicalOperator.Or,
+						conditions: [
+							{ property: "value1", value: "alpha", comparison: ComparisonOperator.Equals },
+							{ property: "value1", value: "beta", comparison: ComparisonOperator.Equals }
+						]
+					}
+				]
+			});
+			expect(result.entities.length).toEqual(2);
+			expect(result.entities.map((e: Partial<TestType>) => e.id).sort()).toEqual(["1", "2"]);
+		}
+	);
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with OR group containing multiple AND children",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "alpha", value2: 1 });
+			await connector.set({ id: "2", value1: "beta", value2: 2 });
+			await connector.set({ id: "3", value1: "alpha", value2: 2 });
+			await connector.set({ id: "4", value1: "gamma", value2: 3 });
+			// OR[ AND[value1==alpha, value2==1], AND[value1==beta, value2==2] ]
+			// Uses OR at the outer level and AND at the inner level.
+			const result = await connector.query({
+				logicalOperator: LogicalOperator.Or,
+				conditions: [
+					{
+						logicalOperator: LogicalOperator.And,
+						conditions: [
+							{ property: "value1", value: "alpha", comparison: ComparisonOperator.Equals },
+							{ property: "value2", value: 1, comparison: ComparisonOperator.Equals }
+						]
+					},
+					{
+						logicalOperator: LogicalOperator.And,
+						conditions: [
+							{ property: "value1", value: "beta", comparison: ComparisonOperator.Equals },
+							{ property: "value2", value: 2, comparison: ComparisonOperator.Equals }
+						]
+					}
+				]
+			});
+			expect(result.entities.length).toEqual(2);
+			expect(result.entities.map((e: Partial<TestType>) => e.id).sort()).toEqual(["1", "2"]);
+		}
+	);
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with AND group containing multiple OR children",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "alpha", value2: 1 });
+			await connector.set({ id: "2", value1: "beta", value2: 2 });
+			await connector.set({ id: "3", value1: "alpha", value2: 3 });
+			await connector.set({ id: "4", value1: "gamma", value2: 1 });
+			// AND[ OR[value1==alpha, value1==beta], OR[value2==1, value2==2] ]
+			// Uses AND at the outer level and OR at each inner group.
+			const result = await connector.query({
+				logicalOperator: LogicalOperator.And,
+				conditions: [
+					{
+						logicalOperator: LogicalOperator.Or,
+						conditions: [
+							{ property: "value1", value: "alpha", comparison: ComparisonOperator.Equals },
+							{ property: "value1", value: "beta", comparison: ComparisonOperator.Equals }
+						]
+					},
+					{
+						logicalOperator: LogicalOperator.Or,
+						conditions: [
+							{ property: "value2", value: 1, comparison: ComparisonOperator.Equals },
+							{ property: "value2", value: 2, comparison: ComparisonOperator.Equals }
+						]
+					}
+				]
+			});
+			expect(result.entities.length).toEqual(2);
+			expect(result.entities.map((e: Partial<TestType>) => e.id).sort()).toEqual(["1", "2"]);
+		}
+	);
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with triple-nested alternating logical operators",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "alpha", value2: 1 });
+			await connector.set({ id: "2", value1: "beta", value2: 2 });
+			await connector.set({ id: "3", value1: "gamma", value2: 3 });
+			// OR[ AND[ OR[value1==alpha, value1==beta] ] ] — three levels of nesting
+			// with alternating OR → AND → OR logical operators.
+			const result = await connector.query({
+				logicalOperator: LogicalOperator.Or,
+				conditions: [
+					{
+						logicalOperator: LogicalOperator.And,
+						conditions: [
+							{
+								logicalOperator: LogicalOperator.Or,
+								conditions: [
+									{
+										property: "value1",
+										value: "alpha",
+										comparison: ComparisonOperator.Equals
+									},
+									{
+										property: "value1",
+										value: "beta",
+										comparison: ComparisonOperator.Equals
+									}
+								]
+							}
+						]
+					}
+				]
+			});
+			expect(result.entities.length).toEqual(2);
+			expect(result.entities.map((e: Partial<TestType>) => e.id).sort()).toEqual(["1", "2"]);
+		}
+	);
+
+	test("can query with an empty nested condition group in AND", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "alpha", value2: 1 });
+		await connector.set({ id: "2", value1: "beta", value2: 2 });
+		await connector.set({ id: "3", value1: "gamma", value2: 3 });
+		// AND[ AND[] ] — empty AND child inside outer AND applies no constraint.
+		const result = await connector.query({
+			logicalOperator: LogicalOperator.And,
+			conditions: [
+				{
+					logicalOperator: LogicalOperator.And,
+					conditions: []
+				}
+			]
+		});
+		expect(result.entities.length).toEqual(3);
+	});
+
+	test("can query with an empty nested group alongside a real condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "alpha", value2: 1 });
+		await connector.set({ id: "2", value1: "beta", value2: 2 });
+		await connector.set({ id: "3", value1: "gamma", value2: 3 });
+		// AND[ AND[], value1==alpha ] — empty AND sibling is a no-op; only value1==alpha filters.
+		const result = await connector.query({
+			logicalOperator: LogicalOperator.And,
+			conditions: [
+				{
+					logicalOperator: LogicalOperator.And,
+					conditions: []
+				},
+				{ property: "value1", value: "alpha", comparison: ComparisonOperator.Equals }
+			]
+		});
+		expect(result.entities.length).toEqual(1);
+		expect((result.entities[0] as TestType).id).toEqual("1");
+	});
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with an empty OR nested group alongside a real OR condition",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "alpha", value2: 1 });
+			await connector.set({ id: "2", value1: "beta", value2: 2 });
+			await connector.set({ id: "3", value1: "gamma", value2: 3 });
+			// OR[ OR[], value1==alpha ] — empty OR child contributes nothing; only value1==alpha matches.
+			const result = await connector.query({
+				logicalOperator: LogicalOperator.Or,
+				conditions: [
+					{
+						logicalOperator: LogicalOperator.Or,
+						conditions: []
+					},
+					{ property: "value1", value: "alpha", comparison: ComparisonOperator.Equals }
+				]
+			});
+			expect(result.entities.length).toEqual(1);
+			expect((result.entities[0] as TestType).id).toEqual("1");
+		}
+	);
+
 	test("can query with custom sort", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());
 		for (let i = 0; i < 5; i++) {
