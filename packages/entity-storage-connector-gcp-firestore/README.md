@@ -13,7 +13,7 @@ npm install @twin.org/entity-storage-connector-gcp-firestore
 To perform testing of this component it may be necessary to launch a local instance to communicate with.
 
 ```shell
-docker run -d --name twin-entity-storage-gcp-firestore -p 8080:8080 gcr.io/google.com/cloudsdktool/cloud-sdk:emulators gcloud beta emulators firestore start --host-port=0.0.0.0:8080
+docker run -d --name twin-entity-storage-gcp-firestore -p 20200:8080 gcr.io/google.com/cloudsdktool/cloud-sdk:emulators gcloud beta emulators firestore start --host-port=0.0.0.0:8080
 ```
 
 ## Examples

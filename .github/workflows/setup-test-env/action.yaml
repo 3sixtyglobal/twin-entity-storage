@@ -51,7 +51,7 @@ runs:
     - name: Start Firestore Emulator
       if: inputs.package == 'packages/entity-storage-connector-gcp-firestore' || inputs.package == 'all'
       shell: bash
-      run: docker run -d --name twin-entity-storage-firestore -p 8080:8080 gcr.io/google.com/cloudsdktool/cloud-sdk:emulators gcloud beta emulators firestore start --host-port=0.0.0.0:8080
+      run: docker run -d --name twin-entity-storage-firestore -p 20200:8080 gcr.io/google.com/cloudsdktool/cloud-sdk:emulators gcloud beta emulators firestore start --host-port=0.0.0.0:8080
 
     # Start CosmosDB service only for CosmosDB package
     - name: Run CosmosDB Emulator
