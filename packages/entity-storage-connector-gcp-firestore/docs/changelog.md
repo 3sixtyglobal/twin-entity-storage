@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.1-next.6](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-gcp-firestore-v0.9.1-next.5...entity-storage-connector-gcp-firestore-v0.9.1-next.6) (2026-07-01)
+
+
+### Features
+
+* input validation ([#162](https://github.com/iotaledger/twin-entity-storage/issues/162)) ([3e1e428](https://github.com/iotaledger/twin-entity-storage/commit/3e1e42887955cf079efd5989e197ddf8e0fa8c47))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.1-next.5 to 0.9.1-next.6
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.1-next.5 to 0.9.1-next.6
+
 ## [0.9.1-next.5](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-gcp-firestore-v0.9.1-next.4...entity-storage-connector-gcp-firestore-v0.9.1-next.5) (2026-06-30)
 
 

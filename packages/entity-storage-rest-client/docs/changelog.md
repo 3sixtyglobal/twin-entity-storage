@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.1-next.6](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.1-next.5...entity-storage-rest-client-v0.9.1-next.6) (2026-07-01)
+
+
+### Features
+
+* enhanced rest processing ([8c5bf89](https://github.com/iotaledger/twin-entity-storage/commit/8c5bf894ee6af5c22359c1e0c7de3cf95c14aeff))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.1-next.5 to 0.9.1-next.6
+
 ## [0.9.1-next.5](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.1-next.4...entity-storage-rest-client-v0.9.1-next.5) (2026-06-30)
 
 
