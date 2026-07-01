@@ -181,6 +181,83 @@ GeneralError If a property does not exist in the schema.
 
 ***
 
+### validateConditionProperties() {#validateconditionproperties}
+
+> `static` **validateConditionProperties**\<`T`\>(`schema`, `condition`): `void`
+
+Validate that every leaf property in an EntityCondition tree is a recognised schema property.
+The root part of a dot-notation path must exist in the schema and be of type object or array.
+
+#### Type Parameters
+
+##### T
+
+`T`
+
+#### Parameters
+
+##### schema
+
+`IEntitySchema`\<`T`\>
+
+The entity schema to validate against.
+
+##### condition
+
+`EntityCondition`\<`T`\> \| `undefined`
+
+The condition tree to validate, may be undefined.
+
+#### Returns
+
+`void`
+
+#### Throws
+
+GeneralError with message key "unknownPropertyInConditionProperty" if the root property is not in the schema.
+
+#### Throws
+
+GeneralError with message key "invalidConditionPropertyPath" if dot-notation is used on a non-object/array property.
+
+***
+
+### validateConditions() {#validateconditions}
+
+> `static` **validateConditions**\<`T`\>(`schema`, `conditions`): `void`
+
+Validate that every property in a conditions array is a recognised schema property.
+
+#### Type Parameters
+
+##### T
+
+`T`
+
+#### Parameters
+
+##### schema
+
+`IEntitySchema`\<`T`\>
+
+The entity schema to validate against.
+
+##### conditions
+
+`object`[] \| `undefined`
+
+The conditions array to validate, may be undefined.
+
+#### Returns
+
+`void`
+
+#### Throws
+
+GeneralError with message key "unknownPropertyInConditions" if validation fails.
+
+***
+
 ### normalizeConditionValues() {#normalizeconditionvalues}
 
 > `static` **normalizeConditionValues**\<`T`\>(`condition`): `EntityCondition`\<`T`\>
