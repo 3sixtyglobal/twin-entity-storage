@@ -180,6 +180,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
 		Guards.stringValue(AbstractScyllaDBConnector.CLASS_NAME, nameof(id), id);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
@@ -382,19 +383,16 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 */
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
 		let connection;
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const { whereClause, params, noResults } = this.buildCqlConditions(conditions, partitionKey);
+
+		if (noResults) {
+			return 0;
+		}
+
 		try {
-			const contextIds = await ContextIdStore.getContextIds();
-			const partitionKey = ContextIdHelper.combinedContextKey(
-				contextIds,
-				this._partitionContextIds
-			);
-
-			const { whereClause, params, noResults } = this.buildCqlConditions(conditions, partitionKey);
-
-			if (noResults) {
-				return 0;
-			}
-
 			const sql = `SELECT COUNT(*) FROM "${this.safeTableName(this._fullTableName)}" WHERE ${whereClause} ALLOW FILTERING`;
 
 			connection = await this.openConnection();
@@ -771,7 +769,8 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 		if (Is.arrayValue(conditions)) {
 			for (const condition of conditions) {
-				sqlConditions.push(`"${condition.property as string}"=?`);
+				const propName = condition.property as string;
+				sqlConditions.push(`"${propName}"=?`);
 				const schemaProperty = properties.find(s => s.property === condition.property);
 				conditionValues.push(this.propertyToDbValue(condition.value, schemaProperty));
 			}
@@ -843,6 +842,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 					reason: "dot-notation nested property paths are not supported in CQL"
 				});
 			}
+			EntityStorageHelper.validateConditionProperties(this._entitySchema, cond);
 			if (
 				(comparator.comparison === ComparisonOperator.Equals ||
 					comparator.comparison === ComparisonOperator.NotEquals) &&
@@ -878,11 +878,12 @@ export abstract class AbstractScyllaDBConnector<T> {
 				condition.comparison === ComparisonOperator.NotIncludes
 			) {
 				const serialized = this.propertyToDbValue(condition.value, descriptor);
-				const propValue = `'%${Is.stringValue(serialized) ? serialized : ""}%'`;
+				const searchStr = Is.stringValue(serialized) ? serialized : "";
+				params.push(`%${searchStr}%`);
 				if (condition.comparison === ComparisonOperator.Includes) {
-					conds.push(`"${condition.property}" LIKE ${propValue}`);
-				} else if (condition.comparison === ComparisonOperator.NotIncludes) {
-					conds.push(`"${condition.property}" NOT LIKE ${propValue}`);
+					conds.push(`"${condition.property}" LIKE ?`);
+				} else {
+					conds.push(`"${condition.property}" NOT LIKE ?`);
 				}
 			} else if (condition.comparison === ComparisonOperator.In) {
 				// Guard must come first: Is.arrayValue([]) returns false for an empty array,

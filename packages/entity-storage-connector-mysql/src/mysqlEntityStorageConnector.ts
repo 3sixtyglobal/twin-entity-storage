@@ -324,6 +324,8 @@ export class MySqlEntityStorageConnector<
 	): Promise<T | undefined> {
 		Guards.stringValue(MySqlEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
+
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
@@ -380,6 +382,7 @@ export class MySqlEntityStorageConnector<
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(MySqlEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
@@ -547,6 +550,8 @@ export class MySqlEntityStorageConnector<
 	): Promise<void> {
 		Guards.stringValue(MySqlEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
+
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
@@ -682,6 +687,7 @@ export class MySqlEntityStorageConnector<
 
 		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
 		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 
 		if (!Is.empty(limit)) {
 			const validationFailures: IValidationFailure[] = [];
@@ -745,6 +751,8 @@ export class MySqlEntityStorageConnector<
 	 * @returns The total count of entities in the storage.
 	 */
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
+		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
+
 		let sql: string | undefined;
 		try {
 			const pool = this.getPool();

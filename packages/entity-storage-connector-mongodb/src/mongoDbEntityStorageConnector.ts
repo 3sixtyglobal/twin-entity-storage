@@ -254,6 +254,7 @@ export class MongoDbEntityStorageConnector<
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
 		Guards.stringValue(MongoDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		try {
 			const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
@@ -293,6 +294,7 @@ export class MongoDbEntityStorageConnector<
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(MongoDbEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		const prepared = EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
 			nullBehavior: "omit"
@@ -401,6 +403,7 @@ export class MongoDbEntityStorageConnector<
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
 		Guards.stringValue(MongoDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		try {
 			const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
@@ -514,6 +517,7 @@ export class MongoDbEntityStorageConnector<
 		cursor?: string,
 		limit?: number
 	): Promise<{ entities: Partial<T>[]; cursor?: string }> {
+		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
 		EntityStorageHelper.validateProperties(this._entitySchema, properties);
 
@@ -577,6 +581,7 @@ export class MongoDbEntityStorageConnector<
 	 * @returns The total count of entities in the storage.
 	 */
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
+		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 		try {
 			const filter = this.buildFilter(conditions);
 

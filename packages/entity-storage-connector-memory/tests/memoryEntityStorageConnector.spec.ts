@@ -2286,4 +2286,70 @@ describe("MemoryEntityStorageConnector", () => {
 		await connector?.bootstrap?.();
 		expect(await connector.count()).toEqual(0);
 	});
+
+	describe("property validation", () => {
+		let connector: MemoryEntityStorageConnector<TestType>;
+
+		beforeAll(() => {
+			connector = new MemoryEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: { storageKey: "test-property-validation" }
+			});
+		});
+
+		test("query() rejects an unrecognised condition property", async () => {
+			await expect(
+				connector.query({
+					property: "__injected",
+					comparison: ComparisonOperator.Equals,
+					value: "x"
+				})
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entityStorageHelper.unknownPropertyInConditionProperty"
+			});
+		});
+
+		test("count() rejects an unrecognised condition property", async () => {
+			await expect(
+				connector.count({
+					property: "__injected",
+					comparison: ComparisonOperator.Equals,
+					value: "x"
+				})
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entityStorageHelper.unknownPropertyInConditionProperty"
+			});
+		});
+
+		test("get() rejects an unrecognised simple condition property", async () => {
+			await expect(
+				connector.get("id", undefined, [{ property: "__injected" as keyof TestType, value: "x" }])
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entityStorageHelper.unknownPropertyInConditions"
+			});
+		});
+
+		test("set() rejects an unrecognised simple condition property", async () => {
+			await expect(
+				connector.set({ id: "1", value1: "aaa", value2: 1 }, [
+					{ property: "__injected" as keyof TestType, value: "x" }
+				])
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entityStorageHelper.unknownPropertyInConditions"
+			});
+		});
+
+		test("remove() rejects an unrecognised simple condition property", async () => {
+			await expect(
+				connector.remove("id", [{ property: "__injected" as keyof TestType, value: "x" }])
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entityStorageHelper.unknownPropertyInConditions"
+			});
+		});
+	});
 });

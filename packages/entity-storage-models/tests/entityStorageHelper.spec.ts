@@ -15,6 +15,21 @@ import { nameof } from "@twin.org/nameof";
 import { EntityStorageHelper } from "../src/helpers/entityStorageHelper.js";
 
 @entity()
+class ValidationTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string" })
+	public value1!: string;
+
+	@property({ type: "number", optional: true })
+	public count?: number;
+
+	@property({ type: "object", optional: true })
+	public address?: object;
+}
+
+@entity()
 class SortTestType {
 	@property({ type: "string", isPrimary: true })
 	public id!: string;
@@ -69,6 +84,9 @@ describe("EntityStorageHelper.prepareEntity", () => {
 		);
 		EntitySchemaFactory.register(nameof<SortTestType>(), () =>
 			EntitySchemaHelper.getSchema(SortTestType)
+		);
+		EntitySchemaFactory.register(nameof<ValidationTestType>(), () =>
+			EntitySchemaHelper.getSchema(ValidationTestType)
 		);
 	});
 
@@ -429,5 +447,237 @@ describe("EntityStorageHelper.validateProperties", () => {
 		} catch (err) {
 			expect(BaseError.isErrorMessage(err, "entityStorageHelper.propertyNotInSchema")).toBe(true);
 		}
+	});
+});
+
+describe("EntityStorageHelper.validateConditionProperties", () => {
+	let schema: ReturnType<typeof EntitySchemaHelper.getSchema<ValidationTestType>>;
+
+	beforeAll(() => {
+		schema = EntitySchemaFactory.get(nameof<ValidationTestType>());
+	});
+
+	test("does not throw when condition is undefined", () => {
+		expect(() => EntityStorageHelper.validateConditionProperties(schema, undefined)).not.toThrow();
+	});
+
+	test("does not throw for a valid schema property", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: "value1",
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			})
+		).not.toThrow();
+	});
+
+	test("does not throw for the primary key property", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: "id",
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			})
+		).not.toThrow();
+	});
+
+	test("throws unknownPropertyInConditionProperty for a property not in the schema", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: "__injected",
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			})
+		).toThrow(GeneralError);
+	});
+
+	test("error message is unknownPropertyInConditionProperty for an unrecognised property", () => {
+		expect.assertions(1);
+		try {
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: "__injected",
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			});
+		} catch (err) {
+			expect(
+				BaseError.isErrorMessage(err, "entityStorageHelper.unknownPropertyInConditionProperty")
+			).toBe(true);
+		}
+	});
+
+	test("does not throw for a dot-notation path whose root is an object property", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: "address.street",
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			})
+		).not.toThrow();
+	});
+
+	test("throws unknownPropertyInConditionProperty when dot-notation root is not in schema", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: "__inject.field",
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			})
+		).toThrow(GeneralError);
+	});
+
+	test("throws invalidConditionPropertyPath when dot-notation is used on a non-object property", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: "value1.subField",
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			})
+		).toThrow(GeneralError);
+	});
+
+	test("error message is invalidConditionPropertyPath for dot-notation on a non-object property", () => {
+		expect.assertions(1);
+		try {
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: "value1.subField",
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			});
+		} catch (err) {
+			expect(
+				BaseError.isErrorMessage(err, "entityStorageHelper.invalidConditionPropertyPath")
+			).toBe(true);
+		}
+	});
+
+	test("throws invalidConditionPropertyPath when a sub-path segment contains a single quote", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: "address.foo'bar",
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			})
+		).toThrow(GeneralError);
+	});
+
+	test("throws invalidConditionPropertyPath when a sub-path segment contains a semicolon", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: "address.foo;DROP",
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			})
+		).toThrow(GeneralError);
+	});
+
+	test("throws invalidConditionPropertyPath when a sub-path segment contains a SQL comment sequence", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: "address.foo--bar",
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			})
+		).toThrow(GeneralError);
+	});
+
+	test("throws invalidConditionPropertyPath when a sub-path segment exceeds the maximum length", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: `address.${"a".repeat(129)}`,
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			})
+		).toThrow(GeneralError);
+	});
+
+	test("does not throw for a sub-path segment with valid special characters", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				property: "address.first-name",
+				comparison: ComparisonOperator.Equals,
+				value: "x"
+			})
+		).not.toThrow();
+	});
+
+	test("recursively validates nested compound conditions", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				conditions: [
+					{ property: "id", comparison: ComparisonOperator.Equals, value: "1" },
+					{
+						property: "__injected",
+						comparison: ComparisonOperator.Equals,
+						value: "x"
+					}
+				],
+				logicalOperator: LogicalOperator.And
+			})
+		).toThrow(GeneralError);
+	});
+
+	test("does not throw for a valid compound condition", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditionProperties(schema, {
+				conditions: [
+					{ property: "id", comparison: ComparisonOperator.Equals, value: "1" },
+					{ property: "value1", comparison: ComparisonOperator.Equals, value: "x" }
+				],
+				logicalOperator: LogicalOperator.And
+			})
+		).not.toThrow();
+	});
+});
+
+describe("EntityStorageHelper.validateConditions", () => {
+	let schema: ReturnType<typeof EntitySchemaHelper.getSchema<ValidationTestType>>;
+
+	beforeAll(() => {
+		schema = EntitySchemaFactory.get(nameof<ValidationTestType>());
+	});
+
+	test("does not throw when conditions is undefined", () => {
+		expect(() => EntityStorageHelper.validateConditions(schema, undefined)).not.toThrow();
+	});
+
+	test("does not throw when conditions is an empty array", () => {
+		expect(() => EntityStorageHelper.validateConditions(schema, [])).not.toThrow();
+	});
+
+	test("does not throw for a valid schema property", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditions(schema, [{ property: "value1", value: "x" }])
+		).not.toThrow();
+	});
+
+	test("throws unknownPropertyInConditions for an unrecognised property", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditions(schema, [
+				{ property: "__injected" as keyof ValidationTestType, value: "x" }
+			])
+		).toThrow(GeneralError);
+	});
+
+	test("error message is unknownPropertyInConditions for an unrecognised property", () => {
+		expect.assertions(1);
+		try {
+			EntityStorageHelper.validateConditions(schema, [
+				{ property: "__injected" as keyof ValidationTestType, value: "x" }
+			]);
+		} catch (err) {
+			expect(BaseError.isErrorMessage(err, "entityStorageHelper.unknownPropertyInConditions")).toBe(
+				true
+			);
+		}
+	});
+
+	test("throws on the first unknown property in a multi-item array", () => {
+		expect(() =>
+			EntityStorageHelper.validateConditions(schema, [
+				{ property: "id", value: "1" },
+				{ property: "__injected" as keyof ValidationTestType, value: "x" }
+			])
+		).toThrow(GeneralError);
 	});
 });

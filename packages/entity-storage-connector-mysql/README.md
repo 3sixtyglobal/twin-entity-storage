@@ -14,7 +14,7 @@ To perform testing of this component it may be necessary to launch a local insta
 
 ```shell
 docker pull mysql:latest
-docker run -d --name twin-entity-storage-mysql -e MYSQL_ROOT_PASSWORD=password -p 3400:3306 mysql:latest
+docker run -d --name twin-entity-storage-mysql -e MYSQL_ROOT_PASSWORD=password -p 3306:3306 mysql:latest
 ```
 
 ## Examples

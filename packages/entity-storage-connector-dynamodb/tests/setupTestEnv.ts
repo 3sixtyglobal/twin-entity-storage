@@ -6,7 +6,7 @@ import * as dotenv from "dotenv";
 import type { IDynamoDbEntityStorageConnectorConfig } from "../src/models/IDynamoDbEntityStorageConnectorConfig.js";
 
 dotenv.config({
-	path: [path.join(__dirname, ".env"), path.join(__dirname, ".env.dev")],
+	path: [path.join(__dirname, ".env.dev"), path.join(__dirname, ".env")],
 	quiet: true
 });
 
