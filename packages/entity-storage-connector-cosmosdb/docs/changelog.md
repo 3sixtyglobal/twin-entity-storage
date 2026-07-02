@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.9.1-next.7](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-cosmosdb-v0.9.1-next.6...entity-storage-connector-cosmosdb-v0.9.1-next.7) (2026-07-02)
+
+
+### Features
+
+* input validation ([4300a20](https://github.com/iotaledger/twin-entity-storage/commit/4300a20fd8683211b55f11ed0773319e57a9ee22))
+* input validation ([8db3cab](https://github.com/iotaledger/twin-entity-storage/commit/8db3cab70d1282e18c0fd87b0454e5e2a33ca044))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.1-next.6 to 0.9.1-next.7
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.1-next.6 to 0.9.1-next.7
+
 ## [0.9.1-next.6](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-cosmosdb-v0.9.1-next.5...entity-storage-connector-cosmosdb-v0.9.1-next.6) (2026-07-01)
 
 
