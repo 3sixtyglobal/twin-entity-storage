@@ -300,13 +300,15 @@ export class MySqlEntityStorageConnector<
 				// Decrease the use counter and close the pool if no longer used
 				sharedPools[poolId].useCounter--;
 				if (sharedPools[poolId].useCounter <= 0) {
-					await this._pool.end();
+					await sharedPools[poolId].pool.end();
 					delete sharedPools[poolId];
+					this._pool = undefined;
 				}
 				SharedStore.set("mySqlPools", sharedPools);
+			} else {
+				// Pool was already ended by another connector; clear our stale reference.
+				this._pool = undefined;
 			}
-
-			this._pool = undefined;
 		}
 	}
 
@@ -890,34 +892,6 @@ export class MySqlEntityStorageConnector<
 			return Is.arrayValue(rows);
 		} catch {
 			return false;
-		}
-	}
-
-	/**
-	 * Close the connection pool and release all connections.
-	 * Should be called when the connector is no longer needed.
-	 * @returns Nothing.
-	 */
-	public async close(): Promise<void> {
-		if (this._pool) {
-			const poolConfig = this.createPoolConfig();
-			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
-
-			const sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
-				"mySqlPools",
-				() => ({})
-			);
-			if (sharedPools[poolId]) {
-				// Decrease the use counter and close the pool if no longer used
-				sharedPools[poolId].useCounter--;
-				if (sharedPools[poolId].useCounter <= 0) {
-					await this._pool.end();
-					delete sharedPools[poolId];
-				}
-				SharedStore.set("mySqlPools", sharedPools);
-			}
-
-			this._pool = undefined;
 		}
 	}
 
