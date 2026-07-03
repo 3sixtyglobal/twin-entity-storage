@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.1-next.8](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-gcp-firestore-v0.9.1-next.7...entity-storage-connector-gcp-firestore-v0.9.1-next.8) (2026-07-03)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-connector-gcp-firestore:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.1-next.7 to 0.9.1-next.8
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.1-next.7 to 0.9.1-next.8
+
 ## [0.9.1-next.7](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-gcp-firestore-v0.9.1-next.6...entity-storage-connector-gcp-firestore-v0.9.1-next.7) (2026-07-02)
 
 
