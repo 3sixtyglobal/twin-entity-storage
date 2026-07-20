@@ -135,6 +135,18 @@ class ObjectJsonArrayTestType {
 	public keywords?: string[];
 }
 
+@entity()
+class AnnotationTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "object", optional: true })
+	public annotationObject?: { globalId: string };
+
+	@property({ type: "string", optional: true })
+	public label?: string;
+}
+
 let currentUser = "user";
 let currentConnector: IEntityStorageConnector | undefined;
 
@@ -164,6 +176,9 @@ describe("MongoDbEntityStorageConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<ObjectJsonArrayTestType>(), () =>
 			EntitySchemaHelper.getSchema(ObjectJsonArrayTestType)
+		);
+		EntitySchemaFactory.register(nameof<AnnotationTestType>(), () =>
+			EntitySchemaHelper.getSchema(AnnotationTestType)
 		);
 
 		createConnector = async <T>(entitySchema: string, partitionContextIds?: string[]) => {
@@ -2290,6 +2305,182 @@ describe("MongoDbEntityStorageConnector", () => {
 		await connector?.teardown?.();
 		await connector?.bootstrap?.();
 		expect(await connector.count()).toEqual(0);
+	});
+
+	describe("dynamically-built OR conditions on dot-notation path", () => {
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"returns all entities whose annotationObject.globalId appears in the id list",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" }, label: "alpha" });
+				await connector.set({ id: "2", annotationObject: { globalId: "gid-b" }, label: "beta" });
+				await connector.set({ id: "3", annotationObject: { globalId: "gid-c" }, label: "gamma" });
+				await connector.set({ id: "4", label: "no-annotation" });
+
+				const entityIds = ["gid-a", "gid-c"];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(2);
+				expect(result.entities.map(e => (e as AnnotationTestType).id).sort()).toEqual(["1", "3"]);
+			}
+		);
+
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"returns a single entity when the id list has one entry",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" } });
+				await connector.set({ id: "2", annotationObject: { globalId: "gid-b" } });
+
+				const entityIds = ["gid-a"];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(1);
+				expect((result.entities[0] as AnnotationTestType).id).toEqual("1");
+			}
+		);
+
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"returns empty when no entity matches any id in the list",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" } });
+				await connector.set({ id: "2", annotationObject: { globalId: "gid-b" } });
+
+				const entityIds = ["nonexistent-x", "nonexistent-y"];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(0);
+				expect(result.cursor).toBeUndefined();
+			}
+		);
+
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"does not return entities that lack annotationObject when querying by globalId",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" } });
+				await connector.set({ id: "2", label: "no-annotation" });
+				await connector.set({ id: "3", label: "also-no-annotation" });
+
+				const entityIds = ["gid-a"];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(1);
+				expect((result.entities[0] as AnnotationTestType).id).toEqual("1");
+			}
+		);
+
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"returns only the matching subset when id list partially overlaps stored globalIds",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" } });
+				await connector.set({ id: "2", annotationObject: { globalId: "gid-b" } });
+				await connector.set({ id: "3", annotationObject: { globalId: "gid-c" } });
+
+				const entityIds = ["gid-a", "gid-z"];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(1);
+				expect((result.entities[0] as AnnotationTestType).id).toEqual("1");
+			}
+		);
+
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"matches entity whose annotationObject.globalId is an empty string",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" } });
+				await connector.set({ id: "2", annotationObject: { globalId: "" } });
+				await connector.set({ id: "3", annotationObject: { globalId: "gid-c" } });
+
+				const entityIds = [""];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(1);
+				expect((result.entities[0] as AnnotationTestType).id).toEqual("2");
+			}
+		);
+
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"returns no results when the id list contains only spaces and no entity matches",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" } });
+				await connector.set({ id: "2", annotationObject: { globalId: "gid-b" } });
+				await connector.set({ id: "3", annotationObject: { globalId: "gid-c" } });
+
+				const entityIds = ["   "];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(0);
+				expect(result.cursor).toBeUndefined();
+			}
+		);
 	});
 
 	describe("property validation", () => {
