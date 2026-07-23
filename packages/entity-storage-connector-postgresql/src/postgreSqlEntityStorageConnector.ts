@@ -409,7 +409,7 @@ export class PostgreSqlEntityStorageConnector<
 		try {
 			if (Is.arrayValue(conditions)) {
 				const itemData = await this.get(id);
-				if (Is.notEmpty(itemData) && !this.verifyConditions(conditions, itemData as T)) {
+				if (Is.notEmpty(itemData) && !this.verifyConditions(conditions, itemData)) {
 					return;
 				}
 			}
