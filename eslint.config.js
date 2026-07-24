@@ -130,7 +130,25 @@ const jsRules = {
 	'no-prototype-builtins': 'error',
 	'no-regex-spaces': 'error',
 	'no-restricted-globals': 'error',
-	'no-restricted-imports': 'error',
+	'no-restricted-imports': [
+		'error',
+		{
+			patterns: [
+				{
+					group: [
+						'@twin.org/**/index.js',
+						'./index.js',
+						'./**/index.js',
+						'../index.js',
+						'../**/index.js',
+						'!../dist/es/index.js',
+						'!**/dist/es/index.js'
+					],
+					message: 'Import from a concrete module file instead of a barrel file.'
+				}
+			]
+		}
+	],
 	'no-restricted-properties': 'error',
 	'no-return-assign': 'error',
 	'no-script-url': 'error',
@@ -729,6 +747,13 @@ const config = [
 		}
 	},
 
+	// Bin entry files can import package dist entrypoints.
+	{
+		files: ['**/bin/index.js'],
+		rules: {
+			'no-restricted-imports': 'off'
+		}
+	},
 	// Test files
 	{
 		files: ['**/tests/**/*.ts'],
