@@ -580,6 +580,72 @@ describe("DynamoDbEntityStorageConnector", () => {
 		expect(result2.cursor).toBeUndefined();
 	});
 
+	test("full unsorted cursor walk returns all items exactly once", async () => {
+		const BATCH = 50;
+		const PAGE = 7;
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		const seeded = [...new Array(BATCH).keys()].map(i => ({
+			id: String(i + 1).padStart(4, "0"),
+			value1: "walk",
+			value2: i
+		}));
+		await connector.setBatch(seeded);
+
+		const seen = new Set<string>();
+		let cursor: string | undefined;
+		let pages = 0;
+		do {
+			const page = await connector.query(undefined, undefined, undefined, cursor, PAGE);
+			for (const e of page.entities) {
+				expect(seen.has(e.id as string), `duplicate id ${e.id}`).toBe(false);
+				seen.add(e.id as string);
+			}
+			cursor = page.cursor;
+			expect(++pages).toBeLessThan(100);
+		} while (cursor !== undefined);
+
+		for (const item of seeded) {
+			expect(seen.has(item.id), `id ${item.id} missing from full walk`).toBe(true);
+		}
+		expect(seen.size).toBe(BATCH);
+	});
+
+	test("full cursor walk with condition returns matching items exactly once", async () => {
+		const BATCH = 30;
+		const PAGE = 4;
+		const THRESHOLD = 15;
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < BATCH; i++) {
+			await connector.set({
+				id: String(i + 1).padStart(4, "0"),
+				value1: "walk",
+				value2: i
+			});
+		}
+
+		const condition = {
+			property: "id" as keyof TestType,
+			comparison: ComparisonOperator.GreaterThanOrEqual,
+			value: String(THRESHOLD + 1).padStart(4, "0")
+		};
+
+		const seen = new Set<string>();
+		let cursor: string | undefined;
+		let pages = 0;
+		do {
+			const page = await connector.query(condition, undefined, undefined, cursor, PAGE);
+			for (const e of page.entities) {
+				expect(seen.has(e.id as string), `duplicate id ${e.id}`).toBe(false);
+				expect((e.id as string) >= String(THRESHOLD + 1).padStart(4, "0")).toBe(true);
+				seen.add(e.id as string);
+			}
+			cursor = page.cursor;
+			expect(++pages).toBeLessThan(100);
+		} while (cursor !== undefined);
+
+		expect(seen.size).toBe(BATCH - THRESHOLD);
+	});
+
 	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
 		"can paginate with cursor when sorted by an indexed property",
 		async () => {

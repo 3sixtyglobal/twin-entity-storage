@@ -5,6 +5,7 @@ import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	Converter,
 	GeneralError,
 	Guards,
 	HealthStatus,
@@ -723,25 +724,82 @@ export class MySqlEntityStorageConnector<
 		try {
 			const returnSize = limit ?? MySqlEntityStorageConnector._DEFAULT_LIMIT;
 
-			let orderByClause: string = "";
+			const pkPropName = String(this._primaryKeyProperty.property);
+
+			// Decide whether the caller's sort already includes the PK.  When it does we
+			// skip appending a second PK clause so we never emit "ORDER BY id ..., id ...".
+			const sortsByPK =
+				Is.array(sortProperties) && sortProperties.some(s => String(s.property) === pkPropName);
+
+			// Full ordered column list used for both ORDER BY and the keySet condition.
+			// Format: [user sort cols…] + [pk tie-breaker if not already present].
+			const keySetCols: { prop: string; asc: boolean }[] = [];
 			if (Is.array(sortProperties)) {
-				const orderClauses: string[] = [];
-				for (const sortProperty of sortProperties) {
-					const direction = sortProperty.sortDirection === SortDirection.Ascending ? "ASC" : "DESC";
-					orderClauses.push(`\`${String(sortProperty.property)}\` ${direction}`);
+				for (const s of sortProperties) {
+					keySetCols.push({
+						prop: String(s.property),
+						asc: s.sortDirection === SortDirection.Ascending
+					});
 				}
-				orderByClause = `ORDER BY ${orderClauses.join(", ")}`;
 			}
+			if (!sortsByPK) {
+				keySetCols.push({ prop: pkPropName, asc: true });
+			}
+
+			// When the caller projects specific columns we must still SELECT the PK and any
+			// sort columns so we can build the next-page cursor.  Track which columns we add
+			// internally so we can strip them from the returned entities afterward.
+			const requestedProps = properties ? new Set(properties.map(p => String(p))) : undefined;
+			const internallyAdded = new Set<string>();
+
+			let selectClause: string;
+			if (requestedProps) {
+				const selectSet = new Set(requestedProps);
+				for (const col of keySetCols) {
+					if (!selectSet.has(col.prop)) {
+						selectSet.add(col.prop);
+						internallyAdded.add(col.prop);
+					}
+				}
+				selectClause = [...selectSet].map(p => `\`${p}\``).join(", ");
+			} else {
+				selectClause = "*";
+			}
+
+			const orderByClause = `ORDER BY ${keySetCols.map(c => `\`${c.prop}\` ${c.asc ? "ASC" : "DESC"}`).join(", ")}`;
 
 			const { whereClauses, values } = this.buildWhereClause(conditions, partitionKey);
 
-			const startIndex = Coerce.number(cursor) ?? 0;
+			// Apply keySet condition when continuing from a previous page.
+			if (Is.stringBase64(cursor)) {
+				const parsedCursor = ObjectHelper.fromBytes<{ i: string; sv?: unknown[] }>(
+					Converter.base64ToBytes(cursor)
+				);
 
-			sql = `SELECT ${properties ? properties.map(p => `\`${String(p)}\``).join(", ") : "*"} FROM \`${this._config.database}\`.\`${this._config.tableName}\``;
+				// Reconstruct the ordered last-value list: [sort-col values…, pk].
+				const lastValues: unknown[] = [...(parsedCursor.sv ?? []), parsedCursor.i];
+
+				// Build: (col0 op last0) OR (col0=last0 AND col1 op last1) OR …
+				const orParts: string[] = [];
+				for (let i = 0; i < keySetCols.length; i++) {
+					const parts: string[] = [];
+					for (let j = 0; j < i; j++) {
+						values.push(lastValues[j]);
+						parts.push(`\`${keySetCols[j].prop}\` = ?`);
+					}
+					const op = keySetCols[i].asc ? ">" : "<";
+					values.push(lastValues[i]);
+					parts.push(`\`${keySetCols[i].prop}\` ${op} ?`);
+					orParts.push(parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`);
+				}
+				whereClauses.push(`(${orParts.join(" OR ")})`);
+			}
+
+			sql = `SELECT ${selectClause} FROM \`${this._config.database}\`.\`${this._config.tableName}\``;
 			if (whereClauses.length > 0) {
 				sql += ` WHERE ${whereClauses.join(" AND ")}`;
 			}
-			sql += ` ${orderByClause} LIMIT ${returnSize + 1} OFFSET ${startIndex}`;
+			sql += ` ${orderByClause} LIMIT ${returnSize + 1}`;
 
 			const pool = await this.getPool();
 			const [rows] = (await pool.query(sql, values)) ?? [];
@@ -749,17 +807,36 @@ export class MySqlEntityStorageConnector<
 			const hasMore = Is.array(rows) && rows.length > returnSize;
 			const resultRows = hasMore ? (rows as unknown[]).slice(0, returnSize) : rows;
 			const entities = resultRows as Partial<T>[];
+
+			// Build the next-page cursor from the last returned row before stripping columns.
+			let nextCursor: string | undefined;
+			if (hasMore && entities.length > 0) {
+				const lastRow = entities[entities.length - 1];
+				// Sort values are all keySet columns except the final PK entry.
+				const sortValues = keySetCols
+					.slice(0, -1)
+					.map(c => ObjectHelper.propertyGet(lastRow, c.prop));
+				const lastId = ObjectHelper.propertyGet<string>(lastRow, pkPropName);
+
+				if (Is.stringValue(lastId)) {
+					const cursorData: { i: string; sv?: unknown[] } =
+						sortValues.length > 0 ? { i: lastId, sv: sortValues } : { i: lastId };
+					nextCursor = Converter.bytesToBase64(ObjectHelper.toBytes(cursorData));
+				}
+			}
+
 			for (let i = 0; i < entities.length; i++) {
 				entities[i] = EntityStorageHelper.unPrepareEntity(entities[i], [
 					MySqlEntityStorageConnector._PARTITION_KEY
 				]);
+				// Remove any columns we added internally for cursor purposes.
+				for (const col of internallyAdded) {
+					ObjectHelper.propertyDelete(entities[i], col);
+				}
 				entities[i] = this.coerceEntityTypes(entities[i]);
 			}
 
-			return {
-				entities,
-				cursor: hasMore ? Coerce.string(startIndex + returnSize) : undefined
-			};
+			return { entities, cursor: nextCursor };
 		} catch (err) {
 			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "queryFailed", { sql }, err);
 		}
