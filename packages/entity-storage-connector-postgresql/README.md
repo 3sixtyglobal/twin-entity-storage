@@ -14,7 +14,7 @@ To perform testing of this component it may be necessary to launch a local insta
 
 ```shell
 docker pull postgres:latest
-docker run -d --name twin-entity-storage-postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -p 5444:5432 postgres:latest
+docker run -d --name twin-entity-storage-postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -p 5432:5432 postgres:latest
 ```
 
 ## Examples

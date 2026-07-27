@@ -129,3 +129,11 @@ Maximum queued requests (0 = unlimited).
 ```ts
 0
 ```
+
+***
+
+### mutexTimeoutMs? {#mutextimeoutms}
+
+> `optional` **mutexTimeoutMs?**: `number`
+
+Maximum milliseconds to wait for the per-directory write lock before throwing.

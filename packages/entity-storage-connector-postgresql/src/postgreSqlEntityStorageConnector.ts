@@ -301,6 +301,7 @@ export class PostgreSqlEntityStorageConnector<
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
 		Guards.stringValue(PostgreSqlEntityStorageConnector.CLASS_NAME, nameof(id), id);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
@@ -386,6 +387,7 @@ export class PostgreSqlEntityStorageConnector<
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(PostgreSqlEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
@@ -407,7 +409,7 @@ export class PostgreSqlEntityStorageConnector<
 		try {
 			if (Is.arrayValue(conditions)) {
 				const itemData = await this.get(id);
-				if (Is.notEmpty(itemData) && !this.verifyConditions(conditions, itemData as T)) {
+				if (Is.notEmpty(itemData) && !this.verifyConditions(conditions, itemData)) {
 					return;
 				}
 			}
@@ -546,6 +548,7 @@ export class PostgreSqlEntityStorageConnector<
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
 		Guards.stringValue(PostgreSqlEntityStorageConnector.CLASS_NAME, nameof(id), id);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
@@ -782,6 +785,7 @@ export class PostgreSqlEntityStorageConnector<
 
 		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
 		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 
 		if (!Is.empty(limit)) {
 			const validationFailures: IValidationFailure[] = [];
@@ -877,6 +881,8 @@ export class PostgreSqlEntityStorageConnector<
 	 * @returns The total count of entities in the storage.
 	 */
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
+		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
+
 		let queryStr: string | undefined;
 		try {
 			const dbConnection = await this.createConnection();
@@ -915,7 +921,8 @@ export class PostgreSqlEntityStorageConnector<
 		try {
 			const dbConnection = await this.createConnection();
 			const res = await dbConnection.unsafe(
-				`SELECT datname FROM pg_catalog.pg_database WHERE datname = '${this._config.database}'`
+				"SELECT datname FROM pg_catalog.pg_database WHERE datname = $1",
+				[this._config.database] as postgres.ParameterOrJSON<never>[]
 			);
 			return res.length > 0;
 		} catch {

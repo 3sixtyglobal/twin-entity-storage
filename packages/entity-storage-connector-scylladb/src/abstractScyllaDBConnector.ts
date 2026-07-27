@@ -180,6 +180,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
 		Guards.stringValue(AbstractScyllaDBConnector.CLASS_NAME, nameof(id), id);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
@@ -382,19 +383,16 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 */
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
 		let connection;
+
+		const contextIds = await ContextIdStore.getContextIds();
+		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const { whereClause, params, noResults } = this.buildCqlConditions(conditions, partitionKey);
+
+		if (noResults) {
+			return 0;
+		}
+
 		try {
-			const contextIds = await ContextIdStore.getContextIds();
-			const partitionKey = ContextIdHelper.combinedContextKey(
-				contextIds,
-				this._partitionContextIds
-			);
-
-			const { whereClause, params, noResults } = this.buildCqlConditions(conditions, partitionKey);
-
-			if (noResults) {
-				return 0;
-			}
-
 			const sql = `SELECT COUNT(*) FROM "${this.safeTableName(this._fullTableName)}" WHERE ${whereClause} ALLOW FILTERING`;
 
 			connection = await this.openConnection();
@@ -771,7 +769,8 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 		if (Is.arrayValue(conditions)) {
 			for (const condition of conditions) {
-				sqlConditions.push(`"${condition.property as string}"=?`);
+				const propName = condition.property as string;
+				sqlConditions.push(`"${propName}"=?`);
 				const schemaProperty = properties.find(s => s.property === condition.property);
 				conditionValues.push(this.propertyToDbValue(condition.value, schemaProperty));
 			}
@@ -789,6 +788,28 @@ export abstract class AbstractScyllaDBConnector<T> {
 	}
 
 	/**
+	 * Recursively flatten nested AND-only groups into a flat list of comparators.
+	 * @param conditions The group's conditions array to flatten.
+	 * @returns A flat list of leaf comparators.
+	 * @throws GeneralError if any OR group is encountered.
+	 * @internal
+	 */
+	private flattenConditions(conditions: EntityCondition<T>[]): IComparator[] {
+		const result: IComparator[] = [];
+		for (const cond of conditions) {
+			if ("conditions" in cond) {
+				if (cond.logicalOperator === LogicalOperator.Or) {
+					throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "orConditionNotSupported");
+				}
+				result.push(...this.flattenConditions(cond.conditions));
+			} else {
+				result.push(cond);
+			}
+		}
+		return result;
+	}
+
+	/**
 	 * Parse, validate, and build a CQL WHERE clause from an EntityCondition tree.
 	 * The partition key equality is always the first clause; user conditions follow.
 	 * @param conditions The optional conditions to match for the entities.
@@ -801,26 +822,27 @@ export abstract class AbstractScyllaDBConnector<T> {
 		conditions: EntityCondition<T> | undefined,
 		partitionKey: string | undefined
 	): { whereClause: string; params: unknown[]; noResults?: boolean } {
-		let conditionsList: EntityCondition<T>[] = [];
+		let conditionsList: IComparator[] = [];
 		if (conditions !== undefined) {
 			if ("conditions" in conditions) {
-				if ((conditions as IComparatorGroup).logicalOperator === LogicalOperator.Or) {
+				if (conditions.logicalOperator === LogicalOperator.Or) {
 					throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "orConditionNotSupported");
 				}
-				conditionsList = conditions.conditions;
+				conditionsList = this.flattenConditions(conditions.conditions);
 			} else {
 				conditionsList = [conditions];
 			}
 		}
 
 		for (const cond of conditionsList) {
-			const comparator = cond as IComparator;
-			if (String(comparator.property).includes(".")) {
+			const comparator = cond;
+			if (comparator.property.includes(".")) {
 				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "comparisonNotSupported", {
 					property: comparator.property,
 					reason: "dot-notation nested property paths are not supported in CQL"
 				});
 			}
+			EntityStorageHelper.validateConditionProperties(this._entitySchema, cond);
 			if (
 				(comparator.comparison === ComparisonOperator.Equals ||
 					comparator.comparison === ComparisonOperator.NotEquals) &&
@@ -847,7 +869,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 		const params: unknown[] = [partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE];
 
 		for (const cond of conditionsList) {
-			const condition = cond as IComparator;
+			const condition = cond;
 			const descriptor = this._entitySchema.properties?.find(
 				p => p.property === condition.property
 			);
@@ -856,11 +878,12 @@ export abstract class AbstractScyllaDBConnector<T> {
 				condition.comparison === ComparisonOperator.NotIncludes
 			) {
 				const serialized = this.propertyToDbValue(condition.value, descriptor);
-				const propValue = `'%${Is.stringValue(serialized) ? serialized : ""}%'`;
+				const searchStr = Is.stringValue(serialized) ? serialized : "";
+				params.push(`%${searchStr}%`);
 				if (condition.comparison === ComparisonOperator.Includes) {
-					conds.push(`"${condition.property}" LIKE ${propValue}`);
-				} else if (condition.comparison === ComparisonOperator.NotIncludes) {
-					conds.push(`"${condition.property}" NOT LIKE ${propValue}`);
+					conds.push(`"${condition.property}" LIKE ?`);
+				} else {
+					conds.push(`"${condition.property}" NOT LIKE ?`);
 				}
 			} else if (condition.comparison === ComparisonOperator.In) {
 				// Guard must come first: Is.arrayValue([]) returns false for an empty array,

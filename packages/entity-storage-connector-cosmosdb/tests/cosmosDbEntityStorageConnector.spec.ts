@@ -135,6 +135,18 @@ class ObjectJsonArrayTestType {
 	public keywords?: string[];
 }
 
+@entity()
+class AnnotationTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "object", optional: true })
+	public annotationObject?: { globalId: string };
+
+	@property({ type: "string", optional: true })
+	public label?: string;
+}
+
 let currentUser = "user";
 let currentConnector: IEntityStorageConnector | undefined;
 
@@ -164,6 +176,9 @@ describe("CosmosDbEntityStorageConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<ObjectJsonArrayTestType>(), () =>
 			EntitySchemaHelper.getSchema(ObjectJsonArrayTestType)
+		);
+		EntitySchemaFactory.register(nameof<AnnotationTestType>(), () =>
+			EntitySchemaHelper.getSchema(AnnotationTestType)
 		);
 
 		createConnector = async <T>(entitySchema: string, partitionContextIds?: string[]) => {
@@ -563,6 +578,72 @@ describe("CosmosDbEntityStorageConnector", () => {
 		const result2 = await connector.query(undefined, undefined, undefined, result.cursor, 10);
 		expect(result2.entities.length).toEqual(5);
 		expect(result2.cursor).toBeUndefined();
+	});
+
+	test("full unsorted cursor walk returns all items exactly once", async () => {
+		const BATCH = 50;
+		const PAGE = 7;
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		const seeded = [...new Array(BATCH).keys()].map(i => ({
+			id: String(i + 1).padStart(4, "0"),
+			value1: "walk",
+			value2: i
+		}));
+		await connector.setBatch(seeded);
+
+		const seen = new Set<string>();
+		let cursor: string | undefined;
+		let pages = 0;
+		do {
+			const page = await connector.query(undefined, undefined, undefined, cursor, PAGE);
+			for (const e of page.entities) {
+				expect(seen.has(e.id as string), `duplicate id ${e.id}`).toBe(false);
+				seen.add(e.id as string);
+			}
+			cursor = page.cursor;
+			expect(++pages).toBeLessThan(100);
+		} while (cursor !== undefined);
+
+		for (const item of seeded) {
+			expect(seen.has(item.id), `id ${item.id} missing from full walk`).toBe(true);
+		}
+		expect(seen.size).toBe(BATCH);
+	});
+
+	test("full cursor walk with condition returns matching items exactly once", async () => {
+		const BATCH = 30;
+		const PAGE = 4;
+		const THRESHOLD = 15;
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		for (let i = 0; i < BATCH; i++) {
+			await connector.set({
+				id: String(i + 1).padStart(4, "0"),
+				value1: "walk",
+				value2: i
+			});
+		}
+
+		const condition = {
+			property: "id" as keyof TestType,
+			comparison: ComparisonOperator.GreaterThanOrEqual,
+			value: String(THRESHOLD + 1).padStart(4, "0")
+		};
+
+		const seen = new Set<string>();
+		let cursor: string | undefined;
+		let pages = 0;
+		do {
+			const page = await connector.query(condition, undefined, undefined, cursor, PAGE);
+			for (const e of page.entities) {
+				expect(seen.has(e.id as string), `duplicate id ${e.id}`).toBe(false);
+				expect((e.id as string) >= String(THRESHOLD + 1).padStart(4, "0")).toBe(true);
+				seen.add(e.id as string);
+			}
+			cursor = page.cursor;
+			expect(++pages).toBeLessThan(100);
+		} while (cursor !== undefined);
+
+		expect(seen.size).toBe(BATCH - THRESHOLD);
 	});
 
 	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
@@ -1352,6 +1433,200 @@ describe("CosmosDbEntityStorageConnector", () => {
 		);
 	});
 
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with single-child AND group wrapping a multi-child OR group",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "alpha", value2: 1 });
+			await connector.set({ id: "2", value1: "beta", value2: 2 });
+			await connector.set({ id: "3", value1: "gamma", value2: 3 });
+			// AND[ OR[value1==alpha, value1==beta] ] — single-child AND wrapping a multi-child OR.
+			// Without the fix DynamoDB rejects the generated ( (expr) ) as redundant parens.
+			const result = await connector.query({
+				logicalOperator: LogicalOperator.And,
+				conditions: [
+					{
+						logicalOperator: LogicalOperator.Or,
+						conditions: [
+							{ property: "value1", value: "alpha", comparison: ComparisonOperator.Equals },
+							{ property: "value1", value: "beta", comparison: ComparisonOperator.Equals }
+						]
+					}
+				]
+			});
+			expect(result.entities.length).toEqual(2);
+			expect(result.entities.map((e: Partial<TestType>) => e.id).sort()).toEqual(["1", "2"]);
+		}
+	);
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with OR group containing multiple AND children",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "alpha", value2: 1 });
+			await connector.set({ id: "2", value1: "beta", value2: 2 });
+			await connector.set({ id: "3", value1: "alpha", value2: 2 });
+			await connector.set({ id: "4", value1: "gamma", value2: 3 });
+			// OR[ AND[value1==alpha, value2==1], AND[value1==beta, value2==2] ]
+			// Uses OR at the outer level and AND at the inner level.
+			const result = await connector.query({
+				logicalOperator: LogicalOperator.Or,
+				conditions: [
+					{
+						logicalOperator: LogicalOperator.And,
+						conditions: [
+							{ property: "value1", value: "alpha", comparison: ComparisonOperator.Equals },
+							{ property: "value2", value: 1, comparison: ComparisonOperator.Equals }
+						]
+					},
+					{
+						logicalOperator: LogicalOperator.And,
+						conditions: [
+							{ property: "value1", value: "beta", comparison: ComparisonOperator.Equals },
+							{ property: "value2", value: 2, comparison: ComparisonOperator.Equals }
+						]
+					}
+				]
+			});
+			expect(result.entities.length).toEqual(2);
+			expect(result.entities.map((e: Partial<TestType>) => e.id).sort()).toEqual(["1", "2"]);
+		}
+	);
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with AND group containing multiple OR children",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "alpha", value2: 1 });
+			await connector.set({ id: "2", value1: "beta", value2: 2 });
+			await connector.set({ id: "3", value1: "alpha", value2: 3 });
+			await connector.set({ id: "4", value1: "gamma", value2: 1 });
+			// AND[ OR[value1==alpha, value1==beta], OR[value2==1, value2==2] ]
+			// Uses AND at the outer level and OR at each inner group.
+			const result = await connector.query({
+				logicalOperator: LogicalOperator.And,
+				conditions: [
+					{
+						logicalOperator: LogicalOperator.Or,
+						conditions: [
+							{ property: "value1", value: "alpha", comparison: ComparisonOperator.Equals },
+							{ property: "value1", value: "beta", comparison: ComparisonOperator.Equals }
+						]
+					},
+					{
+						logicalOperator: LogicalOperator.Or,
+						conditions: [
+							{ property: "value2", value: 1, comparison: ComparisonOperator.Equals },
+							{ property: "value2", value: 2, comparison: ComparisonOperator.Equals }
+						]
+					}
+				]
+			});
+			expect(result.entities.length).toEqual(2);
+			expect(result.entities.map((e: Partial<TestType>) => e.id).sort()).toEqual(["1", "2"]);
+		}
+	);
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with triple-nested alternating logical operators",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "alpha", value2: 1 });
+			await connector.set({ id: "2", value1: "beta", value2: 2 });
+			await connector.set({ id: "3", value1: "gamma", value2: 3 });
+			// OR[ AND[ OR[value1==alpha, value1==beta] ] ] — three levels of nesting
+			// with alternating OR → AND → OR logical operators.
+			const result = await connector.query({
+				logicalOperator: LogicalOperator.Or,
+				conditions: [
+					{
+						logicalOperator: LogicalOperator.And,
+						conditions: [
+							{
+								logicalOperator: LogicalOperator.Or,
+								conditions: [
+									{
+										property: "value1",
+										value: "alpha",
+										comparison: ComparisonOperator.Equals
+									},
+									{
+										property: "value1",
+										value: "beta",
+										comparison: ComparisonOperator.Equals
+									}
+								]
+							}
+						]
+					}
+				]
+			});
+			expect(result.entities.length).toEqual(2);
+			expect(result.entities.map((e: Partial<TestType>) => e.id).sort()).toEqual(["1", "2"]);
+		}
+	);
+
+	test("can query with an empty nested condition group in AND", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "alpha", value2: 1 });
+		await connector.set({ id: "2", value1: "beta", value2: 2 });
+		await connector.set({ id: "3", value1: "gamma", value2: 3 });
+		// AND[ AND[] ] — empty AND child inside outer AND applies no constraint.
+		const result = await connector.query({
+			logicalOperator: LogicalOperator.And,
+			conditions: [
+				{
+					logicalOperator: LogicalOperator.And,
+					conditions: []
+				}
+			]
+		});
+		expect(result.entities.length).toEqual(3);
+	});
+
+	test("can query with an empty nested group alongside a real condition", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "alpha", value2: 1 });
+		await connector.set({ id: "2", value1: "beta", value2: 2 });
+		await connector.set({ id: "3", value1: "gamma", value2: 3 });
+		// AND[ AND[], value1==alpha ] — empty AND sibling is a no-op; only value1==alpha filters.
+		const result = await connector.query({
+			logicalOperator: LogicalOperator.And,
+			conditions: [
+				{
+					logicalOperator: LogicalOperator.And,
+					conditions: []
+				},
+				{ property: "value1", value: "alpha", comparison: ComparisonOperator.Equals }
+			]
+		});
+		expect(result.entities.length).toEqual(1);
+		expect((result.entities[0] as TestType).id).toEqual("1");
+	});
+
+	test.skipIf(!SUPPORT_OR_CONDITIONS)(
+		"can query with an empty OR nested group alongside a real OR condition",
+		async () => {
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			await connector.set({ id: "1", value1: "alpha", value2: 1 });
+			await connector.set({ id: "2", value1: "beta", value2: 2 });
+			await connector.set({ id: "3", value1: "gamma", value2: 3 });
+			// OR[ OR[], value1==alpha ] — empty OR child contributes nothing; only value1==alpha matches.
+			const result = await connector.query({
+				logicalOperator: LogicalOperator.Or,
+				conditions: [
+					{
+						logicalOperator: LogicalOperator.Or,
+						conditions: []
+					},
+					{ property: "value1", value: "alpha", comparison: ComparisonOperator.Equals }
+				]
+			});
+			expect(result.entities.length).toEqual(1);
+			expect((result.entities[0] as TestType).id).toEqual("1");
+		}
+	);
+
 	test("can query with custom sort", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());
 		for (let i = 0; i < 5; i++) {
@@ -1522,6 +1797,26 @@ describe("CosmosDbEntityStorageConnector", () => {
 				]
 			});
 			expect(result.entities.map(e => (e as NestedSearchType).id).sort()).toEqual(["2", "3"]);
+		}
+	);
+
+	test.skipIf(!SUPPORT_DOT_NOTATION)(
+		"can query with Equals empty string on nested object subproperty returns no entries",
+		async () => {
+			const connector = await createConnector<NestedSearchType>(nameof<NestedSearchType>());
+			await connector.set({ id: "1", consignor: { name: "Alice" } });
+			await connector.set({ id: "2", consignor: { name: "Bob" } });
+			await connector.set({ id: "3", consignor: { name: "Charlie" } });
+			const result = await connector.query({
+				conditions: [
+					{
+						property: "consignor.name",
+						value: "",
+						comparison: ComparisonOperator.Equals
+					}
+				]
+			});
+			expect(result.entities.length).toEqual(0);
 		}
 	);
 
@@ -2076,5 +2371,247 @@ describe("CosmosDbEntityStorageConnector", () => {
 		await connector?.teardown?.();
 		await connector?.bootstrap?.();
 		expect(await connector.count()).toEqual(0);
+	});
+
+	describe("dynamically-built OR conditions on dot-notation path", () => {
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"returns all entities whose annotationObject.globalId appears in the id list",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" }, label: "alpha" });
+				await connector.set({ id: "2", annotationObject: { globalId: "gid-b" }, label: "beta" });
+				await connector.set({ id: "3", annotationObject: { globalId: "gid-c" }, label: "gamma" });
+				await connector.set({ id: "4", label: "no-annotation" });
+
+				const entityIds = ["gid-a", "gid-c"];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(2);
+				expect(result.entities.map(e => (e as AnnotationTestType).id).sort()).toEqual(["1", "3"]);
+			}
+		);
+
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"returns a single entity when the id list has one entry",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" } });
+				await connector.set({ id: "2", annotationObject: { globalId: "gid-b" } });
+
+				const entityIds = ["gid-a"];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(1);
+				expect((result.entities[0] as AnnotationTestType).id).toEqual("1");
+			}
+		);
+
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"returns empty when no entity matches any id in the list",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" } });
+				await connector.set({ id: "2", annotationObject: { globalId: "gid-b" } });
+
+				const entityIds = ["nonexistent-x", "nonexistent-y"];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(0);
+				expect(result.cursor).toBeUndefined();
+			}
+		);
+
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"does not return entities that lack annotationObject when querying by globalId",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" } });
+				await connector.set({ id: "2", label: "no-annotation" });
+				await connector.set({ id: "3", label: "also-no-annotation" });
+
+				const entityIds = ["gid-a"];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(1);
+				expect((result.entities[0] as AnnotationTestType).id).toEqual("1");
+			}
+		);
+
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"returns only the matching subset when id list partially overlaps stored globalIds",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" } });
+				await connector.set({ id: "2", annotationObject: { globalId: "gid-b" } });
+				await connector.set({ id: "3", annotationObject: { globalId: "gid-c" } });
+
+				const entityIds = ["gid-a", "gid-z"];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(1);
+				expect((result.entities[0] as AnnotationTestType).id).toEqual("1");
+			}
+		);
+
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"matches entity whose annotationObject.globalId is an empty string",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" } });
+				await connector.set({ id: "2", annotationObject: { globalId: "" } });
+				await connector.set({ id: "3", annotationObject: { globalId: "gid-c" } });
+
+				const entityIds = [""];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(1);
+				expect((result.entities[0] as AnnotationTestType).id).toEqual("2");
+			}
+		);
+
+		test.skipIf(!SUPPORT_OR_CONDITIONS || !SUPPORT_DOT_NOTATION)(
+			"returns no results when the id list contains only spaces and no entity matches",
+			async () => {
+				const connector = await createConnector<AnnotationTestType>(nameof<AnnotationTestType>());
+				await connector.set({ id: "1", annotationObject: { globalId: "gid-a" } });
+				await connector.set({ id: "2", annotationObject: { globalId: "gid-b" } });
+				await connector.set({ id: "3", annotationObject: { globalId: "gid-c" } });
+
+				const entityIds = ["   "];
+				const conditions = entityIds.map(entityId => ({
+					property: "annotationObject.globalId",
+					value: entityId,
+					comparison: ComparisonOperator.Equals
+				}));
+
+				const result = await connector.query({
+					logicalOperator: LogicalOperator.Or,
+					conditions
+				});
+
+				expect(result.entities.length).toEqual(0);
+				expect(result.cursor).toBeUndefined();
+			}
+		);
+	});
+
+	describe("property validation", () => {
+		let connector: CosmosDbEntityStorageConnector<TestType>;
+
+		beforeAll(() => {
+			connector = new CosmosDbEntityStorageConnector<TestType>({
+				entitySchema: nameof<TestType>(),
+				config: TEST_COSMOS_CONFIG
+			});
+		});
+
+		test("query() rejects an unrecognised condition property", async () => {
+			await expect(
+				connector.query({
+					property: "__injected",
+					comparison: ComparisonOperator.Equals,
+					value: "x"
+				})
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entityStorageHelper.unknownPropertyInConditionProperty"
+			});
+		});
+
+		test("count() rejects an unrecognised condition property", async () => {
+			await expect(
+				connector.count({
+					property: "__injected",
+					comparison: ComparisonOperator.Equals,
+					value: "x"
+				})
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entityStorageHelper.unknownPropertyInConditionProperty"
+			});
+		});
+
+		test("get() rejects an unrecognised simple condition property", async () => {
+			await expect(
+				connector.get("id", undefined, [{ property: "__injected" as keyof TestType, value: "x" }])
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entityStorageHelper.unknownPropertyInConditions"
+			});
+		});
+
+		test("set() rejects an unrecognised simple condition property", async () => {
+			await expect(
+				connector.set({ id: "1", value1: "aaa", value2: 1 }, [
+					{ property: "__injected" as keyof TestType, value: "x" }
+				])
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entityStorageHelper.unknownPropertyInConditions"
+			});
+		});
+
+		test("remove() rejects an unrecognised simple condition property", async () => {
+			await expect(
+				connector.remove("id", [{ property: "__injected" as keyof TestType, value: "x" }])
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entityStorageHelper.unknownPropertyInConditions"
+			});
+		});
 	});
 });

@@ -23,6 +23,7 @@ import type {
 	IEntityStorageSetRequest
 } from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
+import { HttpMethod } from "@twin.org/web";
 
 /**
  * Client for performing entity storage through to REST endpoints.
@@ -61,7 +62,7 @@ export class EntityStorageRestClient<T>
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object(EntityStorageRestClient.CLASS_NAME, nameof(entity), entity);
 
-		await this.fetch<IEntityStorageSetRequest, INoContentResponse>("/", "POST", {
+		await this.fetch<IEntityStorageSetRequest, INoContentResponse>("/", HttpMethod.POST, {
 			body: entity,
 			query: {
 				conditions: HttpParameterHelper.objectToString(conditions)
@@ -77,7 +78,7 @@ export class EntityStorageRestClient<T>
 	public async setBatch(entities: T[]): Promise<void> {
 		Guards.arrayValue(EntityStorageRestClient.CLASS_NAME, nameof(entities), entities);
 
-		await this.fetch<IEntityStorageSetBatchRequest, INoContentResponse>("/batch", "POST", {
+		await this.fetch<IEntityStorageSetBatchRequest, INoContentResponse>("/batch", HttpMethod.POST, {
 			body: entities
 		});
 	}
@@ -98,7 +99,7 @@ export class EntityStorageRestClient<T>
 
 		const response = await this.fetch<IEntityStorageGetRequest, IEntityStorageGetResponse>(
 			"/:id",
-			"GET",
+			HttpMethod.GET,
 			{
 				pathParams: {
 					id
@@ -125,7 +126,7 @@ export class EntityStorageRestClient<T>
 	): Promise<void> {
 		Guards.stringValue(EntityStorageRestClient.CLASS_NAME, nameof(id), id);
 
-		await this.fetch<IEntityStorageRemoveRequest, INoContentResponse>("/:id", "DELETE", {
+		await this.fetch<IEntityStorageRemoveRequest, INoContentResponse>("/:id", HttpMethod.DELETE, {
 			pathParams: {
 				id
 			},
@@ -143,9 +144,13 @@ export class EntityStorageRestClient<T>
 	public async removeBatch(ids: string[]): Promise<void> {
 		Guards.arrayValue(EntityStorageRestClient.CLASS_NAME, nameof(ids), ids);
 
-		await this.fetch<IEntityStorageRemoveBatchRequest, INoContentResponse>("/batch", "DELETE", {
-			body: ids
-		});
+		await this.fetch<IEntityStorageRemoveBatchRequest, INoContentResponse>(
+			"/batch",
+			HttpMethod.DELETE,
+			{
+				body: ids
+			}
+		);
 	}
 
 	/**
@@ -153,7 +158,7 @@ export class EntityStorageRestClient<T>
 	 * @returns Nothing.
 	 */
 	public async empty(): Promise<void> {
-		await this.fetch<IEntityStorageEmptyRequest, INoContentResponse>("/", "DELETE", {});
+		await this.fetch<IEntityStorageEmptyRequest, INoContentResponse>("/", HttpMethod.DELETE, {});
 	}
 
 	/**
@@ -164,7 +169,7 @@ export class EntityStorageRestClient<T>
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
 		const result = await this.fetch<IEntityStorageCountRequest, IEntityStorageCountResponse>(
 			"/count",
-			"GET",
+			HttpMethod.GET,
 			{
 				query: {
 					conditions: HttpParameterHelper.objectToString(conditions)
@@ -204,7 +209,7 @@ export class EntityStorageRestClient<T>
 	}> {
 		const result = await this.fetch<IEntityStorageListRequest, IEntityStorageListResponse>(
 			"/",
-			"GET",
+			HttpMethod.GET,
 			{
 				query: {
 					conditions: HttpParameterHelper.objectToString(conditions),

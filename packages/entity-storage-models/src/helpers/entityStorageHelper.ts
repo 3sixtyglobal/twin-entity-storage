@@ -5,6 +5,7 @@ import {
 	ComparisonOperator,
 	type EntityCondition,
 	EntitySchemaHelper,
+	EntitySchemaPropertyType,
 	type IEntitySchema,
 	type SortDirection
 } from "@twin.org/entity";
@@ -18,6 +19,20 @@ export class EntityStorageHelper {
 	 * Runtime name for the class.
 	 */
 	public static readonly CLASS_NAME: string = nameof<EntityStorageHelper>();
+
+	/**
+	 * Maximum allowed length for each dot-notation path segment.
+	 * @internal
+	 */
+	private static readonly _MAX_PATH_SEGMENT_LENGTH: number = 128;
+
+	/**
+	 * Regex matching characters/sequences disallowed in a dot-notation path segment:
+	 * SQL metacharacters (single-quote, double-quote, semicolon, hash, backslash),
+	 * comment sequences (double-dash, slash-star, star-slash) and ASCII control characters.
+	 * @internal
+	 */
+	private static readonly _INVALID_PATH_SEGMENT: RegExp = /['";#\\]|--|\/\*|\*\/|[\x00-\x1F\x7F]/;
 
 	/**
 	 * Prepare the entity by handling undefined and null values and validating it against the schema.
@@ -97,7 +112,9 @@ export class EntityStorageHelper {
 	): void {
 		if (Is.arrayValue(sortProperties)) {
 			for (const sortProperty of sortProperties) {
-				const propertySchema = schema.properties?.find(p => p.property === sortProperty.property);
+				const propertySchema = (schema.properties ?? []).find(
+					p => p.property === sortProperty.property
+				);
 				if (
 					Is.undefined(propertySchema) ||
 					(!propertySchema.isPrimary &&
@@ -122,12 +139,92 @@ export class EntityStorageHelper {
 	public static validateProperties<T>(schema: IEntitySchema<T>, properties?: (keyof T)[]): void {
 		if (Is.arrayValue(properties)) {
 			for (const property of properties) {
-				const propertySchema = schema.properties?.find(p => p.property === property);
+				const propertySchema = (schema.properties ?? []).find(p => p.property === property);
 				if (Is.undefined(propertySchema)) {
 					throw new GeneralError(EntityStorageHelper.CLASS_NAME, "propertyNotInSchema", {
 						property
 					});
 				}
+			}
+		}
+	}
+
+	/**
+	 * Validate that every leaf property in an EntityCondition tree is a recognised schema property.
+	 * The root part of a dot-notation path must exist in the schema and be of type object or array.
+	 * @param schema The entity schema to validate against.
+	 * @param condition The condition tree to validate, may be undefined.
+	 * @throws GeneralError with message key "unknownPropertyInConditionProperty" if the root property is not in the schema.
+	 * @throws GeneralError with message key "invalidConditionPropertyPath" if dot-notation is used on a non-object/array property.
+	 */
+	public static validateConditionProperties<T>(
+		schema: IEntitySchema<T>,
+		condition: EntityCondition<T> | undefined
+	): void {
+		if (Is.empty(condition)) {
+			return;
+		}
+		if ("conditions" in condition) {
+			for (const child of condition.conditions) {
+				EntityStorageHelper.validateConditionProperties(schema, child);
+			}
+			return;
+		}
+
+		const propertyStr = String(condition.property);
+		const parts = propertyStr.split(".");
+		const rootPropName = parts[0];
+
+		const rootSchema = (schema.properties ?? []).find(p => String(p.property) === rootPropName);
+
+		if (Is.undefined(rootSchema)) {
+			throw new GeneralError(EntityStorageHelper.CLASS_NAME, "unknownPropertyInConditionProperty", {
+				property: condition.property
+			});
+		}
+
+		if (parts.length > 1) {
+			if (
+				rootSchema.type !== EntitySchemaPropertyType.Object &&
+				rootSchema.type !== EntitySchemaPropertyType.Array
+			) {
+				throw new GeneralError(EntityStorageHelper.CLASS_NAME, "invalidConditionPropertyPath", {
+					property: condition.property
+				});
+			}
+			for (const part of parts.slice(1)) {
+				if (
+					part.length > EntityStorageHelper._MAX_PATH_SEGMENT_LENGTH ||
+					EntityStorageHelper._INVALID_PATH_SEGMENT.test(part)
+				) {
+					throw new GeneralError(EntityStorageHelper.CLASS_NAME, "invalidConditionPropertyPath", {
+						property: condition.property
+					});
+				}
+			}
+		}
+	}
+
+	/**
+	 * Validate that every property in a conditions array is a recognised schema property.
+	 * @param schema The entity schema to validate against.
+	 * @param conditions The conditions array to validate, may be undefined.
+	 * @throws GeneralError with message key "unknownPropertyInConditions" if validation fails.
+	 */
+	public static validateConditions<T>(
+		schema: IEntitySchema<T>,
+		conditions: { property: keyof T; value: unknown }[] | undefined
+	): void {
+		if (!Is.arrayValue(conditions)) {
+			return;
+		}
+		for (const condition of conditions) {
+			const isInSchema = (schema.properties ?? []).some(p => p.property === condition.property);
+
+			if (!isInSchema) {
+				throw new GeneralError(EntityStorageHelper.CLASS_NAME, "unknownPropertyInConditions", {
+					property: condition.property
+				});
 			}
 		}
 	}

@@ -1,5 +1,112 @@
 # Changelog
 
+## [0.9.1-next.9](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.1-next.8...entity-storage-models-v0.9.1-next.9) (2026-07-24)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-models:** Synchronize repo versions
+
+## [0.9.1-next.8](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.1-next.7...entity-storage-models-v0.9.1-next.8) (2026-07-03)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-models:** Synchronize repo versions
+
+## [0.9.1-next.7](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.1-next.6...entity-storage-models-v0.9.1-next.7) (2026-07-02)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-models:** Synchronize repo versions
+
+## [0.9.1-next.6](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.1-next.5...entity-storage-models-v0.9.1-next.6) (2026-07-01)
+
+
+### Features
+
+* input validation ([#162](https://github.com/iotaledger/twin-entity-storage/issues/162)) ([3e1e428](https://github.com/iotaledger/twin-entity-storage/commit/3e1e42887955cf079efd5989e197ddf8e0fa8c47))
+
+## [0.9.1-next.5](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.1-next.4...entity-storage-models-v0.9.1-next.5) (2026-06-30)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-models:** Synchronize repo versions
+
+## [0.9.1-next.4](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.1-next.3...entity-storage-models-v0.9.1-next.4) (2026-06-29)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-models:** Synchronize repo versions
+
+## [0.9.1-next.3](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.1-next.2...entity-storage-models-v0.9.1-next.3) (2026-06-26)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-models:** Synchronize repo versions
+
+## [0.9.1-next.2](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.1-next.1...entity-storage-models-v0.9.1-next.2) (2026-06-26)
+
+
+### Features
+
+* add context id features ([#55](https://github.com/iotaledger/twin-entity-storage/issues/55)) ([99c15a2](https://github.com/iotaledger/twin-entity-storage/commit/99c15a257539b61d9da63649ce573ebf47699fc9))
+* add ISchemaMigration chain, SchemaVersionMigrator runner and version store ([#110](https://github.com/iotaledger/twin-entity-storage/issues/110)) ([2dac924](https://github.com/iotaledger/twin-entity-storage/commit/2dac9244a752cb58304d1649ff03c3a2469783dd))
+* add production release automation ([1eb4c8e](https://github.com/iotaledger/twin-entity-storage/commit/1eb4c8ee3eb099defdfc2d063ae44935276dcae8))
+* add SchemaVersionService for automatic schema migrations ([#118](https://github.com/iotaledger/twin-entity-storage/issues/118)) ([b2ad843](https://github.com/iotaledger/twin-entity-storage/commit/b2ad8435185c53304aca99eb4d98582009b3902d))
+* add validate-locales ([e66ef0d](https://github.com/iotaledger/twin-entity-storage/commit/e66ef0de26ca2f82b3fe89bb5c7a15a0978a9644))
+* adding schema migration functionality to all the connectors ([#85](https://github.com/iotaledger/twin-entity-storage/issues/85)) ([fd1555a](https://github.com/iotaledger/twin-entity-storage/commit/fd1555a34380158214a577586dafae821e72a578))
+* entity storage conditions ([#115](https://github.com/iotaledger/twin-entity-storage/issues/115)) ([7a53884](https://github.com/iotaledger/twin-entity-storage/commit/7a53884f6acb856d77733e4e0f23ec1c00b74cb4))
+* entity storage enhancements ([#86](https://github.com/iotaledger/twin-entity-storage/issues/86)) ([1279af4](https://github.com/iotaledger/twin-entity-storage/commit/1279af42615c6497bb06539842cee44842dd1f75))
+* eslint migration to flat config ([f033b64](https://github.com/iotaledger/twin-entity-storage/commit/f033b64984c0e6a8129d929c9dd816dcc1b8dab0))
+* migration progress ([#121](https://github.com/iotaledger/twin-entity-storage/issues/121)) ([d032162](https://github.com/iotaledger/twin-entity-storage/commit/d032162768b6b7d4ccca7e39b80f8bc3ba46440e))
+* remove includeNodeIdentity flag ([d88d1d0](https://github.com/iotaledger/twin-entity-storage/commit/d88d1d0694419b795dc860e0b712a0051c9a1c9e))
+* typescript 6 update ([995a0c6](https://github.com/iotaledger/twin-entity-storage/commit/995a0c6fa9a6813bfdc7200779ce3664236e59e9))
+* update dependencies ([7ccc0c4](https://github.com/iotaledger/twin-entity-storage/commit/7ccc0c429125d073dc60b3de6cf101abc8cc6cba))
+* update framework core ([b59a380](https://github.com/iotaledger/twin-entity-storage/commit/b59a380bb7fba2b43610f69074dcdee24a4737da))
+* use shared store mechanism ([#34](https://github.com/iotaledger/twin-entity-storage/issues/34)) ([68b6b71](https://github.com/iotaledger/twin-entity-storage/commit/68b6b71e7a96d7d016cd57bfff36775b56bf3f93))
+
+
+### Bug Fixes
+
+* docs ([1a30170](https://github.com/iotaledger/twin-entity-storage/commit/1a301707ee0cb48314223347a6e9f3b3a3a7362d))
+* null secondary indexes ([#103](https://github.com/iotaledger/twin-entity-storage/issues/103)) ([5e44f11](https://github.com/iotaledger/twin-entity-storage/commit/5e44f11bb5af5bf2c27d6f1d56aba5851116ff89))
+* query params force coercion ([dd6aa87](https://github.com/iotaledger/twin-entity-storage/commit/dd6aa87efdfb60bab7d6756a86888863c45c51a7))
+* route GSI sort-key conditions to KeyConditionExpression and cross-connector cursor-walk tests ([#127](https://github.com/iotaledger/twin-entity-storage/issues/127)) ([6a24e1b](https://github.com/iotaledger/twin-entity-storage/commit/6a24e1b5f3b8b426987e43da3af6766d8cb68afb))
+
+## [0.9.1-next.1](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.1-next.0...entity-storage-models-v0.9.1-next.1) (2026-06-26)
+
+
+### Features
+
+* add context id features ([#55](https://github.com/iotaledger/twin-entity-storage/issues/55)) ([99c15a2](https://github.com/iotaledger/twin-entity-storage/commit/99c15a257539b61d9da63649ce573ebf47699fc9))
+* add ISchemaMigration chain, SchemaVersionMigrator runner and version store ([#110](https://github.com/iotaledger/twin-entity-storage/issues/110)) ([2dac924](https://github.com/iotaledger/twin-entity-storage/commit/2dac9244a752cb58304d1649ff03c3a2469783dd))
+* add production release automation ([1eb4c8e](https://github.com/iotaledger/twin-entity-storage/commit/1eb4c8ee3eb099defdfc2d063ae44935276dcae8))
+* add SchemaVersionService for automatic schema migrations ([#118](https://github.com/iotaledger/twin-entity-storage/issues/118)) ([b2ad843](https://github.com/iotaledger/twin-entity-storage/commit/b2ad8435185c53304aca99eb4d98582009b3902d))
+* add validate-locales ([e66ef0d](https://github.com/iotaledger/twin-entity-storage/commit/e66ef0de26ca2f82b3fe89bb5c7a15a0978a9644))
+* adding schema migration functionality to all the connectors ([#85](https://github.com/iotaledger/twin-entity-storage/issues/85)) ([fd1555a](https://github.com/iotaledger/twin-entity-storage/commit/fd1555a34380158214a577586dafae821e72a578))
+* entity storage conditions ([#115](https://github.com/iotaledger/twin-entity-storage/issues/115)) ([7a53884](https://github.com/iotaledger/twin-entity-storage/commit/7a53884f6acb856d77733e4e0f23ec1c00b74cb4))
+* entity storage enhancements ([#86](https://github.com/iotaledger/twin-entity-storage/issues/86)) ([1279af4](https://github.com/iotaledger/twin-entity-storage/commit/1279af42615c6497bb06539842cee44842dd1f75))
+* eslint migration to flat config ([f033b64](https://github.com/iotaledger/twin-entity-storage/commit/f033b64984c0e6a8129d929c9dd816dcc1b8dab0))
+* migration progress ([#121](https://github.com/iotaledger/twin-entity-storage/issues/121)) ([d032162](https://github.com/iotaledger/twin-entity-storage/commit/d032162768b6b7d4ccca7e39b80f8bc3ba46440e))
+* remove includeNodeIdentity flag ([d88d1d0](https://github.com/iotaledger/twin-entity-storage/commit/d88d1d0694419b795dc860e0b712a0051c9a1c9e))
+* typescript 6 update ([995a0c6](https://github.com/iotaledger/twin-entity-storage/commit/995a0c6fa9a6813bfdc7200779ce3664236e59e9))
+* update dependencies ([7ccc0c4](https://github.com/iotaledger/twin-entity-storage/commit/7ccc0c429125d073dc60b3de6cf101abc8cc6cba))
+* update framework core ([b59a380](https://github.com/iotaledger/twin-entity-storage/commit/b59a380bb7fba2b43610f69074dcdee24a4737da))
+* use shared store mechanism ([#34](https://github.com/iotaledger/twin-entity-storage/issues/34)) ([68b6b71](https://github.com/iotaledger/twin-entity-storage/commit/68b6b71e7a96d7d016cd57bfff36775b56bf3f93))
+
+
+### Bug Fixes
+
+* docs ([1a30170](https://github.com/iotaledger/twin-entity-storage/commit/1a301707ee0cb48314223347a6e9f3b3a3a7362d))
+* null secondary indexes ([#103](https://github.com/iotaledger/twin-entity-storage/issues/103)) ([5e44f11](https://github.com/iotaledger/twin-entity-storage/commit/5e44f11bb5af5bf2c27d6f1d56aba5851116ff89))
+* query params force coercion ([dd6aa87](https://github.com/iotaledger/twin-entity-storage/commit/dd6aa87efdfb60bab7d6756a86888863c45c51a7))
+* route GSI sort-key conditions to KeyConditionExpression and cross-connector cursor-walk tests ([#127](https://github.com/iotaledger/twin-entity-storage/issues/127)) ([6a24e1b](https://github.com/iotaledger/twin-entity-storage/commit/6a24e1b5f3b8b426987e43da3af6766d8cb68afb))
+
 ## [0.9.0](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.0...entity-storage-models-v0.9.0) (2026-06-24)
 
 

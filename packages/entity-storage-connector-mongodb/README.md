@@ -14,7 +14,7 @@ To perform testing of this component it may be necessary to launch a local insta
 
 ```shell
 docker pull mongo:latest
-docker run -d --name twin-entity-storage-mongodb -p 27500:27017 mongo:latest
+docker run -d --name twin-entity-storage-mongodb -p 27017:27017 mongo:latest
 ```
 
 ## Examples

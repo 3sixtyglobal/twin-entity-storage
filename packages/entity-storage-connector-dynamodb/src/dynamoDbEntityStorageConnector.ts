@@ -384,6 +384,7 @@ export class DynamoDbEntityStorageConnector<
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<T | undefined> {
 		Guards.stringValue(DynamoDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
@@ -479,6 +480,7 @@ export class DynamoDbEntityStorageConnector<
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(DynamoDbEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
@@ -689,6 +691,7 @@ export class DynamoDbEntityStorageConnector<
 		conditions?: { property: keyof T; value: unknown }[]
 	): Promise<void> {
 		Guards.stringValue(DynamoDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
@@ -873,6 +876,7 @@ export class DynamoDbEntityStorageConnector<
 
 		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
 		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 
 		return this.internalQuery(
 			conditions,
@@ -891,6 +895,8 @@ export class DynamoDbEntityStorageConnector<
 	 * @returns The total count of entities in the storage.
 	 */
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
+		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
+
 		try {
 			const contextIds = await ContextIdStore.getContextIds();
 			const partitionKey = ContextIdHelper.combinedContextKey(
@@ -1256,28 +1262,23 @@ export class DynamoDbEntityStorageConnector<
 						if (subParts.length === 0) {
 							return "";
 						}
-						if (subParts.length === 1) {
-							return subParts[0];
-						}
-						return `(${subParts.join(" AND ")})`;
+						return subParts.length === 1 ? ` ${subParts[0]} ` : ` (${subParts.join(" AND ")}) `;
 					})
 					.filter(s => s.length > 0);
 				const hasKeyConditions = joinConditions.some(j => j.keyCondition.length > 0);
 				const filterCondition = parts.join(" OR ");
 				return {
 					keyCondition: "",
-					filterCondition: Is.stringValue(filterCondition) ? ` (${filterCondition}) ` : "",
+					filterCondition: this.wrapConditionExpression(filterCondition, parts.length),
 					requiresScan: hasKeyConditions
 				};
 			}
 
-			const keyCondition = joinConditions
-				.filter(j => j.keyCondition.length > 0)
-				.map(j => j.keyCondition)
-				.join(` ${logicalOperator} `);
-			const filterCondition = joinConditions
-				.filter(j => j.filterCondition.length > 0)
-				.map(j => j.filterCondition)
+			const keyParts = joinConditions.filter(j => j.keyCondition.length > 0);
+			const filterParts = joinConditions.filter(j => j.filterCondition.length > 0);
+			const keyCondition = keyParts.map(j => j.keyCondition.trim()).join(` ${logicalOperator} `);
+			const filterCondition = filterParts
+				.map(j => j.filterCondition.trim())
 				.join(` ${logicalOperator} `);
 
 			// AND: if any sub-condition is a guaranteed empty result (e.g. empty IN list),
@@ -1301,8 +1302,8 @@ export class DynamoDbEntityStorageConnector<
 			}
 
 			return {
-				keyCondition: Is.stringValue(keyCondition) ? ` (${keyCondition}) ` : "",
-				filterCondition: Is.stringValue(filterCondition) ? ` (${filterCondition}) ` : "",
+				keyCondition: this.wrapConditionExpression(keyCondition, keyParts.length),
+				filterCondition: this.wrapConditionExpression(filterCondition, filterParts.length),
 				requiresScan: joinConditions.some(j => j.requiresScan)
 			};
 		}
@@ -1459,6 +1460,21 @@ export class DynamoDbEntityStorageConnector<
 		throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "conditionalNotSupported", {
 			operator
 		});
+	}
+
+	/**
+	 * Wrap a condition expression in parentheses only when multiple parts were joined.
+	 * A single already-parenthesised child must not be double-wrapped.
+	 * @param expr The joined condition expression.
+	 * @param partCount The number of parts that were joined to produce expr.
+	 * @returns The expression with surrounding spaces, wrapped only when partCount is greater than one.
+	 * @internal
+	 */
+	private wrapConditionExpression(expr: string, partCount: number): string {
+		if (!Is.stringValue(expr)) {
+			return "";
+		}
+		return partCount > 1 ? ` (${expr}) ` : ` ${expr} `;
 	}
 
 	/**

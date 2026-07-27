@@ -5,12 +5,14 @@ import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	Converter,
 	GeneralError,
 	Guards,
 	HealthStatus,
 	type IHealth,
 	Is,
 	type IValidationFailure,
+	Mutex,
 	ObjectHelper,
 	SharedStore,
 	Validation
@@ -105,6 +107,12 @@ export class MySqlEntityStorageConnector<
 	private readonly _primaryKeyProperty: IEntitySchemaProperty<T>;
 
 	/**
+	 * Milliseconds to wait for the directory lock before throwing.
+	 * @internal
+	 */
+	private readonly _mutexTimeoutMs?: number;
+
+	/**
 	 * Create a new instance of MySqlEntityStorageConnector.
 	 * @param options The options for the connector.
 	 */
@@ -152,6 +160,7 @@ export class MySqlEntityStorageConnector<
 		this._primaryKeyProperty = EntitySchemaHelper.getPrimaryKey(this._entitySchema);
 
 		this._config = options.config;
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 	}
 
 	/**
@@ -168,7 +177,8 @@ export class MySqlEntityStorageConnector<
 	 */
 	public async health(): Promise<IHealth[]> {
 		try {
-			await this.getPool().query(
+			const pool = await this.getPool();
+			await pool.query(
 				`SELECT 1 FROM \`${this._config.database}\`.\`${this._config.tableName}\` LIMIT 0`
 			);
 			return [
@@ -209,7 +219,7 @@ export class MySqlEntityStorageConnector<
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
-			const pool = this.getPool();
+			const pool = await this.getPool();
 
 			const databaseExists = await this.databaseExists();
 			if (!databaseExists) {
@@ -292,21 +302,32 @@ export class MySqlEntityStorageConnector<
 			const poolConfig = this.createPoolConfig();
 			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
 
-			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
-				"mySqlPools"
-			);
-			sharedPools ??= {};
-			if (sharedPools[poolId]) {
-				// Decrease the use counter and close the pool if no longer used
-				sharedPools[poolId].useCounter--;
-				if (sharedPools[poolId].useCounter <= 0) {
-					await this._pool.end();
-					delete sharedPools[poolId];
+			try {
+				await Mutex.lock(`mySqlPools:${poolId}`, {
+					throwOnTimeout: true,
+					timeoutMs: this._mutexTimeoutMs
+				});
+				const sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
+					"mySqlPools",
+					() => ({})
+				);
+				if (sharedPools[poolId]) {
+					// Decrease the use counter and close the pool if no longer used
+					sharedPools[poolId].useCounter--;
+					if (sharedPools[poolId].useCounter <= 0) {
+						const poolInstance = sharedPools[poolId].pool;
+						await poolInstance.end();
+						delete sharedPools[poolId];
+						this._pool = undefined;
+					}
+					SharedStore.set("mySqlPools", sharedPools);
+				} else {
+					// Pool was already ended by another connector; clear our stale reference.
+					this._pool = undefined;
 				}
-				SharedStore.set("mySqlPools", sharedPools);
+			} finally {
+				Mutex.unlock(`mySqlPools:${poolId}`);
 			}
-
-			this._pool = undefined;
 		}
 	}
 
@@ -324,11 +345,13 @@ export class MySqlEntityStorageConnector<
 	): Promise<T | undefined> {
 		Guards.stringValue(MySqlEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
+
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const pool = this.getPool();
+			const pool = await this.getPool();
 
 			const whereClauses: string[] = [];
 			const values: unknown[] = [];
@@ -380,6 +403,7 @@ export class MySqlEntityStorageConnector<
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(MySqlEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
@@ -401,7 +425,7 @@ export class MySqlEntityStorageConnector<
 		try {
 			if (Is.arrayValue(conditions)) {
 				const itemData = await this.get(id);
-				if (Is.notEmpty(itemData) && !this.verifyConditions(conditions, itemData as T)) {
+				if (Is.notEmpty(itemData) && !this.verifyConditions(conditions, itemData)) {
 					return;
 				}
 			}
@@ -435,7 +459,7 @@ export class MySqlEntityStorageConnector<
 			sql += ` VALUES (${values.map(() => "?").join(", ")})`;
 			sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
 
-			const pool = this.getPool();
+			const pool = await this.getPool();
 			await pool.query(sql, values);
 		} catch (err) {
 			throw new GeneralError(
@@ -504,7 +528,7 @@ export class MySqlEntityStorageConnector<
 			sql += ` VALUES ${entities.map(() => rowPlaceholder).join(", ")}`;
 			sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
 
-			const pool = this.getPool();
+			const pool = await this.getPool();
 			await pool.query(sql, allValues);
 		} catch (err) {
 			throw new GeneralError(
@@ -525,7 +549,7 @@ export class MySqlEntityStorageConnector<
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const pool = this.getPool();
+			const pool = await this.getPool();
 			await pool.query(
 				`DELETE FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ?`,
 				[partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE]
@@ -547,11 +571,13 @@ export class MySqlEntityStorageConnector<
 	): Promise<void> {
 		Guards.stringValue(MySqlEntityStorageConnector.CLASS_NAME, nameof(id), id);
 
+		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
+
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const pool = this.getPool();
+			const pool = await this.getPool();
 
 			const itemData = await this.get(id, undefined, conditions);
 			if (Is.notEmpty(itemData)) {
@@ -606,7 +632,7 @@ export class MySqlEntityStorageConnector<
 
 		try {
 			if (await this.tableExists()) {
-				const pool = this.getPool();
+				const pool = await this.getPool();
 				await pool.query(`DROP TABLE \`${this._config.database}\`.\`${this._config.tableName}\`;`);
 				await this.waitForTableNotExists();
 			}
@@ -644,7 +670,7 @@ export class MySqlEntityStorageConnector<
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const pool = this.getPool();
+			const pool = await this.getPool();
 			const sql = `DELETE FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ? AND \`${String(this._primaryKeyProperty.property)}\` IN (?)`;
 			await pool.query(sql, [
 				partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE,
@@ -682,6 +708,7 @@ export class MySqlEntityStorageConnector<
 
 		EntityStorageHelper.validateSortProperties(this._entitySchema, sortProperties);
 		EntityStorageHelper.validateProperties(this._entitySchema, properties);
+		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 
 		if (!Is.empty(limit)) {
 			const validationFailures: IValidationFailure[] = [];
@@ -697,43 +724,119 @@ export class MySqlEntityStorageConnector<
 		try {
 			const returnSize = limit ?? MySqlEntityStorageConnector._DEFAULT_LIMIT;
 
-			let orderByClause: string = "";
+			const pkPropName = String(this._primaryKeyProperty.property);
+
+			// Decide whether the caller's sort already includes the PK.  When it does we
+			// skip appending a second PK clause so we never emit "ORDER BY id ..., id ...".
+			const sortsByPK =
+				Is.array(sortProperties) && sortProperties.some(s => String(s.property) === pkPropName);
+
+			// Full ordered column list used for both ORDER BY and the keySet condition.
+			// Format: [user sort cols…] + [pk tie-breaker if not already present].
+			const keySetCols: { prop: string; asc: boolean }[] = [];
 			if (Is.array(sortProperties)) {
-				const orderClauses: string[] = [];
-				for (const sortProperty of sortProperties) {
-					const direction = sortProperty.sortDirection === SortDirection.Ascending ? "ASC" : "DESC";
-					orderClauses.push(`\`${String(sortProperty.property)}\` ${direction}`);
+				for (const s of sortProperties) {
+					keySetCols.push({
+						prop: String(s.property),
+						asc: s.sortDirection === SortDirection.Ascending
+					});
 				}
-				orderByClause = `ORDER BY ${orderClauses.join(", ")}`;
 			}
+			if (!sortsByPK) {
+				keySetCols.push({ prop: pkPropName, asc: true });
+			}
+
+			// When the caller projects specific columns we must still SELECT the PK and any
+			// sort columns so we can build the next-page cursor.  Track which columns we add
+			// internally so we can strip them from the returned entities afterward.
+			const requestedProps = properties ? new Set(properties.map(p => String(p))) : undefined;
+			const internallyAdded = new Set<string>();
+
+			let selectClause: string;
+			if (requestedProps) {
+				const selectSet = new Set(requestedProps);
+				for (const col of keySetCols) {
+					if (!selectSet.has(col.prop)) {
+						selectSet.add(col.prop);
+						internallyAdded.add(col.prop);
+					}
+				}
+				selectClause = [...selectSet].map(p => `\`${p}\``).join(", ");
+			} else {
+				selectClause = "*";
+			}
+
+			const orderByClause = `ORDER BY ${keySetCols.map(c => `\`${c.prop}\` ${c.asc ? "ASC" : "DESC"}`).join(", ")}`;
 
 			const { whereClauses, values } = this.buildWhereClause(conditions, partitionKey);
 
-			const startIndex = Coerce.number(cursor) ?? 0;
+			// Apply keySet condition when continuing from a previous page.
+			if (Is.stringBase64(cursor)) {
+				const parsedCursor = ObjectHelper.fromBytes<{ i: string; sv?: unknown[] }>(
+					Converter.base64ToBytes(cursor)
+				);
 
-			sql = `SELECT ${properties ? properties.map(p => `\`${String(p)}\``).join(", ") : "*"} FROM \`${this._config.database}\`.\`${this._config.tableName}\``;
+				// Reconstruct the ordered last-value list: [sort-col values…, pk].
+				const lastValues: unknown[] = [...(parsedCursor.sv ?? []), parsedCursor.i];
+
+				// Build: (col0 op last0) OR (col0=last0 AND col1 op last1) OR …
+				const orParts: string[] = [];
+				for (let i = 0; i < keySetCols.length; i++) {
+					const parts: string[] = [];
+					for (let j = 0; j < i; j++) {
+						values.push(lastValues[j]);
+						parts.push(`\`${keySetCols[j].prop}\` = ?`);
+					}
+					const op = keySetCols[i].asc ? ">" : "<";
+					values.push(lastValues[i]);
+					parts.push(`\`${keySetCols[i].prop}\` ${op} ?`);
+					orParts.push(parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`);
+				}
+				whereClauses.push(`(${orParts.join(" OR ")})`);
+			}
+
+			sql = `SELECT ${selectClause} FROM \`${this._config.database}\`.\`${this._config.tableName}\``;
 			if (whereClauses.length > 0) {
 				sql += ` WHERE ${whereClauses.join(" AND ")}`;
 			}
-			sql += ` ${orderByClause} LIMIT ${returnSize + 1} OFFSET ${startIndex}`;
+			sql += ` ${orderByClause} LIMIT ${returnSize + 1}`;
 
-			const pool = this.getPool();
+			const pool = await this.getPool();
 			const [rows] = (await pool.query(sql, values)) ?? [];
 
 			const hasMore = Is.array(rows) && rows.length > returnSize;
 			const resultRows = hasMore ? (rows as unknown[]).slice(0, returnSize) : rows;
 			const entities = resultRows as Partial<T>[];
+
+			// Build the next-page cursor from the last returned row before stripping columns.
+			let nextCursor: string | undefined;
+			if (hasMore && entities.length > 0) {
+				const lastRow = entities[entities.length - 1];
+				// Sort values are all keySet columns except the final PK entry.
+				const sortValues = keySetCols
+					.slice(0, -1)
+					.map(c => ObjectHelper.propertyGet(lastRow, c.prop));
+				const lastId = ObjectHelper.propertyGet<string>(lastRow, pkPropName);
+
+				if (Is.stringValue(lastId)) {
+					const cursorData: { i: string; sv?: unknown[] } =
+						sortValues.length > 0 ? { i: lastId, sv: sortValues } : { i: lastId };
+					nextCursor = Converter.bytesToBase64(ObjectHelper.toBytes(cursorData));
+				}
+			}
+
 			for (let i = 0; i < entities.length; i++) {
 				entities[i] = EntityStorageHelper.unPrepareEntity(entities[i], [
 					MySqlEntityStorageConnector._PARTITION_KEY
 				]);
+				// Remove any columns we added internally for cursor purposes.
+				for (const col of internallyAdded) {
+					ObjectHelper.propertyDelete(entities[i], col);
+				}
 				entities[i] = this.coerceEntityTypes(entities[i]);
 			}
 
-			return {
-				entities,
-				cursor: hasMore ? Coerce.string(startIndex + returnSize) : undefined
-			};
+			return { entities, cursor: nextCursor };
 		} catch (err) {
 			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "queryFailed", { sql }, err);
 		}
@@ -745,9 +848,11 @@ export class MySqlEntityStorageConnector<
 	 * @returns The total count of entities in the storage.
 	 */
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
+		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
+
 		let sql: string | undefined;
 		try {
-			const pool = this.getPool();
+			const pool = await this.getPool();
 
 			const contextIds = await ContextIdStore.getContextIds();
 			const partitionKey = ContextIdHelper.combinedContextKey(
@@ -779,7 +884,7 @@ export class MySqlEntityStorageConnector<
 		}
 
 		try {
-			const pool = this.getPool();
+			const pool = await this.getPool();
 			const [rows] = await pool.query(
 				`SELECT DISTINCT \`${MySqlEntityStorageConnector._PARTITION_KEY}\` FROM \`${this._config.database}\`.\`${this._config.tableName}\``
 			);
@@ -832,7 +937,7 @@ export class MySqlEntityStorageConnector<
 		await this.teardown(loggingComponentType);
 
 		// RENAME TABLE is an atomic metadata-only operation in MySQL — no data copying needed.
-		const pool = this.getPool();
+		const pool = await this.getPool();
 		await pool.query(
 			`RENAME TABLE \`${targetConnector._config.database}\`.\`${targetConnector._config.tableName}\` TO \`${this._config.database}\`.\`${this._config.tableName}\``
 		);
@@ -877,39 +982,11 @@ export class MySqlEntityStorageConnector<
 	 */
 	public async databaseExists(): Promise<boolean> {
 		try {
-			const pool = this.getPool();
+			const pool = await this.getPool();
 			const [rows] = await pool.query("SHOW DATABASES LIKE ?;", [this._config.database]);
 			return Is.arrayValue(rows);
 		} catch {
 			return false;
-		}
-	}
-
-	/**
-	 * Close the connection pool and release all connections.
-	 * Should be called when the connector is no longer needed.
-	 * @returns Nothing.
-	 */
-	public async close(): Promise<void> {
-		if (this._pool) {
-			const poolConfig = this.createPoolConfig();
-			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
-
-			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
-				"mySqlPools"
-			);
-			sharedPools ??= {};
-			if (sharedPools[poolId]) {
-				// Decrease the use counter and close the pool if no longer used
-				sharedPools[poolId].useCounter--;
-				if (sharedPools[poolId].useCounter <= 0) {
-					await this._pool.end();
-					delete sharedPools[poolId];
-				}
-				SharedStore.set("mySqlPools", sharedPools);
-			}
-
-			this._pool = undefined;
 		}
 	}
 
@@ -952,7 +1029,7 @@ export class MySqlEntityStorageConnector<
 	 */
 	private async tableExists(): Promise<boolean> {
 		try {
-			const pool = this.getPool();
+			const pool = await this.getPool();
 			const [rows] = await pool.query("SHOW TABLES FROM ?? LIKE ?", [
 				this._config.database,
 				this._config.tableName
@@ -998,27 +1075,36 @@ export class MySqlEntityStorageConnector<
 	 * @returns The MySql connection pool.
 	 * @internal
 	 */
-	private getPool(): Pool {
+	private async getPool(): Promise<Pool> {
 		if (!this._pool) {
 			const poolConfig = this.createPoolConfig();
 			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
 
-			let sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
-				"mySqlPools"
-			);
-			sharedPools ??= {};
+			try {
+				await Mutex.lock(`mySqlPools:${poolId}`, {
+					throwOnTimeout: true,
+					timeoutMs: this._mutexTimeoutMs
+				});
 
-			// If there is no pool for the id, create it
-			if (!sharedPools[poolId]) {
-				sharedPools[poolId] = {
-					pool: createPool(poolConfig),
-					useCounter: 0
-				};
-				SharedStore.set("mySqlPools", sharedPools);
+				const sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
+					"mySqlPools",
+					() => ({})
+				);
+
+				// If there is no pool for the id, create it
+				if (!sharedPools[poolId]) {
+					sharedPools[poolId] = {
+						pool: createPool(poolConfig),
+						useCounter: 0
+					};
+					SharedStore.set("mySqlPools", sharedPools);
+				}
+				// Increase the use counter and return the pool
+				sharedPools[poolId].useCounter++;
+				this._pool = sharedPools[poolId].pool;
+			} finally {
+				Mutex.unlock(`mySqlPools:${poolId}`);
 			}
-			// Increase the use counter and return the pool
-			sharedPools[poolId].useCounter++;
-			this._pool = sharedPools[poolId].pool;
 		}
 		return this._pool;
 	}
