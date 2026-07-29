@@ -54,7 +54,10 @@ function makeMigConnector(schemaName: string, version = 0): IEntityStorageMigrat
 		remove: vi.fn(),
 		removeBatch: vi.fn(),
 		setBatch: vi.fn(),
-		count: vi.fn(),
+		// Default to 1 so "no version record" tests exercise the pre-existing-data path
+		// (count > 0 → treat as v0 and run migration). Tests that need an empty table
+		// override this with mockResolvedValue(0).
+		count: vi.fn().mockResolvedValue(1),
 		empty: vi.fn(),
 		getPartitionContextIds: vi.fn().mockResolvedValue([]),
 		createTargetConnector: vi.fn().mockResolvedValue(undefined),
@@ -153,14 +156,52 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// start() — fresh install (C8: empty table still runs chain)
+	// start() — fresh install: empty table seeds at current, no migration
 	// -------------------------------------------------------------------------
 
-	test("start() runs migration chain on fresh install even when the table is empty", async () => {
+	test("start() seeds version at current and skips migration when table is empty and no version record exists", async () => {
 		const schemaName = "Widget";
 		const v0Schema = makeSchema(`${schemaName}V0`, 0);
 		const currentSchema = makeSchema(schemaName, 1);
 		const connector = makeMigConnector(schemaName, 1);
+
+		// Simulate empty table: count() returns 0
+		(connector.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([]); // no stored version record
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		// No migration should run: the table is empty, so we fast-path to current.
+		expect(migrateWithChainSpy).not.toHaveBeenCalled();
+		// Version record must be written at current (1), not 0.
+		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
+	});
+
+	// -------------------------------------------------------------------------
+	// start() — pre-existing data: no version record → treat as v0, run chain
+	// -------------------------------------------------------------------------
+
+	test("start() treats non-empty table as v0 and runs migration when no version record exists", async () => {
+		const schemaName = "Widget";
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1); // count defaults to 1 (non-empty)
 
 		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
 		schemaGetSpy.mockImplementation((name: string) => {

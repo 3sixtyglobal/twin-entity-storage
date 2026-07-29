@@ -323,6 +323,48 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		expect(result.note).toBeUndefined();
 	});
 
+	// ---
+	// Issue #185 Bug 2 — "added" properties must preserve existing source values
+	// ---
+
+	test("added non-optional string property preserves existing source value over empty-string default", () => {
+		const d = diff({ added: [prop("organizationId", EntitySchemaPropertyType.String)] });
+		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ id: "1", organizationId: "org-abc" },
+			d
+		);
+		expect(result.organizationId).toBe("org-abc");
+	});
+
+	test("added non-optional string property preserves existing source value over provided defaultValue", () => {
+		const d = diff({
+			added: [prop("status", EntitySchemaPropertyType.String, { defaultValue: "active" })]
+		});
+		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ status: "custom" },
+			d
+		);
+		expect(result.status).toBe("custom");
+	});
+
+	test("added non-optional boolean property preserves existing source value over boolean default", () => {
+		const d = diff({ added: [prop("active", EntitySchemaPropertyType.Boolean)] });
+		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ active: true },
+			d
+		);
+		expect(result.active).toBe(true);
+	});
+
+	test("added non-optional number property preserves existing source value over zero default", () => {
+		const d = diff({ added: [prop("count", EntitySchemaPropertyType.Number)] });
+		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ count: 42 },
+			d
+		);
+		expect(result.count).toBe(42);
+	});
+
 	test("unchanged property absent from entity is copied as undefined", () => {
 		const d = diff({
 			unchanged: [

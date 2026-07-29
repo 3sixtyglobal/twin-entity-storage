@@ -217,13 +217,17 @@ export class SchemaVersionService implements IComponent {
 		let resolvedStoredVersion: number;
 
 		if (stored === undefined) {
-			// No version record: treat as v0 regardless of whether the table has data.
-			// On SQL connectors the table may have a stale column structure even when empty;
-			// running the chain over zero rows still calls finalizeMigration, which reconciles
-			// the table shape via a connector swap.
-			// Deployment precondition: any pre-existing data is genuinely at v0. A deployment
-			// that hand-applied a later schema before this service was introduced would be
-			// incorrectly replayed v0→…→current and should be seeded with an explicit record.
+			// No version record: check whether the table has any data.
+			// Empty table → this is a fresh bootstrap; seed at the current version so the
+			// migration chain never runs over an already-current-shape (or empty) table.
+			// Non-empty table → pre-existing data from before version tracking was introduced;
+			// treat as v0 and run the migration chain. applyEntityTransform preserves existing
+			// property values so current-shape rows are not degraded (issue #185, Bug 2).
+			const tableCount = await connector.count();
+			if (tableCount === 0) {
+				await this.writeVersion(schemaName, currentVersion);
+				return;
+			}
 			resolvedStoredVersion = 0;
 			await this.writeVersion(schemaName, 0);
 		} else {
