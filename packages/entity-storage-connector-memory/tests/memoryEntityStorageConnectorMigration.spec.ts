@@ -257,14 +257,14 @@ describe("MemoryEntityStorageConnector — partitioning and migration", () => {
 			expect(result).toEqual([]);
 		});
 
-		test("returns empty array when no partition context ids are configured", async () => {
+		test("returns undefined when no partition context ids are configured", async () => {
 			const entityStorage = (await createConnector(
 				nameof<MigV1>()
 			)) as IEntityStorageMigrationConnector<MigV1>;
 			await entityStorage.set({ id: "1", legacyField: "a" });
 			await entityStorage.set({ id: "2", legacyField: "b" });
 			const result = await entityStorage.getPartitionContextIds();
-			expect(result).toEqual([]);
+			expect(result).toBeUndefined();
 		});
 
 		test("returns a single entry when all entities share the same partition", async () => {
@@ -279,7 +279,11 @@ describe("MemoryEntityStorageConnector — partitioning and migration", () => {
 			await entityStorage.set({ id: "3", legacyField: "c" });
 			const result = await entityStorage.getPartitionContextIds();
 			expect(result).toHaveLength(1);
-			expect(result[0]).toEqual({ node: "node", tenant: "tenant", user: "user1" });
+			expect((result as IContextIds[])[0]).toEqual({
+				node: "node",
+				tenant: "tenant",
+				user: "user1"
+			});
 		});
 
 		test("returns one entry per unique partition", async () => {

@@ -878,9 +878,9 @@ export class MySqlEntityStorageConnector<
 	 * Get all unique partition context ids present in the table.
 	 * @returns An array of context id objects, one per unique partition.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
 		if (!Is.arrayValue(this._partitionContextIds)) {
-			return [];
+			return undefined;
 		}
 
 		try {

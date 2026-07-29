@@ -631,9 +631,9 @@ export class ScyllaDBTableConnector<T = unknown>
 	 * Get all the distinct partition context ids from the storage.
 	 * @returns An array of context id objects, one per unique partition.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
 		if (!Is.arrayValue(this._partitionContextIds)) {
-			return [];
+			return undefined;
 		}
 		let connection;
 		try {
@@ -755,17 +755,17 @@ export class ScyllaDBTableConnector<T = unknown>
 	private async bulkCopy<U>(
 		sourceConnector: ScyllaDBTableConnector<U>,
 		destConnector: ScyllaDBTableConnector<U>,
-		partitions: IContextIds[],
+		partitions: IContextIds[] | undefined,
 		batchSize: number
 	): Promise<void> {
-		let partitionList: IContextIds[];
-		if (Is.arrayValue(partitions)) {
-			partitionList = partitions;
-		} else if (Is.arrayValue(sourceConnector._partitionContextIds)) {
-			partitionList = [];
-		} else {
-			partitionList = [{}];
+		// undefined → not partitioned: one pass with no partition key.
+		// []        → partitioned but empty: nothing to copy, return early before opening
+		//             the connection.
+		// [{…}, …]  → partitioned with data: iterate over each partition.
+		if (partitions?.length === 0) {
+			return;
 		}
+		const partitionList = partitions ?? [{}];
 
 		const sourceColumns = [
 			AbstractScyllaDBConnector.PARTITION_KEY,
@@ -777,11 +777,12 @@ export class ScyllaDBTableConnector<T = unknown>
 		try {
 			connection = await sourceConnector.openConnection();
 			for (let i = 0; i < partitionList.length; i++) {
-				const partitionKey =
-					ContextIdHelper.combinedContextKey(
-						partitionList[i],
-						sourceConnector._partitionContextIds
-					) ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE;
+				// Values from getPartitionContextIds are already short-form, so we join them
+				// directly rather than using combinedContextKey, which expects long-form input
+				// and calls guardAll (throwing if a registered handler rejects short-form values).
+				const partitionKey = Is.arrayValue(sourceConnector._partitionContextIds)
+					? sourceConnector._partitionContextIds.map(k => partitionList[i][k]).join("/")
+					: AbstractScyllaDBConnector.PARTITION_KEY_VALUE;
 
 				let pageState: string | undefined;
 				do {

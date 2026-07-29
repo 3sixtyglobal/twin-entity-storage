@@ -604,7 +604,10 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 * Get a unique list of all the context ids from the storage.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
+		if (!Is.arrayValue(this._partitionContextIds)) {
+			return undefined;
+		}
 		return this.withLock(entities => {
 			const contextIds: { [id: string]: IContextIds } = {};
 			for (const entity of entities) {

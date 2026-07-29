@@ -250,8 +250,8 @@ export class SchemaVersionService implements IComponent {
 			message: "migrationRequired",
 			data: {
 				schemaName,
-				from: currentVersion,
-				to: resolvedStoredVersion
+				from: resolvedStoredVersion,
+				to: currentVersion
 			}
 		});
 

@@ -604,10 +604,10 @@ export class FirestoreEntityStorageConnector<
 	 * Get a unique list of all the context ids from the storage.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
 		const partitionContextIds = this._partitionContextIds;
 		if (!Is.arrayValue(partitionContextIds)) {
-			return [];
+			return undefined;
 		}
 		try {
 			const prefix = `${this._config.collectionName}_`;
@@ -951,24 +951,25 @@ export class FirestoreEntityStorageConnector<
 	private async bulkCopy<U>(
 		sourceConnector: FirestoreEntityStorageConnector<U>,
 		destConnector: FirestoreEntityStorageConnector<U>,
-		partitions: IContextIds[],
+		partitions: IContextIds[] | undefined,
 		batchSize: number
 	): Promise<void> {
-		let partitionList: IContextIds[];
-		if (Is.arrayValue(partitions)) {
-			partitionList = partitions;
-		} else if (Is.arrayValue(sourceConnector._partitionContextIds)) {
-			partitionList = [];
-		} else {
-			partitionList = [{}];
+		if (partitions?.length === 0) {
+			return;
 		}
+		// undefined → not partitioned: one pass with no partition key.
+		// [{…}, …]  → partitioned with data: iterate over each partition.
+		const partitionList = partitions ?? [{}];
 
 		for (let i = 0; i < partitionList.length; i++) {
-			const partitionKey = ContextIdHelper.combinedContextKey(
-				partitionList[i],
-				sourceConnector._partitionContextIds,
-				FirestoreEntityStorageConnector._PARTITION_SEPARATOR
-			);
+			// Values from getPartitionContextIds are already short-form, so we join them
+			// directly rather than using combinedContextKey, which expects long-form input
+			// and calls guardAll (throwing if a registered handler rejects short-form values).
+			const partitionKey = Is.arrayValue(sourceConnector._partitionContextIds)
+				? sourceConnector._partitionContextIds
+						.map(k => partitionList[i][k])
+						.join(FirestoreEntityStorageConnector._PARTITION_SEPARATOR)
+				: undefined;
 
 			const sourceCollection = sourceConnector._firestoreClient.collection(
 				sourceConnector.collectionName(partitionKey)

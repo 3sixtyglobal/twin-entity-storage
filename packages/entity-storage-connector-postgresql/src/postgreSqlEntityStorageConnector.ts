@@ -672,9 +672,9 @@ export class PostgreSqlEntityStorageConnector<
 	 * Get all the distinct partition context ids from the storage.
 	 * @returns An array of context id objects, one per unique partition.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
 		if (!Is.arrayValue(this._partitionContextIds)) {
-			return [];
+			return undefined;
 		}
 		try {
 			const dbConnection = await this.createConnection();

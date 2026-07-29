@@ -1,6 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { GeneralError } from "@twin.org/core";
+import { ComponentFactory, GeneralError } from "@twin.org/core";
 import { EntitySchemaFactory, type IEntitySchema } from "@twin.org/entity";
 import {
 	EntityStorageConnectorFactory,
@@ -222,6 +222,49 @@ describe("SchemaVersionService", () => {
 
 		expect(migrateWithChainSpy).toHaveBeenCalled();
 		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
+	});
+
+	test("start() logs migrationRequired with the stored version as from and the current as to", async () => {
+		const schemaName = "Widget";
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		const logSpy = vi.fn();
+		ComponentFactory.register("test-logging", () => ({
+			className: () => "TestLogging",
+			log: logSpy
+		}));
+
+		try {
+			await new SchemaVersionService().start("test-logging");
+
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "migrationRequired",
+					data: { schemaName, from: 0, to: 1 }
+				})
+			);
+		} finally {
+			ComponentFactory.unregister("test-logging");
+		}
 	});
 
 	// -------------------------------------------------------------------------

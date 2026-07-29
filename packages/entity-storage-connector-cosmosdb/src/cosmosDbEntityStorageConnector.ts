@@ -846,10 +846,10 @@ export class CosmosDbEntityStorageConnector<
 	 * Get a unique list of all the context ids from the storage.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
 		const partitionContextIds = this._partitionContextIds;
 		if (!Is.arrayValue(partitionContextIds)) {
-			return [];
+			return undefined;
 		}
 		try {
 			const { resources: partitionIds } = await this._container.items
@@ -953,24 +953,24 @@ export class CosmosDbEntityStorageConnector<
 	private async bulkCopy<U>(
 		sourceConnector: CosmosDbEntityStorageConnector<U>,
 		destConnector: CosmosDbEntityStorageConnector<U>,
-		partitions: IContextIds[],
+		partitions: IContextIds[] | undefined,
 		batchSize: number
 	): Promise<void> {
-		let partitionList: IContextIds[];
-		if (Is.arrayValue(partitions)) {
-			partitionList = partitions;
-		} else if (Is.arrayValue(sourceConnector._partitionContextIds)) {
-			partitionList = [];
-		} else {
-			partitionList = [{}];
+		// undefined → not partitioned: one pass with no partition key.
+		// []        → partitioned but empty: nothing to copy, return early.
+		// [{…}, …]  → partitioned with data: iterate over each partition.
+		if (partitions?.length === 0) {
+			return;
 		}
+		const partitionList = partitions ?? [{}];
 
 		for (let i = 0; i < partitionList.length; i++) {
-			const partitionKey =
-				ContextIdHelper.combinedContextKey(
-					partitionList[i],
-					sourceConnector._partitionContextIds
-				) ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE;
+			// Values from getPartitionContextIds are already short-form, so we join them
+			// directly rather than using combinedContextKey, which expects long-form input
+			// and calls guardAll (throwing if a registered handler rejects short-form values).
+			const partitionKey = Is.arrayValue(sourceConnector._partitionContextIds)
+				? sourceConnector._partitionContextIds.map(k => partitionList[i][k]).join("/")
+				: CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE;
 
 			let continuationToken: string | undefined;
 			do {

@@ -707,7 +707,10 @@ export class FileEntityStorageConnector<
 	 * Get a unique list of all the context ids from the storage.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
+		if (!Is.arrayValue(this._partitionContextIds)) {
+			return undefined;
+		}
 		const contextIds: { [id: string]: IContextIds } = {};
 
 		const store = await this.readStoreWithLock();

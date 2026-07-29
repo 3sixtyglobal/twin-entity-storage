@@ -10,9 +10,12 @@ import type { IMigrationOptions } from "./IMigrationOptions.js";
 export interface IEntityStorageMigrationConnector<T = unknown> extends IEntityStorageConnector<T> {
 	/**
 	 * Get a unique list of all the context ids from the storage.
-	 * @returns The list of unique context ids.
+	 * Returns undefined when the connector has no partition context ids configured
+	 * (run migration once with an empty context), or an empty array when the connector
+	 * is partitioned but the table contains no entities (skip migration entirely).
+	 * @returns The list of unique context ids, undefined if not partitioned, or [] if partitioned but empty.
 	 */
-	getPartitionContextIds(): Promise<IContextIds[]>;
+	getPartitionContextIds(): Promise<IContextIds[] | undefined>;
 
 	/**
 	 * Create the target connector for performing the migration it will use a temporary storage location.

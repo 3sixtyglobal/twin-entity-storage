@@ -1,5 +1,12 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import {
+	ContextIdHandlerFactory,
+	ContextIdHelper,
+	ContextIdKeys,
+	ContextIdStore,
+	type IContextIds
+} from "@twin.org/context";
 import { GeneralError } from "@twin.org/core";
 import {
 	EntitySchemaPropertyType,
@@ -10,6 +17,7 @@ import type {
 	IEntityStorageConnector,
 	IEntityStorageMigrationConnector
 } from "@twin.org/entity-storage-models";
+import { TestContextIdHandler } from "./testContextIdHandler.js";
 import { MigrationHelper } from "../src/helpers/migrationHelper.js";
 import type { IResolvedMigrationStep } from "../src/models/IResolvedMigrationStep.js";
 
@@ -491,7 +499,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 			remove: vi.fn(),
 			removeBatch: vi.fn(),
 			empty: vi.fn(),
-			getPartitionContextIds: vi.fn().mockResolvedValue([{}]),
+			getPartitionContextIds: vi.fn().mockResolvedValue(undefined),
 			createTargetConnector: vi.fn().mockResolvedValue(targetConnector),
 			finalizeMigration: vi.fn().mockResolvedValue(targetConnector),
 			cleanupMigration: vi.fn().mockResolvedValue(undefined)
@@ -565,6 +573,82 @@ describe("MigrationHelper.migrateWithChain", () => {
 		).rejects.toThrow();
 
 		expect(source.cleanupMigration).toHaveBeenCalledWith(target, undefined, undefined);
+	});
+
+	describe("getPartitionContextIds context id failures", () => {
+		beforeEach(() => {
+			ContextIdHandlerFactory.register(ContextIdKeys.Node, () => new TestContextIdHandler());
+		});
+
+		afterEach(() => {
+			ContextIdHandlerFactory.unregister(ContextIdKeys.Node);
+		});
+
+		test("expands short-form context ids from getPartitionContextIds to long form before passing to ContextIdStore.run", async () => {
+			const target = makeTargetConnector();
+			const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+
+			// getPartitionContextIds returns short form — no "did:internal:" prefix — as real
+			// connectors do: they store the short value produced by ContextIdHelper.shortCombined
+			// and reconstruct it via ContextIdHelper.shortSplit.
+			(source.getPartitionContextIds as ReturnType<typeof vi.fn>).mockResolvedValue([
+				{ [ContextIdKeys.Node]: "shortNodeId" }
+			]);
+
+			let contextSeenByCount: IContextIds | undefined;
+			(source.count as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+				contextSeenByCount = await ContextIdStore.getContextIds();
+				ContextIdHelper.combinedContextKey(contextSeenByCount, [ContextIdKeys.Node]);
+				return 1;
+			});
+
+			await MigrationHelper.migrateWithChain(source, "TargetSchema", [singleStep]);
+
+			expect(contextSeenByCount?.[ContextIdKeys.Node]).toBe(
+				`${TestContextIdHandler.INTERNAL_PREFIX}shortNodeId`
+			);
+		});
+
+		test("runs a single pass with empty context when getPartitionContextIds returns undefined for a non-partitioned table", async () => {
+			const target = makeTargetConnector();
+			const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+
+			// undefined = not partitioned: MigrationHelper runs one pass with empty context {}
+			// so count() is called exactly once and no partition key is required.
+			(source.getPartitionContextIds as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+
+			let contextSeenByCount: IContextIds | undefined;
+			(source.count as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+				contextSeenByCount = await ContextIdStore.getContextIds();
+				return 1;
+			});
+
+			const { migrated } = await MigrationHelper.migrateWithChain(source, "TargetSchema", [
+				singleStep
+			]);
+
+			expect(migrated).toBe(1);
+			expect(source.count).toHaveBeenCalledOnce();
+			expect(contextSeenByCount).toEqual({});
+		});
+
+		test("skips all partition passes and migrates 0 entities when getPartitionContextIds returns empty array for an empty partitioned table", async () => {
+			const target = makeTargetConnector();
+			const source = makeSourceConnector([], target);
+
+			// An empty table with partitionContextIds configured returns [] from
+			// getPartitionContextIds.  MigrationHelper skips the partition loop entirely so
+			// count() is never called — avoiding the "contextIdMissing" error that would occur
+			// if we fell back to [{}] and called count() without the required "node" key.
+			(source.getPartitionContextIds as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+			const { migrated } = await MigrationHelper.migrateWithChain(source, "TargetSchema", [
+				singleStep
+			]);
+
+			expect(migrated).toBe(0);
+			expect(source.count).not.toHaveBeenCalled();
+		});
 	});
 
 	test("a chain of one step is equivalent to a single-step migration", async () => {

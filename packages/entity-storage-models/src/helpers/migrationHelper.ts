@@ -1,6 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdStore } from "@twin.org/context";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
 	Coerce,
@@ -73,14 +73,23 @@ export class MigrationHelper {
 			await MigrationHelper.startupConnector(sourceConnector, loggingComponentType);
 			await MigrationHelper.startupConnector(targetConnector, loggingComponentType);
 
-			let partitionContextIds = await sourceConnector.getPartitionContextIds();
-			if (!Is.arrayValue(partitionContextIds)) {
-				partitionContextIds ??= [];
-				partitionContextIds.push({});
+			const rawPartitionContextIds = await sourceConnector.getPartitionContextIds();
+
+			// undefined → not partitioned: run one pass with empty context.
+			// []        → partitioned but table is empty: skip all passes (count() never called).
+			// [{…}, …]  → partitioned with data: expand short-form values to long form and iterate.
+			let effectivePartitions: IContextIds[];
+			if (rawPartitionContextIds === undefined) {
+				effectivePartitions = [{}];
+			} else if (rawPartitionContextIds.length === 0) {
+				effectivePartitions = [];
+			} else {
+				effectivePartitions = rawPartitionContextIds.map(ctx =>
+					ContextIdHelper.longAll(ctx, Object.keys(ctx))
+				);
 			}
 
 			let migrated = 0;
-			const effectivePartitions = partitionContextIds.length > 0 ? partitionContextIds : [{}];
 
 			await options?.onProgress?.("partitionStart", effectivePartitions.length, 0);
 
