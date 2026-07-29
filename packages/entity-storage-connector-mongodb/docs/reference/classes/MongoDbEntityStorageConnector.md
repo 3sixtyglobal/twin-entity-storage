@@ -425,13 +425,13 @@ The total count of entities in the storage.
 
 ### getPartitionContextIds() {#getpartitioncontextids}
 
-> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[] \| `undefined`\>
 
 Get all unique partition context ids present in the collection.
 
 #### Returns
 
-`Promise`\<`IContextIds`[]\>
+`Promise`\<`IContextIds`[] \| `undefined`\>
 
 An array of context id objects, one per unique partition.
 

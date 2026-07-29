@@ -283,15 +283,18 @@ The total count of entities in the storage.
 
 ### getPartitionContextIds() {#getpartitioncontextids}
 
-> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[] \| `undefined`\>
 
 Get a unique list of all the context ids from the storage.
+Returns undefined when the connector has no partition context ids configured
+(run migration once with an empty context), or an empty array when the connector
+is partitioned but the table contains no entities (skip migration entirely).
 
 #### Returns
 
-`Promise`\<`IContextIds`[]\>
+`Promise`\<`IContextIds`[] \| `undefined`\>
 
-The list of unique context ids.
+The list of unique context ids, undefined if not partitioned, or [] if partitioned but empty.
 
 ***
 

@@ -322,13 +322,13 @@ True if the teardown process was successful.
 
 ### getPartitionContextIds() {#getpartitioncontextids}
 
-> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+> **getPartitionContextIds**(): `Promise`\<`IContextIds`[] \| `undefined`\>
 
 Get a unique list of all the context ids from the storage.
 
 #### Returns
 
-`Promise`\<`IContextIds`[]\>
+`Promise`\<`IContextIds`[] \| `undefined`\>
 
 The list of unique context ids.
 
