@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.2-next.2](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.9.2-next.1...entity-storage-service-v0.9.2-next.2) (2026-07-29)
+
+
+### Bug Fixes
+
+* use existing data during migration ([#186](https://github.com/iotaledger/twin-entity-storage/issues/186)) ([c6e91f5](https://github.com/iotaledger/twin-entity-storage/commit/c6e91f54198d4ab1cc242d0825f63082980d4f9c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.1 to 0.9.2-next.2
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.2-next.1 to 0.9.2-next.2
+
 ## [0.9.2-next.1](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.9.2-next.0...entity-storage-service-v0.9.2-next.1) (2026-07-29)
 
 
