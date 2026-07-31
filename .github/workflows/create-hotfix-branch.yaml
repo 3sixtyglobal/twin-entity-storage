@@ -1,0 +1,72 @@
+name: Create Hotfix Branch
+
+# Automates the first step of a hotfix release: cut a branch from main and
+# cherry-pick the fix commits from next onto it. The result is a starting
+# point, not a guarantee — verify the branch builds, cherry-pick any missing
+# dependent commits manually, then dispatch Release Production with
+# hotfixBranch=<this branch>. See HOTFIX.md for the full procedure.
+
+on:
+  workflow_dispatch:
+    inputs:
+      branchName:
+        description: 'Name for the hotfix branch, e.g. hotfix/0.9.1'
+        required: true
+        type: string
+      commits:
+        description: 'Comma-separated commit SHAs from next to cherry-pick, oldest first'
+        required: true
+        type: string
+
+jobs:
+  create-hotfix-branch:
+    name: Create Hotfix Branch
+    runs-on:
+      labels: ${{ github.event.repository.private && 'self-hosted' || 'ubuntu-latest' }}
+      group: ${{ github.event.repository.private && 'twin' || 'default' }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+
+      - name: Import GPG key
+        run: |
+          echo "${{ secrets.TWIN_GPG_PRIVATE_KEY }}" | base64 --decode | gpg --import
+          echo "TWIN_GPG_KEY_ID=${{ secrets.TWIN_GPG_KEY_ID }}" >> "$GITHUB_ENV"
+
+      - name: Configure Git
+        run: |
+          git config --global user.email "github@twindev.org"
+          git config --global user.name "TWIN GitHub Bot"
+          git config --global user.signingkey "$TWIN_GPG_KEY_ID"
+          git config --global commit.gpgsign true
+
+      - name: Create branch and cherry-pick commits
+        run: |
+          git fetch --no-tags origin main next
+          git checkout -b "${{ inputs.branchName }}" origin/main
+
+          IFS=',' read -ra COMMITS <<< "${{ inputs.commits }}"
+          for C in "${COMMITS[@]}"; do
+            C=$(echo "$C" | xargs)
+            echo "Cherry-picking $C ($(git log -1 --format=%s "$C"))"
+            git cherry-pick -S "$C"
+          done
+
+          git push origin "${{ inputs.branchName }}"
+          echo "::notice title=Hotfix Branch Created::${{ inputs.branchName }} with ${#COMMITS[@]} cherry-picked commit(s). Verify it builds, add any missing dependent commits, then dispatch Release Production with hotfixBranch=${{ inputs.branchName }}."
+
+      - name: Cleanup GPG key
+        if: always()
+        run: |
+          FINGERPRINT=$(gpg --list-secret-keys --with-colons "$TWIN_GPG_KEY_ID" | awk -F: '/fpr:/ {print $10}' | head -1)
+          if [ -n "$FINGERPRINT" ]; then
+            gpg --batch --yes --delete-secret-keys "$FINGERPRINT" || true
+            gpg --batch --yes --delete-keys "$FINGERPRINT" || true
+          fi

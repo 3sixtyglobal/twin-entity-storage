@@ -20,7 +20,7 @@
  *     ensuring <base>-next.0 is ahead of the already-published prerelease
  *   • Major version may only increment by 1 from the current development base
  */
-import { loadJson } from './common.mjs';
+import { loadJson, loadNextPrereleaseManifest } from './common.mjs';
 
 const MANIFEST_PRODUCTION_FILENAME = 'release/release-please-manifest.prod.json';
 const MANIFEST_PRERELEASE_FILENAME = 'release/release-please-manifest.prerelease.json';
@@ -70,7 +70,8 @@ async function run() {
 
 	const cv = [cMaj, cMin, cPat];
 
-	const preManifest = await loadJson(MANIFEST_PRERELEASE_FILENAME);
+	// Read next's REAL line from origin: the local copy is stale after hotfixes.
+	const preManifest = await loadNextPrereleaseManifest(MANIFEST_PRERELEASE_FILENAME);
 	const currentPrerelease = Object.values(preManifest)[0];
 	const devBase = currentPrerelease.split('-')[0];
 	const [rMaj, rMin, rPat] = devBase.split('.').map(Number);

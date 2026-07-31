@@ -254,3 +254,23 @@ export function interfaceCase(input) {
 	const pascal = pascalCase(input, false);
 	return pascal ? `I${pascal}` : '';
 }
+
+/**
+ * Load the prerelease manifest from the next branch on origin, falling back to
+ * the local copy when the ref cannot be fetched. The local copy on main can be
+ * stale: it only refreshes when next is merged in, which hotfix releases skip.
+ * @param manifestFilename The path of the prerelease manifest.
+ * @returns The parsed manifest.
+ */
+export async function loadNextPrereleaseManifest(manifestFilename) {
+	try {
+		await execAsync('git fetch --no-tags --depth=1 origin next');
+		const content = await execAsync(`git show "FETCH_HEAD:${manifestFilename}"`);
+		return JSON.parse(content);
+	} catch {
+		process.stdout.write(
+			`Could not read ${manifestFilename} from origin/next, using the local copy\n`
+		);
+		return loadJson(manifestFilename);
+	}
+}
