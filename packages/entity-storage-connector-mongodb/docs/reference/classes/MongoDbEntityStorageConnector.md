@@ -11,6 +11,7 @@ Class for performing entity storage operations using MongoDb.
 ## Implements
 
 - `IEntityStorageMigrationConnector`\<`T`\>
+- `IHealthProviderComponent`
 
 ## Constructors
 
@@ -114,9 +115,17 @@ The class name of the component.
 
 ### health() {#health}
 
-> **health**(): `Promise`\<`IHealth`[]\>
+> **health**(`lastTimestamp`): `Promise`\<`IHealth`[]\>
 
 Returns the health status of the component.
+
+#### Parameters
+
+##### lastTimestamp
+
+`number`
+
+The Unix timestamp (ms) recorded at the start of the previous cycle.
 
 #### Returns
 
@@ -126,7 +135,7 @@ The health status of the component.
 
 #### Implementation of
 
-`IEntityStorageMigrationConnector.health`
+`IHealthProviderComponent.health`
 
 ***
 
