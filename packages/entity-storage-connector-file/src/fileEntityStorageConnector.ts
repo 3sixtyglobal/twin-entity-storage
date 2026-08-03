@@ -2,6 +2,12 @@
 // SPDX-License-Identifier: Apache-2.0.
 import { access, mkdir, readFile, rename, rm, statfs, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
@@ -9,8 +15,6 @@ import {
 	ComponentFactory,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
 	type IValidationFailure,
 	Mutex,
@@ -42,9 +46,9 @@ import type { IFileEntityStorageConnectorConstructorOptions } from "./models/IFi
 /**
  * Class for performing entity storage operations in file.
  */
-export class FileEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class FileEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -217,9 +221,10 @@ export class FileEntityStorageConnector<
 
 	/**
 	 * Returns the health status of the component.
-	 * @returns The health status of the component, can return multiple entries for elements within the component.
+	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
+	 * @returns The health status of the component.
 	 */
-	public async health(): Promise<IHealth[]> {
+	public async health(lastTimestamp: number): Promise<IHealth[]> {
 		try {
 			const stats = await statfs(this._directory);
 			const freeBytes = stats.bavail * stats.bsize;
@@ -228,6 +233,7 @@ export class FileEntityStorageConnector<
 				return [
 					{
 						source: FileEntityStorageConnector.CLASS_NAME,
+						category: HealthCategory.Connectivity,
 						status: HealthStatus.Error,
 						description: "healthDescription",
 						message: "diskSpaceError",
@@ -242,6 +248,7 @@ export class FileEntityStorageConnector<
 				return [
 					{
 						source: FileEntityStorageConnector.CLASS_NAME,
+						category: HealthCategory.Connectivity,
 						status: HealthStatus.Warning,
 						description: "healthDescription",
 						message: "diskSpaceWarning",
@@ -256,6 +263,7 @@ export class FileEntityStorageConnector<
 			return [
 				{
 					source: FileEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { directory: this._directory, freeBytes }
@@ -265,6 +273,7 @@ export class FileEntityStorageConnector<
 			return [
 				{
 					source: FileEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "diskSpaceCheckFailed",

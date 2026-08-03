@@ -1,6 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { HealthStatus } from "@twin.org/core";
+import { HealthStatus } from "@twin.org/api-models";
 import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
 import { MemoryEntityStorageConnector } from "../src/memoryEntityStorageConnector.js";
@@ -68,7 +68,7 @@ describe("MemoryEntityStorageConnector — constructor and health", () => {
 			entitySchema: nameof<TestType>(),
 			config: { storageKey: "test" }
 		});
-		const result = await connector.health();
+		const result = await connector.health(0);
 		expect(result).toHaveLength(1);
 		expect(result[0].status).toEqual(HealthStatus.Ok);
 		expect(result[0].description).toEqual("healthDescription");

@@ -1,5 +1,11 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
@@ -8,8 +14,6 @@ import {
 	Converter,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
 	type IValidationFailure,
 	Mutex,
@@ -44,9 +48,9 @@ import type { IMySqlEntityStorageConnectorConstructorOptions } from "./models/IM
 /**
  * Class for performing entity storage operations using MySql.
  */
-export class MySqlEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class MySqlEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -172,10 +176,11 @@ export class MySqlEntityStorageConnector<
 	}
 
 	/**
-	 * Get the health of the component.
-	 * @returns The health of the component.
+	 * Returns the health status of the component.
+	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
+	 * @returns The health status of the component.
 	 */
-	public async health(): Promise<IHealth[]> {
+	public async health(lastTimestamp: number): Promise<IHealth[]> {
 		try {
 			const pool = await this.getPool();
 			await pool.query(
@@ -184,6 +189,7 @@ export class MySqlEntityStorageConnector<
 			return [
 				{
 					source: MySqlEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { database: this._config.database, tableName: this._config.tableName }
@@ -193,6 +199,7 @@ export class MySqlEntityStorageConnector<
 			return [
 				{
 					source: MySqlEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",

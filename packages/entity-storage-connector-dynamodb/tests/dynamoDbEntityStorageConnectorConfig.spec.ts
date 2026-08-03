@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import { HealthStatus } from "@twin.org/api-models";
 import { ContextIdStore } from "@twin.org/context";
-import { HealthStatus } from "@twin.org/core";
 import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
 import { TEST_DYNAMODB_CONFIG } from "./setupTestEnv.js";
@@ -145,7 +145,7 @@ describe("DynamoDbEntityStorageConnector — constructor and health", () => {
 			}
 		});
 		await connector.bootstrap();
-		const result = await connector.health();
+		const result = await connector.health(0);
 		expect(result).toHaveLength(1);
 		expect(result[0].status).toEqual(HealthStatus.Ok);
 		expect(result[0].description).toEqual("healthDescription");
@@ -161,7 +161,7 @@ describe("DynamoDbEntityStorageConnector — constructor and health", () => {
 		vi.spyOn(connectorInternal, "createConnection").mockReturnValue({
 			describeTable: vi.fn().mockRejectedValueOnce(new Error("Connection refused"))
 		});
-		const result = await connector.health();
+		const result = await connector.health(0);
 		expect(result).toHaveLength(1);
 		expect(result[0].status).toEqual(HealthStatus.Error);
 		expect(result[0].message).toEqual("connectionFailed");

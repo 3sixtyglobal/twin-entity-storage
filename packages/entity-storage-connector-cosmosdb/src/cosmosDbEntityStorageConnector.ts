@@ -13,6 +13,12 @@ import {
 	type SqlParameter,
 	type SqlQuerySpec
 } from "@azure/cosmos";
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
@@ -20,8 +26,6 @@ import {
 	ComponentFactory,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
 	type IValidationFailure,
 	ObjectHelper,
@@ -53,9 +57,9 @@ import type { ICosmosDbEntityStorageConnectorConstructorOptions } from "./models
 /**
  * Class for performing entity storage operations using Cosmos DB.
  */
-export class CosmosDbEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class CosmosDbEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -297,9 +301,10 @@ export class CosmosDbEntityStorageConnector<
 
 	/**
 	 * Returns the health status of the component.
+	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
 	 * @returns The health status of the component.
 	 */
-	public async health(): Promise<IHealth[]> {
+	public async health(lastTimestamp: number): Promise<IHealth[]> {
 		try {
 			await this._client
 				.database(this._config.databaseId)
@@ -308,6 +313,7 @@ export class CosmosDbEntityStorageConnector<
 			return [
 				{
 					source: CosmosDbEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { databaseId: this._config.databaseId, containerId: this._config.containerId }
@@ -317,6 +323,7 @@ export class CosmosDbEntityStorageConnector<
 			return [
 				{
 					source: CosmosDbEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",

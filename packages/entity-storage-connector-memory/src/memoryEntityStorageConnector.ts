@@ -1,12 +1,16 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	Coerce,
 	ComponentFactory,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
 	type IValidationFailure,
 	Mutex,
@@ -49,7 +53,10 @@ import type { IMemoryEntityStorageConnectorConstructorOptions } from "./models/I
  * buffer handlers.
  */
 export class MemoryEntityStorageConnector<T = unknown>
-	implements IEntityStorageConnector<T>, IEntityStorageMigrationConnector<T>
+	implements
+		IEntityStorageConnector<T>,
+		IEntityStorageMigrationConnector<T>,
+		IHealthProviderComponent
 {
 	/**
 	 * Runtime name for the class.
@@ -155,12 +162,14 @@ export class MemoryEntityStorageConnector<T = unknown>
 
 	/**
 	 * Returns the health status of the component.
+	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
 	 * @returns The health status of the component.
 	 */
-	public async health(): Promise<IHealth[]> {
+	public async health(lastTimestamp: number): Promise<IHealth[]> {
 		return [
 			{
 				source: MemoryEntityStorageConnector.CLASS_NAME,
+				category: HealthCategory.Connectivity,
 				status: HealthStatus.Ok,
 				description: "healthDescription",
 				data: { entityType: this._storageKey }

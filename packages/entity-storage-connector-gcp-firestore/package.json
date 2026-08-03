@@ -29,6 +29,7 @@
 	},
 	"dependencies": {
 		"@google-cloud/firestore": "8.7.0",
+		"@twin.org/api-models": "next",
 		"@twin.org/context": "next",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",

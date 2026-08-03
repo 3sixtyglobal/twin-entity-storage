@@ -1,13 +1,17 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
 	ComponentFactory,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
 	type IValidationFailure,
 	ObjectHelper,
@@ -38,9 +42,9 @@ import type { IMongoDbEntityStorageConnectorConstructorOptions } from "./models/
 /**
  * Class for performing entity storage operations using MongoDb.
  */
-export class MongoDbEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class MongoDbEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -204,9 +208,10 @@ export class MongoDbEntityStorageConnector<
 
 	/**
 	 * Returns the health status of the component.
+	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
 	 * @returns The health status of the component.
 	 */
-	public async health(): Promise<IHealth[]> {
+	public async health(lastTimestamp: number): Promise<IHealth[]> {
 		try {
 			await this._client
 				.db(this._config.database)
@@ -215,6 +220,7 @@ export class MongoDbEntityStorageConnector<
 			return [
 				{
 					source: MongoDbEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { database: this._config.database, collection: this._config.collection }
@@ -224,6 +230,7 @@ export class MongoDbEntityStorageConnector<
 			return [
 				{
 					source: MongoDbEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",

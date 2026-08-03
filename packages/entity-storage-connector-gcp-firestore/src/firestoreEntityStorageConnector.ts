@@ -7,6 +7,12 @@ import {
 	type Query,
 	type Settings
 } from "@google-cloud/firestore";
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
@@ -14,8 +20,6 @@ import {
 	Converter,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
 	type IValidationFailure,
 	ObjectHelper,
@@ -47,9 +51,9 @@ import type { IFirestoreEntityStorageConnectorConstructorOptions } from "./model
 /**
  * Class for performing entity storage operations using Firestore.
  */
-export class FirestoreEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class FirestoreEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -176,14 +180,16 @@ export class FirestoreEntityStorageConnector<
 
 	/**
 	 * Returns the health status of the component.
+	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
 	 * @returns The health status of the component.
 	 */
-	public async health(): Promise<IHealth[]> {
+	public async health(lastTimestamp: number): Promise<IHealth[]> {
 		try {
 			await this._firestoreClient.listCollections();
 			return [
 				{
 					source: FirestoreEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { projectId: this._config.projectId, collectionName: this._config.collectionName }
@@ -193,6 +199,7 @@ export class FirestoreEntityStorageConnector<
 			return [
 				{
 					source: FirestoreEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",

@@ -1,5 +1,11 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
@@ -7,8 +13,6 @@ import {
 	ComponentFactory,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
 	type IValidationFailure,
 	ObjectHelper,
@@ -40,9 +44,9 @@ import type { IPostgreSqlEntityStorageConnectorConstructorOptions } from "./mode
 /**
  * Class for performing entity storage operations using ql.
  */
-export class PostgreSqlEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class PostgreSqlEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -241,16 +245,18 @@ export class PostgreSqlEntityStorageConnector<
 	}
 
 	/**
-	 * Get the health of the component.
-	 * @returns The health of the component.
+	 * Returns the health status of the component.
+	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
+	 * @returns The health status of the component.
 	 */
-	public async health(): Promise<IHealth[]> {
+	public async health(lastTimestamp: number): Promise<IHealth[]> {
 		try {
 			const sql = await this.createConnection();
 			await sql`SELECT 1 FROM ${sql(this._config.tableName)} LIMIT 0`;
 			return [
 				{
 					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { tableName: this._config.tableName }
@@ -260,6 +266,7 @@ export class PostgreSqlEntityStorageConnector<
 			return [
 				{
 					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",

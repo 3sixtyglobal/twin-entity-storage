@@ -1,16 +1,13 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
-	BaseError,
-	ComponentFactory,
-	GeneralError,
-	Guards,
+	HealthCategory,
 	HealthStatus,
-	Is,
-	type IError,
-	type IHealth
-} from "@twin.org/core";
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
+import { BaseError, ComponentFactory, GeneralError, Guards, Is, type IError } from "@twin.org/core";
 import {
 	EntitySchemaFactory,
 	EntitySchemaPropertyType,
@@ -32,7 +29,7 @@ import type { IScyllaDBTableConnectorConstructorOptions } from "./models/IScylla
  */
 export class ScyllaDBTableConnector<T = unknown>
 	extends AbstractScyllaDBConnector<T>
-	implements IEntityStorageMigrationConnector<T>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
 {
 	/**
 	 * Runtime name for the class.
@@ -63,10 +60,11 @@ export class ScyllaDBTableConnector<T = unknown>
 	}
 
 	/**
-	 * Get the health of the component.
-	 * @returns The health of the component.
+	 * Returns the health status of the component.
+	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
+	 * @returns The health status of the component.
 	 */
-	public async health(): Promise<IHealth[]> {
+	public async health(lastTimestamp: number): Promise<IHealth[]> {
 		let connection;
 		try {
 			connection = await this.openConnection();
@@ -78,6 +76,7 @@ export class ScyllaDBTableConnector<T = unknown>
 			return [
 				{
 					source: ScyllaDBTableConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { table: this.safeTableName(this._fullTableName) }
@@ -87,6 +86,7 @@ export class ScyllaDBTableConnector<T = unknown>
 			return [
 				{
 					source: ScyllaDBTableConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",

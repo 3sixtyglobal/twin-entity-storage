@@ -21,6 +21,12 @@ import {
 	ScanCommand
 } from "@aws-sdk/lib-dynamodb";
 import { type NativeAttributeValue, unmarshall } from "@aws-sdk/util-dynamodb";
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
@@ -29,8 +35,6 @@ import {
 	Converter,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
 	type IValidationFailure,
 	ObjectHelper,
@@ -62,9 +66,9 @@ import type { IDynamoDbEntityStorageConnectorConstructorOptions } from "./models
 /**
  * Class for performing entity storage operations using Dynamo DB.
  */
-export class DynamoDbEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class DynamoDbEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -182,15 +186,17 @@ export class DynamoDbEntityStorageConnector<
 
 	/**
 	 * Returns the health status of the component.
+	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
 	 * @returns The health status of the component.
 	 */
-	public async health(): Promise<IHealth[]> {
+	public async health(lastTimestamp: number): Promise<IHealth[]> {
 		try {
 			const dbConnection = this.createConnection();
 			await dbConnection.describeTable({ TableName: this._config.tableName });
 			return [
 				{
 					source: DynamoDbEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { tableName: this._config.tableName }
@@ -200,6 +206,7 @@ export class DynamoDbEntityStorageConnector<
 			return [
 				{
 					source: DynamoDbEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",
