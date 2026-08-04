@@ -1,5 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import type { IContextIds } from "@twin.org/context";
 import { ComponentFactory, GeneralError, Is, type IComponent } from "@twin.org/core";
 import { EntitySchemaFactory, EntitySchemaHelper, type IEntitySchema } from "@twin.org/entity";
 import {
@@ -216,15 +217,36 @@ export class SchemaVersionService implements IComponent {
 		const stored = storedVersions.get(schemaName);
 		let resolvedStoredVersion: number;
 
+		// Captured when the fresh-vs-legacy check below already resolved the connector's
+		// partitions, so migrateWithChain can reuse them instead of fetching them again.
+		let partitions: IContextIds[] | undefined;
+
+		const migrationConnector = connector as IEntityStorageMigrationConnector;
+
+		const boundGetPartitionContextIds =
+			migrationConnector.getPartitionContextIds?.bind(migrationConnector);
+		if (Is.function(boundGetPartitionContextIds)) {
+			partitions = await boundGetPartitionContextIds();
+		}
+
 		if (stored === undefined) {
 			// No version record: check whether the table has any data.
 			// Empty table → this is a fresh bootstrap; seed at the current version so the
 			// migration chain never runs over an already-current-shape (or empty) table.
 			// Non-empty table → pre-existing data from before version tracking was introduced;
 			// treat as v0 and run the migration chain. applyEntityTransform preserves existing
-			// property values so current-shape rows are not degraded (issue #185, Bug 2).
-			const tableCount = await connector.count();
-			if (tableCount === 0) {
+			// property values so current-shape rows are not degraded.
+			let hasExistingData: boolean;
+			if (Is.undefined(partitions)) {
+				// Connector does not have partitioning, so we can safely call count.
+				hasExistingData = (await connector.count()) > 0;
+			} else {
+				// Connector has partitioning, if there are partition keys
+				// then it must have data, otherwise the table is empty.
+				hasExistingData = partitions.length > 0;
+			}
+
+			if (!hasExistingData) {
 				await this.writeVersion(schemaName, currentVersion);
 				return;
 			}
@@ -278,8 +300,6 @@ export class SchemaVersionService implements IComponent {
 			});
 		}
 
-		const migrationConnector = connector as IEntityStorageMigrationConnector;
-
 		// Upgrade — resolve and run the chain.
 		const steps: IResolvedMigrationStep[] = [];
 
@@ -320,6 +340,7 @@ export class SchemaVersionService implements IComponent {
 		const { finalConnector } = await MigrationHelper.migrateWithChain(
 			migrationConnector,
 			schemaName,
+			partitions,
 			steps,
 			migrationOptions,
 			loggingComponentType

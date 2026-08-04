@@ -40,6 +40,7 @@ export class MigrationHelper {
 	 * A chain of one step is equivalent to a traditional single-step migration.
 	 * @param sourceConnector The connector holding data at the stored schema version.
 	 * @param targetSchemaName The schema name for the current version (used to create the target connector).
+	 * @param partitions The partitions to migrate.
 	 * @param steps Ordered, fully-resolved migration steps from stored to current version.
 	 * @param options Optional migration options.
 	 * @param loggingComponentType The optional component type to use for logging the migration progress.
@@ -48,6 +49,7 @@ export class MigrationHelper {
 	public static async migrateWithChain(
 		sourceConnector: IEntityStorageMigrationConnector,
 		targetSchemaName: string,
+		partitions: IContextIds[] | undefined,
 		steps: IResolvedMigrationStep[],
 		options?: IMigrationOptions,
 		loggingComponentType?: string
@@ -73,20 +75,16 @@ export class MigrationHelper {
 			await MigrationHelper.startupConnector(sourceConnector, loggingComponentType);
 			await MigrationHelper.startupConnector(targetConnector, loggingComponentType);
 
-			const rawPartitionContextIds = await sourceConnector.getPartitionContextIds();
-
 			// undefined → not partitioned: run one pass with empty context.
 			// []        → partitioned but table is empty: skip all passes (count() never called).
 			// [{…}, …]  → partitioned with data: expand short-form values to long form and iterate.
 			let effectivePartitions: IContextIds[];
-			if (rawPartitionContextIds === undefined) {
+			if (partitions === undefined) {
 				effectivePartitions = [{}];
-			} else if (rawPartitionContextIds.length === 0) {
+			} else if (partitions.length === 0) {
 				effectivePartitions = [];
 			} else {
-				effectivePartitions = rawPartitionContextIds.map(ctx =>
-					ContextIdHelper.longAll(ctx, Object.keys(ctx))
-				);
+				effectivePartitions = partitions.map(ctx => ContextIdHelper.longAll(ctx, Object.keys(ctx)));
 			}
 
 			let migrated = 0;

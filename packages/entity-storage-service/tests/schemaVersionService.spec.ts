@@ -1,7 +1,13 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import { ContextIdKeys, ContextIdStore } from "@twin.org/context";
 import { ComponentFactory, GeneralError } from "@twin.org/core";
-import { EntitySchemaFactory, type IEntitySchema } from "@twin.org/entity";
+import {
+	EntitySchemaFactory,
+	EntitySchemaPropertyType,
+	type IEntitySchema
+} from "@twin.org/entity";
+import { MemoryEntityStorageConnector } from "@twin.org/entity-storage-connector-memory";
 import {
 	EntityStorageConnectorFactory,
 	type IEntityStorageConnector,
@@ -59,7 +65,11 @@ function makeMigConnector(schemaName: string, version = 0): IEntityStorageMigrat
 		// override this with mockResolvedValue(0).
 		count: vi.fn().mockResolvedValue(1),
 		empty: vi.fn(),
-		getPartitionContextIds: vi.fn().mockResolvedValue([]),
+		// Default to undefined ("not partitioned") so existing tests keep exercising the
+		// bare count() path they were written against. Tests exercising the partitioned
+		// contract override this explicitly to [] or a populated array —
+		// see the "partitioned-but-empty" / "partitioned with existing data" cases below.
+		getPartitionContextIds: vi.fn().mockResolvedValue(undefined),
 		createTargetConnector: vi.fn().mockResolvedValue(undefined),
 		finalizeMigration: vi.fn().mockResolvedValue(undefined),
 		cleanupMigration: vi.fn().mockResolvedValue(undefined)
@@ -225,6 +235,7 @@ describe("SchemaVersionService", () => {
 		expect(migrateWithChainSpy).toHaveBeenCalledWith(
 			connector,
 			schemaName,
+			undefined,
 			expect.any(Array) as IResolvedMigrationStep[],
 			expect.any(Object),
 			undefined
@@ -346,6 +357,7 @@ describe("SchemaVersionService", () => {
 			expect(migrateWithChainSpy).toHaveBeenCalledWith(
 				connector,
 				schemaName,
+				undefined,
 				expect.arrayContaining([
 					expect.objectContaining({ renames: [{ from: "oldField", to: "newField" }] })
 				]),
@@ -448,6 +460,9 @@ describe("SchemaVersionService", () => {
 		const v0Schema = makeSchema(`${schemaName}V0`, 0);
 		const currentSchema = makeSchema(schemaName, 1);
 		const connector = makeNonMigConnector(schemaName, 1); // no createTargetConnector
+		// Pre-existing data, so a migration is actually attempted (and then rejected for
+		// lacking migration capability) rather than short-circuiting as a fresh bootstrap.
+		(connector.count as ReturnType<typeof vi.fn>).mockResolvedValue(1);
 
 		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
 		schemaGetSpy.mockImplementation((name: string) => {
@@ -467,5 +482,189 @@ describe("SchemaVersionService", () => {
 		});
 
 		await expect(new SchemaVersionService().start()).rejects.toThrow(GeneralError);
+	});
+
+	// -------------------------------------------------------------------------
+	// start(): tenant-partitioned connector, no tenant in startup context
+	// -------------------------------------------------------------------------
+
+	test("start() succeeds for a tenant-partitioned connector when the startup context has no tenant", async () => {
+		const schemaName = "ReproEntity";
+		const currentVersion = 1;
+		const reproSchema: IEntitySchema = {
+			type: schemaName,
+			properties: [
+				{ property: "id", type: EntitySchemaPropertyType.String, isPrimary: true }
+			] as unknown as IEntitySchema["properties"],
+			version: currentVersion
+		};
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === schemaName) {
+				return reproSchema;
+			}
+			return makeSchema("Unknown");
+		});
+
+		// A real connector, not a stub — partitioned exactly as the engine partitions
+		// tenant-scoped entity storage (twin-engine component builders pick [Node, Tenant]
+		// as partitionContextIds whenever TWIN_TENANT_ENABLED=true).
+		const connector = new MemoryEntityStorageConnector({
+			entitySchema: schemaName,
+			partitionContextIds: [ContextIdKeys.Node, ContextIdKeys.Tenant],
+			config: { storageKey: `repro-${schemaName}` }
+		});
+
+		connectorNamesSpy.mockReturnValue([schemaName]);
+		const vc = makeVersionConnector([]); // no stored version record — first boot
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		// Mirrors EngineCore.start(): only "node" is present in the ambient context — "tenant"
+		// is a per-request value resolved by the tenant route processor, never present at
+		// startup (twin-node start.ts:162/170).
+		await ContextIdStore.run({ [ContextIdKeys.Node]: "test-node" }, async () => {
+			await new SchemaVersionService().start();
+		});
+
+		expect(vc.set).toHaveBeenCalledWith(
+			expect.objectContaining({ schemaName, version: currentVersion })
+		);
+	});
+
+	// -------------------------------------------------------------------------
+	// processSchema — partition-aware fresh-vs-legacy contract
+	// -------------------------------------------------------------------------
+
+	test("falls back to bare count() when getPartitionContextIds returns undefined (un-partitioned connector, unchanged path)", async () => {
+		const schemaName = "Widget";
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+		(connector.getPartitionContextIds as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+		(connector.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(connector.count).toHaveBeenCalledTimes(1);
+		expect(migrateWithChainSpy).not.toHaveBeenCalled();
+		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
+	});
+
+	test("treats a partitioned-but-empty table as fresh bootstrap without calling count()", async () => {
+		const schemaName = "Widget";
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+		// Partitioned (unlike the stub's "not partitioned" default), but no partitions exist yet.
+		(connector.getPartitionContextIds as ReturnType<typeof vi.fn>).mockResolvedValue([]);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(connector.count).not.toHaveBeenCalled();
+		expect(migrateWithChainSpy).not.toHaveBeenCalled();
+		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
+	});
+
+	test("treats a partitioned table with existing partitions as legacy v0 data without calling count()", async () => {
+		const schemaName = "Widget";
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+		(connector.getPartitionContextIds as ReturnType<typeof vi.fn>).mockResolvedValue([
+			{ node: "n1", tenant: "t1" }
+		]);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(connector.count).not.toHaveBeenCalled();
+		expect(migrateWithChainSpy).toHaveBeenCalledWith(
+			connector,
+			schemaName,
+			[{ node: "n1", tenant: "t1" }],
+			expect.any(Array) as IResolvedMigrationStep[],
+			expect.any(Object),
+			undefined
+		);
+		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
+	});
+
+	test("falls back to bare count() for a base connector with no getPartitionContextIds capability", async () => {
+		const schemaName = "Widget";
+		const connector = makeNonMigConnector(schemaName, 1);
+		(connector.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(makeSchema(schemaName, 1));
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(connector.count).toHaveBeenCalledTimes(1);
+		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
 	});
 });

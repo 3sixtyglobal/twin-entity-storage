@@ -555,6 +555,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 		const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 			source,
 			"TargetSchema",
+			await source.getPartitionContextIds(),
 			[singleStep]
 		);
 
@@ -566,9 +567,12 @@ describe("MigrationHelper.migrateWithChain", () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([], target);
 
-		const { migrated } = await MigrationHelper.migrateWithChain(source, "TargetSchema", [
-			singleStep
-		]);
+		const { migrated } = await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			await source.getPartitionContextIds(),
+			[singleStep]
+		);
 
 		expect(migrated).toBe(0);
 	});
@@ -577,7 +581,12 @@ describe("MigrationHelper.migrateWithChain", () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([], target);
 
-		await MigrationHelper.migrateWithChain(source, "TargetSchema", [singleStep]);
+		await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			await source.getPartitionContextIds(),
+			[singleStep]
+		);
 
 		expect(source.createTargetConnector).toHaveBeenCalledWith("TargetSchema");
 	});
@@ -586,7 +595,12 @@ describe("MigrationHelper.migrateWithChain", () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([{ id: "1", name: "Bob" }], target);
 
-		await MigrationHelper.migrateWithChain(source, "TargetSchema", [singleStep]);
+		await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			await source.getPartitionContextIds(),
+			[singleStep]
+		);
 
 		expect(source.finalizeMigration).toHaveBeenCalledOnce();
 	});
@@ -594,30 +608,38 @@ describe("MigrationHelper.migrateWithChain", () => {
 	test("wraps connector errors in a migrationFailed GeneralError", async () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([], target);
-		(source.getPartitionContextIds as ReturnType<typeof vi.fn>).mockRejectedValue(
+		(source.finalizeMigration as ReturnType<typeof vi.fn>).mockRejectedValue(
 			new Error("store unavailable")
 		);
 
 		await expect(
-			MigrationHelper.migrateWithChain(source, "TargetSchema", [singleStep])
+			MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				await source.getPartitionContextIds(),
+				[singleStep]
+			)
 		).rejects.toThrow(GeneralError);
 	});
 
 	test("calls cleanupMigration when an error occurs after createTargetConnector", async () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([], target);
-		(source.getPartitionContextIds as ReturnType<typeof vi.fn>).mockRejectedValue(
-			new Error("boom")
-		);
+		(source.finalizeMigration as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("boom"));
 
 		await expect(
-			MigrationHelper.migrateWithChain(source, "TargetSchema", [singleStep])
+			MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				await source.getPartitionContextIds(),
+				[singleStep]
+			)
 		).rejects.toThrow();
 
 		expect(source.cleanupMigration).toHaveBeenCalledWith(target, undefined, undefined);
 	});
 
-	describe("getPartitionContextIds context id failures", () => {
+	describe("partition handling", () => {
 		beforeEach(() => {
 			ContextIdHandlerFactory.register(ContextIdKeys.Node, () => new TestContextIdHandler());
 		});
@@ -626,17 +648,12 @@ describe("MigrationHelper.migrateWithChain", () => {
 			ContextIdHandlerFactory.unregister(ContextIdKeys.Node);
 		});
 
-		test("expands short-form context ids from getPartitionContextIds to long form before passing to ContextIdStore.run", async () => {
+		test("expands short-form context ids in partitions to long form before passing to ContextIdStore.run", async () => {
 			const target = makeTargetConnector();
 			const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
 
-			// getPartitionContextIds returns short form — no "did:internal:" prefix — as real
-			// connectors do: they store the short value produced by ContextIdHelper.shortCombined
-			// and reconstruct it via ContextIdHelper.shortSplit.
-			(source.getPartitionContextIds as ReturnType<typeof vi.fn>).mockResolvedValue([
-				{ [ContextIdKeys.Node]: "shortNodeId" }
-			]);
-
+			// Partitions carry short form — no "did:internal:" prefix — as real connectors
+			// do: they store the short value produced by ContextIdHelper.shortCombined.
 			let contextSeenByCount: IContextIds | undefined;
 			(source.count as ReturnType<typeof vi.fn>).mockImplementation(async () => {
 				contextSeenByCount = await ContextIdStore.getContextIds();
@@ -644,53 +661,93 @@ describe("MigrationHelper.migrateWithChain", () => {
 				return 1;
 			});
 
-			await MigrationHelper.migrateWithChain(source, "TargetSchema", [singleStep]);
+			await MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				[{ [ContextIdKeys.Node]: "shortNodeId" }],
+				[singleStep]
+			);
 
 			expect(contextSeenByCount?.[ContextIdKeys.Node]).toBe(
 				`${TestContextIdHandler.INTERNAL_PREFIX}shortNodeId`
 			);
 		});
 
-		test("runs a single pass with empty context when getPartitionContextIds returns undefined for a non-partitioned table", async () => {
+		test("runs a single pass with empty context when partitions is undefined (non-partitioned table)", async () => {
 			const target = makeTargetConnector();
 			const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
 
 			// undefined = not partitioned: MigrationHelper runs one pass with empty context {}
 			// so count() is called exactly once and no partition key is required.
-			(source.getPartitionContextIds as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-
 			let contextSeenByCount: IContextIds | undefined;
 			(source.count as ReturnType<typeof vi.fn>).mockImplementation(async () => {
 				contextSeenByCount = await ContextIdStore.getContextIds();
 				return 1;
 			});
 
-			const { migrated } = await MigrationHelper.migrateWithChain(source, "TargetSchema", [
-				singleStep
-			]);
+			const { migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				await source.getPartitionContextIds(),
+				[singleStep]
+			);
 
 			expect(migrated).toBe(1);
 			expect(source.count).toHaveBeenCalledOnce();
 			expect(contextSeenByCount).toEqual({});
 		});
 
-		test("skips all partition passes and migrates 0 entities when getPartitionContextIds returns empty array for an empty partitioned table", async () => {
+		test("skips all partition passes and migrates 0 entities when partitions is an empty array", async () => {
 			const target = makeTargetConnector();
 			const source = makeSourceConnector([], target);
 
-			// An empty table with partitionContextIds configured returns [] from
-			// getPartitionContextIds.  MigrationHelper skips the partition loop entirely so
-			// count() is never called — avoiding the "contextIdMissing" error that would occur
-			// if we fell back to [{}] and called count() without the required "node" key.
-			(source.getPartitionContextIds as ReturnType<typeof vi.fn>).mockResolvedValue([]);
-
-			const { migrated } = await MigrationHelper.migrateWithChain(source, "TargetSchema", [
-				singleStep
-			]);
+			// An empty partitions array means the table is partitioned but has no data.
+			// MigrationHelper skips the partition loop entirely so count() is never called —
+			// avoiding the "contextIdMissing" error that would occur if we fell back to [{}]
+			// and called count() without the required "node" key.
+			const { migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				[],
+				[singleStep]
+			);
 
 			expect(migrated).toBe(0);
 			expect(source.count).not.toHaveBeenCalled();
 		});
+	});
+
+	test("migrates 0 entities and never calls count when partitions is an empty array", async () => {
+		const target = makeTargetConnector();
+		const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+
+		const { migrated } = await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			[],
+			[singleStep]
+		);
+
+		expect(migrated).toBe(0);
+		expect(source.count).not.toHaveBeenCalled();
+	});
+
+	test("migrates entities across all partitions when partitions is a non-empty array", async () => {
+		const target = makeTargetConnector();
+		const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+
+		// Two partitions (empty context objects — no handler registration needed).
+		// source.count returns 1 and source.query returns 1 entity per partition pass,
+		// so the total migrated count should equal partitions.length.
+		const { migrated } = await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			[{}, {}],
+			[singleStep]
+		);
+
+		expect(migrated).toBe(2);
+		expect(source.count).toHaveBeenCalledTimes(2);
 	});
 
 	test("a chain of one step is equivalent to a single-step migration", async () => {
@@ -698,7 +755,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector(entities, target);
 
-		const { migrated } = await MigrationHelper.migrateWithChain(source, "TargetSchema", [
+		const { migrated } = await MigrationHelper.migrateWithChain(source, "TargetSchema", undefined, [
 			singleStep
 		]);
 
