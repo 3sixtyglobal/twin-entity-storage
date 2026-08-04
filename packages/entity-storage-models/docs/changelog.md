@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2-next.4](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.2-next.3...entity-storage-models-v0.9.2-next.4) (2026-08-04)
+
+
+### Bug Fixes
+
+* schema version check crashes in multi-tenant mode ([#192](https://github.com/iotaledger/twin-entity-storage/issues/192)) ([a816341](https://github.com/iotaledger/twin-entity-storage/commit/a8163415ce116582f3c3c23294f7f4062099d8f3))
+
 ## [0.9.2-next.3](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.2-next.2...entity-storage-models-v0.9.2-next.3) (2026-08-03)
 
 
