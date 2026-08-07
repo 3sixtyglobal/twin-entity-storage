@@ -80,7 +80,7 @@ class TestType {
 	@property({ type: "string", optional: true })
 	public role?: string;
 
-	@property({ type: "string", isSecondary: true, optional: true })
+	@property({ type: "string", isSecondary: SUPPORT_NULLABLE_SECONDARY_INDEX, optional: true })
 	public value4?: string;
 }
 

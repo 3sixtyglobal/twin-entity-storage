@@ -82,10 +82,7 @@ class TestType {
 	@property({ type: "string", optional: true })
 	public role?: string;
 
-	// Not isSecondary as in the other connector specs: ScyllaDB maps secondary properties
-	// to clustering-key columns which cannot be optional, and the tests sorting by this
-	// property are skipped here via SUPPORT_SECONDARY_INDEX_SORT.
-	@property({ type: "string", optional: true })
+	@property({ type: "string", isSecondary: SUPPORT_NULLABLE_SECONDARY_INDEX, optional: true })
 	public value4?: string;
 }
 
