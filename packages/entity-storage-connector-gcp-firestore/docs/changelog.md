@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.2-next.6](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-gcp-firestore-v0.9.2-next.5...entity-storage-connector-gcp-firestore-v0.9.2-next.6) (2026-08-07)
+
+
+### Bug Fixes
+
+* allow multi-property sort on DynamoDB and CosmosDB connectors ([#196](https://github.com/iotaledger/twin-entity-storage/issues/196)) ([f1bb582](https://github.com/iotaledger/twin-entity-storage/commit/f1bb5826d75dae331ad6b42df5de330a308c5405))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.5 to 0.9.2-next.6
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.2-next.5 to 0.9.2-next.6
+
 ## [0.9.2-next.5](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-gcp-firestore-v0.9.2-next.4...entity-storage-connector-gcp-firestore-v0.9.2-next.5) (2026-08-07)
 
 
