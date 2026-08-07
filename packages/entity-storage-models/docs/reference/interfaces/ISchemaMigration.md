@@ -3,7 +3,7 @@
 Optional per-step override for a single version-to-version migration.
 Only register an entry in SchemaMigrationFactory when a step requires property
 renames or a custom object/array transform. For purely structural changes
-(add/remove/type-change fields) no entry is needed — the runner diffs the two
+(add/remove/type-change fields) no entry is needed - the runner diffs the two
 versioned schema classes (e.g. MyEntityV0 vs MyEntityV1) from EntitySchemaFactory
 automatically.
 

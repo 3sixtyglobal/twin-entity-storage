@@ -63,7 +63,7 @@ Options controlling how null/undefined optional properties are stored.
 `"omit"` \| `"nullify"`
 
 "omit" strips null/undefined optional properties before writing
-(NoSQL — avoids index-key type errors). "nullify" converts undefined to null (SQL — the default).
+(NoSQL - avoids index-key type errors). "nullify" converts undefined to null (SQL - the default).
 
 #### Returns
 
