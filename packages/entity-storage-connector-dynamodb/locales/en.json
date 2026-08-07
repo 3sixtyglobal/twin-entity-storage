@@ -18,7 +18,7 @@
 			"queryFailed": "The query failed",
 			"comparisonNotSupported": "Comparison operator \"{comparison}\" is not supported",
 			"conditionalNotSupported": "Conditional operator \"{operator}\" is not supported",
-			"sortSingle": "You can only sort by a single property",
+			"sortUnsupported": "Sorting supports at most one property other than the primary key \"{primaryKey}\"",
 			"propertyNotFound": "The property \"{property}\" was not found on the entity schema",
 			"getPartitionContextIdsFailed": "Unable to get partition context ids",
 			"setBatchFailed": "Unable to set batch of entities",

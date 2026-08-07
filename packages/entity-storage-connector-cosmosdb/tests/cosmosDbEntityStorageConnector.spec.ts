@@ -34,6 +34,11 @@ const SUPPORT_NOT_INCLUDES = true;
 const SUPPORT_NULLABLE_SECONDARY_INDEX = true;
 // Does the connector support sorting by secondary index properties.
 const SUPPORT_SECONDARY_INDEX_SORT = true;
+// Does the connector honour trailing tiebreaker sort properties within ties of the
+// first sort property.
+const SUPPORT_MULTI_SORT_TIEBREAKER_ORDER = true;
+// Does the connector support sorting on more than one non primary-key property.
+const SUPPORT_MULTI_SORT_ARBITRARY = false;
 
 @entity()
 class SubType {
@@ -76,6 +81,9 @@ class TestType {
 
 	@property({ type: "string", optional: true })
 	public role?: string;
+
+	@property({ type: "string", isSecondary: true, optional: true })
+	public value4?: string;
 }
 
 @entity()
@@ -875,6 +883,216 @@ describe("CosmosDbEntityStorageConnector", () => {
 			expect(all.every(e => (e.value1 as string) >= "val005")).toBe(true);
 			for (let i = 1; i < all.length; i++) {
 				expect((all[i].value1 as string) <= (all[i - 1].value1 as string)).toBe(true);
+			}
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"can paginate a multi-property sort with a primary-key tiebreaker across ties",
+		async () => {
+			const PAGE = 5;
+			const groups = ["ccc", "aaa", "ddd", "bbb"];
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			const seeded = [...new Array(12).keys()].map(i => ({
+				id: String(i + 1).padStart(3, "0"),
+				value1: groups[i % groups.length],
+				value2: i
+			}));
+			for (const item of seeded) {
+				await connector.set(item);
+			}
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending },
+				{ property: "id" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+
+			const all: Partial<TestType>[] = [];
+			const seen = new Set<string>();
+			let cursor: string | undefined;
+			let pages = 0;
+			do {
+				const page = await connector.query(undefined, sort, undefined, cursor, PAGE);
+				for (const e of page.entities) {
+					expect(seen.has(e.id as string), `duplicate id ${e.id}`).toBe(false);
+					seen.add(e.id as string);
+				}
+				all.push(...page.entities);
+				cursor = page.cursor;
+				expect(++pages).toBeLessThan(100);
+			} while (cursor !== undefined);
+
+			expect(all.length).toBe(seeded.length);
+			for (let i = 1; i < all.length; i++) {
+				expect((all[i].value1 as string) >= (all[i - 1].value1 as string)).toBe(true);
+			}
+
+			if (SUPPORT_MULTI_SORT_TIEBREAKER_ORDER) {
+				const expectedIds = seeded
+					.slice()
+					.sort((a, b) => {
+						if (a.value1 === b.value1) {
+							return a.id.localeCompare(b.id);
+						}
+						return a.value1.localeCompare(b.value1);
+					})
+					.map(e => e.id);
+				expect(all.map(e => e.id)).toEqual(expectedIds);
+			}
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"multi-property sort with descending first property honours the requested direction",
+		async () => {
+			const PAGE = 5;
+			const groups = ["ccc", "aaa", "ddd", "bbb"];
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			const seeded = [...new Array(12).keys()].map(i => ({
+				id: String(i + 1).padStart(3, "0"),
+				value1: groups[i % groups.length],
+				value2: i
+			}));
+			for (const item of seeded) {
+				await connector.set(item);
+			}
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Descending },
+				{ property: "id" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+
+			const all: Partial<TestType>[] = [];
+			let cursor: string | undefined;
+			let pages = 0;
+			do {
+				const page = await connector.query(undefined, sort, undefined, cursor, PAGE);
+				all.push(...page.entities);
+				cursor = page.cursor;
+				expect(++pages).toBeLessThan(100);
+			} while (cursor !== undefined);
+
+			expect(all.length).toBe(seeded.length);
+			for (let i = 1; i < all.length; i++) {
+				expect((all[i].value1 as string) <= (all[i - 1].value1 as string)).toBe(true);
+			}
+
+			if (SUPPORT_MULTI_SORT_TIEBREAKER_ORDER) {
+				const expectedIds = seeded
+					.slice()
+					.sort((a, b) => {
+						if (a.value1 === b.value1) {
+							return a.id.localeCompare(b.id);
+						}
+						return b.value1.localeCompare(a.value1);
+					})
+					.map(e => e.id);
+				expect(all.map(e => e.id)).toEqual(expectedIds);
+			}
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"sort led by the primary key returns primary-key order and ignores the trailing property",
+		async () => {
+			const groups = ["bbb", "aaa"];
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			const seeded = [...new Array(8).keys()].map(i => ({
+				id: String(8 - i).padStart(3, "0"),
+				value1: groups[i % groups.length],
+				value2: i
+			}));
+			for (const item of seeded) {
+				await connector.set(item);
+			}
+
+			const sort = [
+				{ property: "id" as keyof TestType, sortDirection: SortDirection.Ascending },
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+
+			const result = await connector.query(undefined, sort);
+			const expectedIds = seeded.map(e => e.id).sort((a, b) => a.localeCompare(b));
+			expect(result.entities.map(e => e.id)).toEqual(expectedIds);
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"sort with multiple non primary-key properties is honoured or clearly rejected",
+		async () => {
+			const groups = ["bbb", "aaa"];
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			const seeded = [...new Array(8).keys()].map(i => ({
+				id: String(i + 1).padStart(3, "0"),
+				value1: groups[i % groups.length],
+				value2: i,
+				value4: String(8 - i)
+			}));
+			for (const item of seeded) {
+				await connector.set(item);
+			}
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending },
+				{ property: "value4" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+
+			if (SUPPORT_MULTI_SORT_ARBITRARY) {
+				const result = await connector.query(undefined, sort);
+				const expectedIds = seeded
+					.slice()
+					.sort((a, b) => {
+						if (a.value1 === b.value1) {
+							return a.value4.localeCompare(b.value4);
+						}
+						return a.value1.localeCompare(b.value1);
+					})
+					.map(e => e.id);
+				expect(result.entities.map(e => e.id)).toEqual(expectedIds);
+			} else {
+				await expect(connector.query(undefined, sort)).rejects.toMatchObject({
+					name: "GeneralError",
+					message: expect.stringContaining("sortUnsupported")
+				});
+			}
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"multi-property sort keeps working after re-bootstrapping an existing store",
+		async () => {
+			const PAGE = 5;
+			const groups = ["ccc", "aaa", "ddd", "bbb"];
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			for (let i = 0; i < 12; i++) {
+				await connector.set({
+					id: String(i + 1).padStart(3, "0"),
+					value1: groups[i % groups.length],
+					value2: i
+				});
+			}
+
+			const bootstrapped = await connector.bootstrap?.();
+			expect(bootstrapped).toBe(true);
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending },
+				{ property: "id" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+
+			const all: Partial<TestType>[] = [];
+			let cursor: string | undefined;
+			let pages = 0;
+			do {
+				const page = await connector.query(undefined, sort, undefined, cursor, PAGE);
+				all.push(...page.entities);
+				cursor = page.cursor;
+				expect(++pages).toBeLessThan(100);
+			} while (cursor !== undefined);
+
+			expect(all.length).toBe(12);
+			for (let i = 1; i < all.length; i++) {
+				expect((all[i].value1 as string) >= (all[i - 1].value1 as string)).toBe(true);
 			}
 		}
 	);

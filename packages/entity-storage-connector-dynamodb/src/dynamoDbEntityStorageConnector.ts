@@ -884,6 +884,18 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		EntityStorageHelper.validateProperties(this._entitySchema, properties);
 		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 
+		if (Is.arrayValue(sortProperties)) {
+			const nonPrimarySorts = sortProperties.filter(
+				sortProperty => sortProperty.property !== this._primaryKey.property
+			);
+			if (nonPrimarySorts.length > 1) {
+				throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "sortUnsupported", {
+					properties: sortProperties.map(sortProperty => sortProperty.property),
+					primaryKey: this._primaryKey.property
+				});
+			}
+		}
+
 		return this.internalQuery(
 			conditions,
 			sortProperties,
@@ -1712,10 +1724,11 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 
 	/**
 	 * Resolve index configuration from sort options and optional explicit secondary index.
+	 * Only the first sort property selects the GSI and scan direction, trailing tiebreakers
+	 * are ignored as the key-based cursor already paginates stably across ties.
 	 * @param sortProperties The optional sort order.
 	 * @param secondaryIndex The optional explicit secondary index.
 	 * @returns The resolved index name, GSI attribute and sort direction.
-	 * @throws GeneralError if more than one sort property is specified.
 	 * @internal
 	 */
 	private resolveQueryIndexConfig(
@@ -1736,23 +1749,18 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		let scanAscending = true;
 
 		if (Is.arrayValue(sortProperties)) {
-			if (sortProperties.length > 1) {
-				throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "sortSingle");
+			const primarySort = sortProperties[0];
+			const propertySchema = this._entitySchema.properties?.find(
+				e => e.property === primarySort.property
+			);
+			if (propertySchema?.isPrimary) {
+				indexName = undefined;
+				gsiAttribute = undefined;
+			} else {
+				indexName = `${primarySort.property as string}Index`;
+				gsiAttribute = primarySort.property as string;
 			}
-
-			for (const sortProperty of sortProperties) {
-				const propertySchema = this._entitySchema.properties?.find(
-					e => e.property === sortProperty.property
-				);
-				if (propertySchema?.isPrimary) {
-					indexName = undefined;
-					gsiAttribute = undefined;
-				} else {
-					indexName = `${sortProperty.property as string}Index`;
-					gsiAttribute = sortProperty.property as string;
-				}
-				scanAscending = sortProperty.sortDirection === SortDirection.Ascending;
-			}
+			scanAscending = primarySort.sortDirection === SortDirection.Ascending;
 		}
 
 		return {

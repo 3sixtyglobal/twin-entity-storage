@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0.
 import {
 	BulkOperationType,
+	type CompositePath,
 	type Container,
 	CosmosClient,
 	type FeedOptions,
+	type IndexingPolicy,
 	type ItemDefinition,
 	type JSONValue,
 	type OperationInput,
@@ -267,7 +269,8 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 						partitionKey: {
 							kind: PartitionKeyKind.Hash,
 							paths: [`/${CosmosDbEntityStorageConnector._PARTITION_KEY}`]
-						}
+						},
+						indexingPolicy: this.buildIndexingPolicy()
 					},
 					{ offerThroughput: this._config.offerThroughput }
 				);
@@ -725,6 +728,19 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		EntityStorageHelper.validateProperties(this._entitySchema, properties);
 		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 
+		// Only the sort shapes covered by the composite indexes from buildIndexingPolicy are accepted.
+		if (Is.arrayValue(sortProperties)) {
+			const nonPrimarySorts = sortProperties.filter(
+				sortProperty => sortProperty.property !== this._primaryKey.property
+			);
+			if (nonPrimarySorts.length > 1) {
+				throw new GeneralError(CosmosDbEntityStorageConnector.CLASS_NAME, "sortUnsupported", {
+					properties: sortProperties.map(sortProperty => sortProperty.property),
+					primaryKey: this._primaryKey.property
+				});
+			}
+		}
+
 		if (!Is.empty(limit)) {
 			const validationFailures: IValidationFailure[] = [];
 			Validation.integer(nameof(limit), limit, validationFailures, undefined, { minValue: 1 });
@@ -739,14 +755,19 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 			const returnSize = limit ?? CosmosDbEntityStorageConnector._DEFAULT_LIMIT;
 
 			let orderByClause: string = "";
-			if (Array.isArray(sortProperties)) {
-				if (sortProperties.length > 1) {
-					throw new GeneralError(CosmosDbEntityStorageConnector.CLASS_NAME, "sortSingle");
-				}
-				for (const sortProperty of sortProperties) {
+			if (Is.arrayValue(sortProperties)) {
+				// The primary key is unique so no property after its first occurrence can affect
+				// the order, truncating keeps the ORDER BY within the provisioned composite indexes.
+				const primaryKeyIndex = sortProperties.findIndex(
+					sortProperty => sortProperty.property === this._primaryKey.property
+				);
+				const effectiveSorts =
+					primaryKeyIndex === -1 ? sortProperties : sortProperties.slice(0, primaryKeyIndex + 1);
+				const orderClauses = effectiveSorts.map(sortProperty => {
 					const direction = sortProperty.sortDirection === SortDirection.Ascending ? "asc" : "desc";
-					orderByClause = `ORDER BY c.${String(sortProperty.property)} ${direction}`;
-				}
+					return `c.${String(sortProperty.property)} ${direction}`;
+				});
+				orderByClause = `ORDER BY ${orderClauses.join(", ")}`;
 			}
 
 			const attributeNames: { [id: string]: string } = {};
@@ -1319,6 +1340,37 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 			}
 			await new Promise(resolve => setTimeout(resolve, 250));
 		}
+	}
+
+	/**
+	 * Build the composite indexes needed to serve multi-property ORDER BY queries.
+	 * Pairing each sortable property with the primary key in both directions covers all
+	 * four direction combinations, as Cosmos DB also serves each index reversed.
+	 * @returns The indexing policy for the container, or undefined if the schema has no
+	 * sortable properties.
+	 * @internal
+	 */
+	private buildIndexingPolicy(): IndexingPolicy | undefined {
+		const primaryKeyPath = `/${this._primaryKey.property as string}`;
+		const compositeIndexes: CompositePath[][] = [];
+
+		if (Is.arrayValue(this._entitySchema.properties)) {
+			for (const prop of this._entitySchema.properties) {
+				if (!prop.isPrimary && (Is.stringValue(prop.sortDirection) || prop.isSecondary)) {
+					const propertyPath = `/${prop.property as string}`;
+					compositeIndexes.push([
+						{ path: propertyPath, order: "ascending" },
+						{ path: primaryKeyPath, order: "ascending" }
+					]);
+					compositeIndexes.push([
+						{ path: propertyPath, order: "ascending" },
+						{ path: primaryKeyPath, order: "descending" }
+					]);
+				}
+			}
+		}
+
+		return compositeIndexes.length > 0 ? { compositeIndexes } : undefined;
 	}
 
 	/**
