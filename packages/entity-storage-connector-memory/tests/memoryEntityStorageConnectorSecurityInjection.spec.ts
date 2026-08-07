@@ -19,7 +19,7 @@ class TestType {
 	public value1!: string;
 }
 
-describe("MemoryEntityStorageConnector — injection-style input handling", () => {
+describe("MemoryEntityStorageConnector - injection-style input handling", () => {
 	let connector: MemoryEntityStorageConnector<TestType>;
 
 	beforeAll(async () => {

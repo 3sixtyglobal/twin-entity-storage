@@ -61,10 +61,9 @@ export class ScyllaDBTableConnector<T = unknown>
 
 	/**
 	 * Returns the health status of the component.
-	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
 	 * @returns The health status of the component.
 	 */
-	public async health(lastTimestamp: number): Promise<IHealth[]> {
+	public async health(): Promise<IHealth[]> {
 		let connection;
 		try {
 			connection = await this.openConnection();
@@ -286,7 +285,7 @@ export class ScyllaDBTableConnector<T = unknown>
 				sql = `UPDATE "${this.safeTableName(this._fullTableName)}" SET ${updateValues.join(",")} WHERE ${sqlCondition}`;
 				execParams = propValues;
 			} else {
-				// No non-null data columns and no extra conditions — INSERT writes a row marker
+				// No non-null data columns and no extra conditions - INSERT writes a row marker
 				// so the entity remains visible in SELECT even when all data fields are null.
 				const cols = finalConditions.map(c => `"${String(c.property)}"`).join(",");
 				const placeholders = finalConditions.map(() => "?").join(",");
@@ -393,7 +392,7 @@ export class ScyllaDBTableConnector<T = unknown>
 					sql = `UPDATE "${this.safeTableName(this._fullTableName)}" SET ${updateValues.join(",")} WHERE ${sqlCondition}`;
 					queryParams = propValues;
 				} else {
-					// No non-null data columns — INSERT writes a row marker so the entity
+					// No non-null data columns - INSERT writes a row marker so the entity
 					// remains visible in SELECT even when all data fields are null.
 					const cols = finalConditions.map(c => `"${String(c.property)}"`).join(",");
 					const placeholders = finalConditions.map(() => "?").join(",");

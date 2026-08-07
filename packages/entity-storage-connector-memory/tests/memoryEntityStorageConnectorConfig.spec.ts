@@ -14,7 +14,7 @@ class TestType {
 	public value1!: string;
 }
 
-describe("MemoryEntityStorageConnector — constructor and health", () => {
+describe("MemoryEntityStorageConnector - constructor and health", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 	});
@@ -68,7 +68,7 @@ describe("MemoryEntityStorageConnector — constructor and health", () => {
 			entitySchema: nameof<TestType>(),
 			config: { storageKey: "test" }
 		});
-		const result = await connector.health(0);
+		const result = await connector.health();
 		expect(result).toHaveLength(1);
 		expect(result[0].status).toEqual(HealthStatus.Ok);
 		expect(result[0].description).toEqual("healthDescription");

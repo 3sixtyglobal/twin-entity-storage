@@ -14,7 +14,7 @@ describe("SchemaMigrationFactory", () => {
 		try {
 			SchemaMigrationFactory.unregister(stepKey);
 		} catch {
-			// Already absent — ignore.
+			// Already absent - ignore.
 		}
 	});
 

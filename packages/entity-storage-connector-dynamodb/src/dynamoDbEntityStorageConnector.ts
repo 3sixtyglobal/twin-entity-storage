@@ -186,10 +186,9 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 
 	/**
 	 * Returns the health status of the component.
-	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
 	 * @returns The health status of the component.
 	 */
-	public async health(lastTimestamp: number): Promise<IHealth[]> {
+	public async health(): Promise<IHealth[]> {
 		try {
 			const dbConnection = this.createConnection();
 			await dbConnection.describeTable({ TableName: this._config.tableName });
@@ -1219,7 +1218,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 			}[] = condition.conditions.map(c => {
 				// Snapshot before each branch. When a branch is dead (noResults),
 				// undo its attribute registrations so the final expressions stay
-				// consistent — DynamoDB rejects unused ExpressionAttributeNames (#141).
+				// consistent - DynamoDB rejects unused ExpressionAttributeNames (#141).
 				const preBranchNames = new Set(Object.keys(attributeNames));
 				const preBranchValues = new Set(Object.keys(attributeValues));
 				const result = this.buildQueryParameters(
@@ -1251,7 +1250,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 			if (condition.logicalOperator === LogicalOperator.Or) {
 				// OR: only empty if ALL branches are guaranteed empty (e.g. all empty IN lists).
 				// If only some are empty they are naturally filtered out of `parts` below,
-				// which is correct — false OR x = x (#141).
+				// which is correct - false OR x = x (#141).
 				if (joinConditions.every(j => j.noResults)) {
 					return { keyCondition: "", filterCondition: "", requiresScan: false, noResults: true };
 				}
@@ -1259,7 +1258,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 				const parts = joinConditions
 					.map(j => {
 						// A branch marked noResults (e.g. a dead AND group containing In [])
-						// must contribute nothing to the OR — false OR x = x (#141).
+						// must contribute nothing to the OR - false OR x = x (#141).
 						if (j.noResults) {
 							return "";
 						}
@@ -1290,7 +1289,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 
 			// AND: if any sub-condition is a guaranteed empty result (e.g. empty IN list),
 			// the whole AND group is also empty (#141). Restore the attribute maps to the
-			// pre-group snapshot so surviving siblings' registrations are also undone —
+			// pre-group snapshot so surviving siblings' registrations are also undone -
 			// per-branch cleanup above only undoes dead branches, not live ones whose AND
 			// partner was dead.
 			const noResults = joinConditions.some(j => j.noResults);
@@ -1317,7 +1316,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 
 		const schemaProp = this._entitySchema.properties?.find(p => p.property === condition.property);
 
-		// Empty IN list: DynamoDB has no `IN ()` syntax — short-circuit to empty result (#141).
+		// Empty IN list: DynamoDB has no `IN ()` syntax - short-circuit to empty result (#141).
 		if (
 			"comparison" in condition &&
 			condition.comparison === ComparisonOperator.In &&

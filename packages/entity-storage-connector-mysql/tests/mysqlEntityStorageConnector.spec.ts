@@ -1372,7 +1372,7 @@ describe("MySqlEntityStorageConnector", () => {
 				await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i });
 			}
 			// (id IN [] AND value1=="aaa") OR id=="999"
-			// The AND branch is dead — In [] is always false.
+			// The AND branch is dead - In [] is always false.
 			// No entity has id=="999", so the result must be empty.
 			// Without the fix, the dead AND branch incorrectly promotes value1=="aaa"
 			// into the OR and returns 5 rows (#141).
@@ -1440,7 +1440,7 @@ describe("MySqlEntityStorageConnector", () => {
 			await connector.set({ id: "1", value1: "alpha", value2: 1 });
 			await connector.set({ id: "2", value1: "beta", value2: 2 });
 			await connector.set({ id: "3", value1: "gamma", value2: 3 });
-			// AND[ OR[value1==alpha, value1==beta] ] — single-child AND wrapping a multi-child OR.
+			// AND[ OR[value1==alpha, value1==beta] ] - single-child AND wrapping a multi-child OR.
 			// Without the fix DynamoDB rejects the generated ( (expr) ) as redundant parens.
 			const result = await connector.query({
 				logicalOperator: LogicalOperator.And,
@@ -1534,7 +1534,7 @@ describe("MySqlEntityStorageConnector", () => {
 			await connector.set({ id: "1", value1: "alpha", value2: 1 });
 			await connector.set({ id: "2", value1: "beta", value2: 2 });
 			await connector.set({ id: "3", value1: "gamma", value2: 3 });
-			// OR[ AND[ OR[value1==alpha, value1==beta] ] ] — three levels of nesting
+			// OR[ AND[ OR[value1==alpha, value1==beta] ] ] - three levels of nesting
 			// with alternating OR → AND → OR logical operators.
 			const result = await connector.query({
 				logicalOperator: LogicalOperator.Or,
@@ -1571,7 +1571,7 @@ describe("MySqlEntityStorageConnector", () => {
 		await connector.set({ id: "1", value1: "alpha", value2: 1 });
 		await connector.set({ id: "2", value1: "beta", value2: 2 });
 		await connector.set({ id: "3", value1: "gamma", value2: 3 });
-		// AND[ AND[] ] — empty AND child inside outer AND applies no constraint.
+		// AND[ AND[] ] - empty AND child inside outer AND applies no constraint.
 		const result = await connector.query({
 			logicalOperator: LogicalOperator.And,
 			conditions: [
@@ -1589,7 +1589,7 @@ describe("MySqlEntityStorageConnector", () => {
 		await connector.set({ id: "1", value1: "alpha", value2: 1 });
 		await connector.set({ id: "2", value1: "beta", value2: 2 });
 		await connector.set({ id: "3", value1: "gamma", value2: 3 });
-		// AND[ AND[], value1==alpha ] — empty AND sibling is a no-op; only value1==alpha filters.
+		// AND[ AND[], value1==alpha ] - empty AND sibling is a no-op; only value1==alpha filters.
 		const result = await connector.query({
 			logicalOperator: LogicalOperator.And,
 			conditions: [
@@ -1611,7 +1611,7 @@ describe("MySqlEntityStorageConnector", () => {
 			await connector.set({ id: "1", value1: "alpha", value2: 1 });
 			await connector.set({ id: "2", value1: "beta", value2: 2 });
 			await connector.set({ id: "3", value1: "gamma", value2: 3 });
-			// OR[ OR[], value1==alpha ] — empty OR child contributes nothing; only value1==alpha matches.
+			// OR[ OR[], value1==alpha ] - empty OR child contributes nothing; only value1==alpha matches.
 			const result = await connector.query({
 				logicalOperator: LogicalOperator.Or,
 				conditions: [

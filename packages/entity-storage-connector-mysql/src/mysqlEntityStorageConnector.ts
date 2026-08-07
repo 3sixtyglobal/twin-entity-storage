@@ -177,10 +177,9 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 	/**
 	 * Returns the health status of the component.
-	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
 	 * @returns The health status of the component.
 	 */
-	public async health(lastTimestamp: number): Promise<IHealth[]> {
+	public async health(): Promise<IHealth[]> {
 		try {
 			const pool = await this.getPool();
 			await pool.query(
@@ -943,7 +942,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 		// Teardown the existing table with the original name to free up the name for the new table
 		await this.teardown(loggingComponentType);
 
-		// RENAME TABLE is an atomic metadata-only operation in MySQL — no data copying needed.
+		// RENAME TABLE is an atomic metadata-only operation in MySQL - no data copying needed.
 		const pool = await this.getPool();
 		await pool.query(
 			`RENAME TABLE \`${targetConnector._config.database}\`.\`${targetConnector._config.tableName}\` TO \`${this._config.database}\`.\`${this._config.tableName}\``
@@ -1244,7 +1243,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 		if (comparator.comparison === ComparisonOperator.In) {
 			const inValues = Is.array(comparator.value) ? comparator.value : [comparator.value];
 			if (inValues.length === 0) {
-				// MySQL rejects `IN ()` as a syntax error — short-circuit to a condition
+				// MySQL rejects `IN ()` as a syntax error - short-circuit to a condition
 				// that is always false so the query returns zero rows cleanly (#141).
 				return "1 = 0";
 			}
@@ -1253,7 +1252,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 			return `\`${prop}\` IN (${placeholders})`;
 		}
 
-		// null/undefined must use IS NULL / IS NOT NULL — never a parameterised placeholder.
+		// null/undefined must use IS NULL / IS NOT NULL - never a parameterised placeholder.
 		// Passing undefined through propertyToDbValue() coerces it to NaN for number fields
 		// (Number(undefined) === NaN), and null coerces to 0 (Number(null) === 0), both of
 		// which produce semantically wrong or invalid SQL.

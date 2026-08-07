@@ -20,7 +20,7 @@ class TestType {
 	public value1!: string;
 }
 
-describe("MongoDbEntityStorageConnector — NoSQL injection prevention", () => {
+describe("MongoDbEntityStorageConnector - NoSQL injection prevention", () => {
 	let connector: MongoDbEntityStorageConnector<TestType>;
 
 	beforeAll(() => {

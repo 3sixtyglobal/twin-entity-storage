@@ -33,16 +33,16 @@
 		"@twin.org/context": "next",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.9.2-next.4",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next",
-		"@twin.org/web": "next"
+		"@twin.org/web": "next",
+		"@twin.org/entity-storage-models": "0.9.2-next.4"
 	},
 	"devDependencies": {
 		"@twin.org/entity-storage-connector-memory": "0.9.2-next.4",
-		"@twin.org/ts-to-openapi": "next",
 		"@twin.org/nameof-transformer": "next",
 		"@twin.org/nameof-vitest-plugin": "next",
+		"@twin.org/ts-to-openapi": "next",
 		"@twin.org/validate-locales": "next",
 		"@vitest/coverage-v8": "4.1.10",
 		"copyfiles": "2.4.1",

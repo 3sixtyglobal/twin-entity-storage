@@ -67,7 +67,7 @@ function makeMigConnector(schemaName: string, version = 0): IEntityStorageMigrat
 		empty: vi.fn(),
 		// Default to undefined ("not partitioned") so existing tests keep exercising the
 		// bare count() path they were written against. Tests exercising the partitioned
-		// contract override this explicitly to [] or a populated array —
+		// contract override this explicitly to [] or a populated array -
 		// see the "partitioned-but-empty" / "partitioned with existing data" cases below.
 		getPartitionContextIds: vi.fn().mockResolvedValue(undefined),
 		createTargetConnector: vi.fn().mockResolvedValue(undefined),
@@ -140,7 +140,7 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// start() — no-op
+	// start() - no-op
 	// -------------------------------------------------------------------------
 
 	test("start() does not migrate when stored version equals current version", async () => {
@@ -166,7 +166,7 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// start() — fresh install: empty table seeds at current, no migration
+	// start() - fresh install: empty table seeds at current, no migration
 	// -------------------------------------------------------------------------
 
 	test("start() seeds version at current and skips migration when table is empty and no version record exists", async () => {
@@ -204,7 +204,7 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// start() — pre-existing data: no version record → treat as v0, run chain
+	// start() - pre-existing data: no version record → treat as v0, run chain
 	// -------------------------------------------------------------------------
 
 	test("start() treats non-empty table as v0 and runs migration when no version record exists", async () => {
@@ -244,7 +244,7 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// start() — first boot with pre-existing data assumes v0
+	// start() - first boot with pre-existing data assumes v0
 	// -------------------------------------------------------------------------
 
 	test("start() assumes stored version is 0 when no version record exists", async () => {
@@ -320,7 +320,7 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// start() — ISchemaMigration rename override
+	// start() - ISchemaMigration rename override
 	// -------------------------------------------------------------------------
 
 	test("start() applies ISchemaMigration rename override from SchemaMigrationFactory", async () => {
@@ -374,7 +374,7 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// start() — storedVersionNewer
+	// start() - storedVersionNewer
 	// -------------------------------------------------------------------------
 
 	test("start() throws storedVersionNewer when stored version exceeds current", async () => {
@@ -397,14 +397,14 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// start() — noMigrationStep
+	// start() - noMigrationStep
 	// -------------------------------------------------------------------------
 
 	test("start() throws noMigrationStep when the source versioned schema is absent", async () => {
 		const schemaName = "Widget";
 		const connector = makeMigConnector(schemaName, 1);
 
-		// currentVersion = 1 but no V0 schema registered — chain can't start
+		// currentVersion = 1 but no V0 schema registered - chain can't start
 		schemaNamesSpy.mockReturnValue([schemaName]);
 		schemaGetSpy.mockReturnValue(makeSchema(schemaName, 1));
 		connectorNamesSpy.mockReturnValue([schemaName]);
@@ -422,7 +422,7 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// start() — noMigrationStepTarget
+	// start() - noMigrationStepTarget
 	// -------------------------------------------------------------------------
 
 	test("start() throws noMigrationStepTarget when an intermediate versioned schema is absent", async () => {
@@ -452,7 +452,7 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// start() — connectorNotMigrationCapable
+	// start() - connectorNotMigrationCapable
 	// -------------------------------------------------------------------------
 
 	test("start() throws connectorNotMigrationCapable when the connector cannot migrate", async () => {
@@ -507,7 +507,7 @@ describe("SchemaVersionService", () => {
 			return makeSchema("Unknown");
 		});
 
-		// A real connector, not a stub — partitioned exactly as the engine partitions
+		// A real connector, not a stub - partitioned exactly as the engine partitions
 		// tenant-scoped entity storage (twin-engine component builders pick [Node, Tenant]
 		// as partitionContextIds whenever TWIN_TENANT_ENABLED=true).
 		const connector = new MemoryEntityStorageConnector({
@@ -517,7 +517,7 @@ describe("SchemaVersionService", () => {
 		});
 
 		connectorNamesSpy.mockReturnValue([schemaName]);
-		const vc = makeVersionConnector([]); // no stored version record — first boot
+		const vc = makeVersionConnector([]); // no stored version record - first boot
 		connectorGetSpy.mockImplementation((name: string) => {
 			if (name === "schema-version") {
 				return vc;
@@ -525,7 +525,7 @@ describe("SchemaVersionService", () => {
 			return connector;
 		});
 
-		// Mirrors EngineCore.start(): only "node" is present in the ambient context — "tenant"
+		// Mirrors EngineCore.start(): only "node" is present in the ambient context - "tenant"
 		// is a per-request value resolved by the tenant route processor, never present at
 		// startup (twin-node start.ts:162/170).
 		await ContextIdStore.run({ [ContextIdKeys.Node]: "test-node" }, async () => {
@@ -538,7 +538,7 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// processSchema — partition-aware fresh-vs-legacy contract
+	// processSchema - partition-aware fresh-vs-legacy contract
 	// -------------------------------------------------------------------------
 
 	test("falls back to bare count() when getPartitionContextIds returns undefined (un-partitioned connector, unchanged path)", async () => {

@@ -20,13 +20,13 @@ class TestType {
 	public value1!: string;
 }
 
-describe("MySqlEntityStorageConnector — SQL injection guard", () => {
+describe("MySqlEntityStorageConnector - SQL injection guard", () => {
 	let connector: MySqlEntityStorageConnector<TestType>;
 
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 
-		// No bootstrap — validation throws before any pool.query() call.
+		// No bootstrap - validation throws before any pool.query() call.
 		connector = new MySqlEntityStorageConnector<TestType>({
 			entitySchema: nameof<TestType>(),
 			config: TEST_MYSQL_CONFIG

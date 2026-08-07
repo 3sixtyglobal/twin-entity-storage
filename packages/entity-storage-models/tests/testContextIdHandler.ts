@@ -7,7 +7,7 @@ import { nameof } from "@twin.org/nameof";
 /**
  * Minimal context ID handler for test use.
  * Short form: bare id stripped from a "did:example:<id>" value.
- * Long form: "did:internal:<id>" — a different DID method prefix, mirroring how
+ * Long form: "did:internal:<id>" - a different DID method prefix, mirroring how
  * DidContextIdHandler uses "did:internal:" as its canonical long form.
  * guard() rejects any value that is not in long form, which lets migration tests
  * demonstrate the failure that occurs when getPartitionContextIds() returns

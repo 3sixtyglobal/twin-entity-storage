@@ -17,7 +17,7 @@ class TestType {
 	public value1!: string;
 }
 
-describe("FileEntityStorageConnector — concurrent updates and store integrity", () => {
+describe("FileEntityStorageConnector - concurrent updates and store integrity", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 	});
@@ -44,7 +44,7 @@ describe("FileEntityStorageConnector — concurrent updates and store integrity"
 		}
 		await Promise.all(updates);
 
-		// The persisted store must be valid JSON and contain every update —
+		// The persisted store must be valid JSON and contain every update -
 		// unserialized read-modify-write cycles lose entities, and torn
 		// whole-file writes corrupt the JSON.
 		const raw = await readFile(path.join(TEST_DIRECTORY, "store.json"), "utf8");
@@ -78,7 +78,7 @@ describe("FileEntityStorageConnector — concurrent updates and store integrity"
 		});
 	});
 
-	test("concurrent reads during writes never return false-empty — guards against rename-window ENOENT misread", async () => {
+	test("concurrent reads during writes never return false-empty - guards against rename-window ENOENT misread", async () => {
 		const connector = new FileEntityStorageConnector<TestType>({
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }
@@ -109,7 +109,7 @@ describe("FileEntityStorageConnector — concurrent updates and store integrity"
 		}
 	});
 
-	test("get concurrent with a write always returns the anchored entity — never undefined due to ENOENT race", async () => {
+	test("get concurrent with a write always returns the anchored entity - never undefined due to ENOENT race", async () => {
 		const connector = new FileEntityStorageConnector<TestType>({
 			entitySchema: nameof<TestType>(),
 			config: { directory: TEST_DIRECTORY }

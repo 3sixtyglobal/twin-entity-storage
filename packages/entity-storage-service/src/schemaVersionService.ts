@@ -22,14 +22,14 @@ import type { ISchemaVersionServiceConstructorOptions } from "./models/ISchemaVe
  * Service that checks and applies entity schema migrations at every node start-up.
  *
  * This service must be the first entry in coreTypeInitialisers.json. The engine iterates that
- * array in order to determine start sequence — there is no engine-level priority mechanism, so
+ * array in order to determine start sequence - there is no engine-level priority mechanism, so
  * registration position is the only guarantee that start() runs before any other service.
  * By the time start() is called, all component bootstraps have completed (every table already
  * exists) and EntitySchemaFactory / EntityStorageConnectorFactory are fully populated with every
  * registered schema and connector.
  *
  * Migration mechanics: old schema versions are registered in EntitySchemaFactory by naming
- * convention — current schema = "MyEntity", first history = "MyEntityV0", second = "MyEntityV1".
+ * convention - current schema = "MyEntity", first history = "MyEntityV0", second = "MyEntityV1".
  * The service groups schemas by base name (strips the trailing V number suffix) and resolves the
  * migration chain automatically by diffing consecutive versioned schemas. For steps that require
  * property renames or a custom transform hook, register an optional ISchemaMigration entry in
@@ -208,7 +208,7 @@ export class SchemaVersionService implements IComponent {
 				? { connector: this._versionConnector as IEntityStorageConnector, factoryKey: undefined }
 				: this.findConnector(schemaName);
 		if (!connectorEntry) {
-			// No connector registered for this schema — nothing to migrate.
+			// No connector registered for this schema - nothing to migrate.
 			return;
 		}
 		const { connector, factoryKey } = connectorEntry;
@@ -281,7 +281,7 @@ export class SchemaVersionService implements IComponent {
 			}
 		});
 
-		// Downgrade — not supported.
+		// Downgrade - not supported.
 		if (resolvedStoredVersion > currentVersion) {
 			throw new GeneralError(SchemaVersionService.CLASS_NAME, "storedVersionNewer", {
 				schemaName,
@@ -300,7 +300,7 @@ export class SchemaVersionService implements IComponent {
 			});
 		}
 
-		// Upgrade — resolve and run the chain.
+		// Upgrade - resolve and run the chain.
 		const steps: IResolvedMigrationStep[] = [];
 
 		for (let v = resolvedStoredVersion; v < currentVersion; v++) {
@@ -396,7 +396,7 @@ export class SchemaVersionService implements IComponent {
 					return { connector, factoryKey: name };
 				}
 			} catch {
-				// Connector not yet created or registration issue — skip.
+				// Connector not yet created or registration issue - skip.
 			}
 		}
 		return undefined;

@@ -21,7 +21,7 @@ class SecurityTestEntity {
 	public value1!: string;
 }
 
-describe("ScyllaDBTableConnector — CQL injection security", () => {
+describe("ScyllaDBTableConnector - CQL injection security", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<SecurityTestEntity>(), () =>
 			EntitySchemaHelper.getSchema(SecurityTestEntity)
@@ -70,7 +70,7 @@ describe("ScyllaDBTableConnector — CQL injection security", () => {
 		const connector = createConnector();
 		// The value contains a single quote which would break a non-parameterized LIKE string.
 		// After the fix the value is passed as a bound parameter, so the only failure here
-		// should be a connection/driver error — not an "unknownProperty" validation error.
+		// should be a connection/driver error - not an "unknownProperty" validation error.
 		await expect(
 			connector.query({
 				property: "value1",

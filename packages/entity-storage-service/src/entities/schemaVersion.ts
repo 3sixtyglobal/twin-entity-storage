@@ -10,7 +10,7 @@ import { entity, property } from "@twin.org/entity";
 @entity()
 export class SchemaVersion {
 	/**
-	 * The entity schema type name — primary key.
+	 * The entity schema type name - primary key.
 	 */
 	@property({ type: "string", isPrimary: true })
 	public schemaName!: string;

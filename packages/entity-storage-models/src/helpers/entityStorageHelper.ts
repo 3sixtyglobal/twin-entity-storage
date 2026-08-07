@@ -41,7 +41,7 @@ export class EntityStorageHelper {
 	 * @param additionalProperties Optional list of additional properties to set on the entity.
 	 * @param options Options controlling how null/undefined optional properties are stored.
 	 * @param options.nullBehavior "omit" strips null/undefined optional properties before writing
-	 * (NoSQL — avoids index-key type errors). "nullify" converts undefined to null (SQL — the default).
+	 * (NoSQL - avoids index-key type errors). "nullify" converts undefined to null (SQL - the default).
 	 * @returns The entity with undefined and null values handled.
 	 */
 	public static prepareEntity<T>(

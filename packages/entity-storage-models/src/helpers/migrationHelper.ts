@@ -262,7 +262,7 @@ export class MigrationHelper {
 			// Preserve any value the source entity already carries for this property.
 			// This handles rows written with a newer schema before version tracking was
 			// introduced: the property exists and must not be overwritten with a default
-			// (issue #185, Bug 2 — "destructive default for added required properties").
+			// (issue #185, Bug 2 - "destructive default for added required properties").
 			const existingValue = ObjectHelper.propertyGet(entity, change.property as string);
 			if (!Is.undefined(existingValue)) {
 				ObjectHelper.propertySet(newEntity, change.property as string, existingValue);

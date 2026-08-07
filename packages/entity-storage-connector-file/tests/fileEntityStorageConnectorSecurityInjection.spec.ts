@@ -22,7 +22,7 @@ class TestType {
 	public value1!: string;
 }
 
-describe("FileEntityStorageConnector — injection-style input handling", () => {
+describe("FileEntityStorageConnector - injection-style input handling", () => {
 	let connector: FileEntityStorageConnector<TestType>;
 
 	beforeAll(async () => {

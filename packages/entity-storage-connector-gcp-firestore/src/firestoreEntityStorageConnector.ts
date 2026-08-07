@@ -180,10 +180,9 @@ export class FirestoreEntityStorageConnector<T = unknown>
 
 	/**
 	 * Returns the health status of the component.
-	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
 	 * @returns The health status of the component.
 	 */
-	public async health(lastTimestamp: number): Promise<IHealth[]> {
+	public async health(): Promise<IHealth[]> {
 		try {
 			await this._firestoreClient.listCollections();
 			return [
@@ -827,7 +826,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 			// Prune empty-In leaves from OR branches: the Firestore SDK throws on
 			// Filter.where(prop, "in", []) even inside an OR where other branches still match.
 			// hasEmptyInCondition above already handles the all-false case, so pruning here
-			// is safe — any removed leaf was a no-op branch.
+			// is safe - any removed leaf was a no-op branch.
 			const effectiveConditions = !Is.empty(conditions)
 				? (this.pruneEmptyInConditions(conditions) ?? undefined)
 				: conditions;
@@ -850,7 +849,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 			}
 
 			if (Is.stringValue(cursor)) {
-				// Discard cursors from a different partition — startAfter() throws if the
+				// Discard cursors from a different partition - startAfter() throws if the
 				// snapshot belongs to a different collection than the current query.
 				const cursorCollection = cursor.slice(0, cursor.lastIndexOf("/"));
 				if (cursorCollection === this.collectionName(partitionKey)) {
@@ -1083,7 +1082,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 			return condition;
 		}
 		// For AND groups: if any child has an empty In, the whole AND is dead.
-		// Do not recurse — promoting the surviving siblings would turn a dead
+		// Do not recurse - promoting the surviving siblings would turn a dead
 		// branch into a live one when this AND sits inside an OR (#141).
 		if (condition.logicalOperator !== LogicalOperator.Or && this.hasEmptyInCondition(condition)) {
 			return null;
@@ -1120,7 +1119,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		if (comparison === ComparisonOperator.NotIncludes) {
 			return true;
 		}
-		// Includes on a primitive (string/number) means substring search — not natively supported.
+		// Includes on a primitive (string/number) means substring search - not natively supported.
 		// Includes on an object means array-contains, which Firestore does support.
 		if (
 			comparison === ComparisonOperator.Includes &&
@@ -1159,7 +1158,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 				: Filter.and(...filters);
 		}
 		const { property, comparison } = condition;
-		// Firestore has no undefined type — null has the correct semantics:
+		// Firestore has no undefined type - null has the correct semantics:
 		//   == null  matches documents where the field is null OR missing
 		//   != null  matches documents where the field exists and is not null
 		const value = condition.value === undefined ? null : condition.value;

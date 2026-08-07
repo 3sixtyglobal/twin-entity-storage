@@ -301,10 +301,9 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 
 	/**
 	 * Returns the health status of the component.
-	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
 	 * @returns The health status of the component.
 	 */
-	public async health(lastTimestamp: number): Promise<IHealth[]> {
+	public async health(): Promise<IHealth[]> {
 		try {
 			await this._client
 				.database(this._config.databaseId)
@@ -771,7 +770,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 			];
 			const queryPartitionKey = partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE;
 
-			// For sorted queries use OFFSET LIMIT — CosmosDB continuation tokens are
+			// For sorted queries use OFFSET LIMIT - CosmosDB continuation tokens are
 			// not reliably returned for ORDER BY queries across all service versions.
 			// The cursor is a numeric offset encoded as a string (same as SQL connectors).
 			const startIndex = Coerce.number(cursor) ?? 0;
@@ -1108,7 +1107,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		} else if (Is.array(comparator.value)) {
 			const dbValues = comparator.value.map(v => this.propertyToDbValue(v, type));
 			if (dbValues.length === 0 && comparator.comparison === ComparisonOperator.In) {
-				// CosmosDB rejects `IN ()` — return always-false sentinel (#141).
+				// CosmosDB rejects `IN ()` - return always-false sentinel (#141).
 				return "1=0";
 			}
 			const arrAttributeNames = [];

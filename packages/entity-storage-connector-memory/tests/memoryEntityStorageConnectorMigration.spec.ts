@@ -15,7 +15,7 @@ import { MemoryEntityStorageConnector } from "../src/memoryEntityStorageConnecto
 // createConnectors it the only code that should differ
 
 /**
- * Partition/migration V1 entity — used for both getPartitionContextIds and migration tests.
+ * Partition/migration V1 entity - used for both getPartitionContextIds and migration tests.
  */
 @entity()
 class MigV1 {
@@ -27,7 +27,7 @@ class MigV1 {
 }
 
 /**
- * V2 migration entity — drops legacyField, adds optional newField.
+ * V2 migration entity - drops legacyField, adds optional newField.
  */
 @entity()
 class MigV2 {
@@ -39,7 +39,7 @@ class MigV2 {
 }
 
 /**
- * V3 migration entity — changes legacyField type from string to integer.
+ * V3 migration entity - changes legacyField type from string to integer.
  */
 @entity()
 class MigV3TypeChange {
@@ -51,7 +51,7 @@ class MigV3TypeChange {
 }
 
 /**
- * V1 with a plain string info field — used to test transformEntityProperty for object target types.
+ * V1 with a plain string info field - used to test transformEntityProperty for object target types.
  */
 @entity()
 class MigV1WithStr {
@@ -63,7 +63,7 @@ class MigV1WithStr {
 }
 
 /**
- * V2 with an object info field — changing from string triggers the transformEntityProperty requirement.
+ * V2 with an object info field - changing from string triggers the transformEntityProperty requirement.
  */
 @entity()
 class MigV2WithObj {
@@ -75,7 +75,7 @@ class MigV2WithObj {
 }
 
 /**
- * Optional-field variant of MigV3TypeChange — legacyField is integer but optional.
+ * Optional-field variant of MigV3TypeChange - legacyField is integer but optional.
  */
 @entity()
 class MigV3OptionalTypeChange {
@@ -87,7 +87,7 @@ class MigV3OptionalTypeChange {
 }
 
 /**
- * Minimal source entity with only the primary key — used to test added-field defaults.
+ * Minimal source entity with only the primary key - used to test added-field defaults.
  */
 @entity()
 class MigJustId {
@@ -124,7 +124,7 @@ class MigAllAddedDefaults {
 }
 
 /**
- * V3 entity — changes legacyField type from string to boolean.
+ * V3 entity - changes legacyField type from string to boolean.
  */
 @entity()
 class MigV3BoolChange {
@@ -136,7 +136,7 @@ class MigV3BoolChange {
 }
 
 /**
- * V3 entity — changes legacyField type from integer to string.
+ * V3 entity - changes legacyField type from integer to string.
  */
 @entity()
 class MigV3ToStr {
@@ -148,7 +148,7 @@ class MigV3ToStr {
 }
 
 /**
- * Multi-field source entity — used to test multiple field renames in one migration.
+ * Multi-field source entity - used to test multiple field renames in one migration.
  */
 @entity()
 class MigMultiFieldA {
@@ -163,7 +163,7 @@ class MigMultiFieldA {
 }
 
 /**
- * Multi-field target entity — fieldA and fieldB are renamed.
+ * Multi-field target entity - fieldA and fieldB are renamed.
  */
 @entity()
 class MigMultiFieldB {
@@ -188,7 +188,7 @@ let createConnector: (
 	partitionContextIds?: string[]
 ) => Promise<IEntityStorageMigrationConnector>;
 
-describe("MemoryEntityStorageConnector — partitioning and migration", () => {
+describe("MemoryEntityStorageConnector - partitioning and migration", () => {
 	beforeAll(async () => {
 		EntitySchemaFactory.register(nameof<MigV1>(), () => EntitySchemaHelper.getSchema(MigV1));
 		EntitySchemaFactory.register(nameof<MigV2>(), () => EntitySchemaHelper.getSchema(MigV2));
@@ -327,7 +327,7 @@ describe("MemoryEntityStorageConnector — partitioning and migration", () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// Step builder — creates a single IResolvedMigrationStep from the source
+	// Step builder - creates a single IResolvedMigrationStep from the source
 	// connector's live schema and the named target schema in EntitySchemaFactory.
 	// -----------------------------------------------------------------------
 

@@ -208,10 +208,9 @@ export class MongoDbEntityStorageConnector<T = unknown>
 
 	/**
 	 * Returns the health status of the component.
-	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
 	 * @returns The health status of the component.
 	 */
-	public async health(lastTimestamp: number): Promise<IHealth[]> {
+	public async health(): Promise<IHealth[]> {
 		try {
 			await this._client
 				.db(this._config.database)
@@ -911,7 +910,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 				}
 				// For array/object fields: $ne on an array field matches documents where
 				// none of the array elements equal the value (MongoDB element-wise semantics).
-				// $elemMatch: { $ne: value } is wrong — it matches if *any* element ≠ value.
+				// $elemMatch: { $ne: value } is wrong - it matches if *any* element ≠ value.
 				return { $ne: value };
 			default:
 				throw new GeneralError(

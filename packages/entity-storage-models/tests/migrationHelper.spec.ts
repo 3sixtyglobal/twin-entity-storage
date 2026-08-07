@@ -13,12 +13,10 @@ import {
 	type IEntitySchemaDiff,
 	type IEntitySchemaProperty
 } from "@twin.org/entity";
-import type {
-	IEntityStorageConnector,
-	IEntityStorageMigrationConnector
-} from "@twin.org/entity-storage-models";
 import { TestContextIdHandler } from "./testContextIdHandler.js";
 import { MigrationHelper } from "../src/helpers/migrationHelper.js";
+import type { IEntityStorageConnector } from "../src/models/IEntityStorageConnector.js";
+import type { IEntityStorageMigrationConnector } from "../src/models/IEntityStorageMigrationConnector.js";
 import type { IResolvedMigrationStep } from "../src/models/IResolvedMigrationStep.js";
 
 // ---------------------------------------------------------------------------
@@ -257,7 +255,7 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		expect(result.old).toBeUndefined();
 	});
 
-	test("modified property: property renamed — value moved to new property name", () => {
+	test("modified property: property renamed - value moved to new property name", () => {
 		const d = diff({
 			modified: [
 				{
@@ -324,7 +322,7 @@ describe("MigrationHelper.applyEntityTransform", () => {
 	});
 
 	// ---
-	// Issue #185 Bug 2 — "added" properties must preserve existing source values
+	// Issue #185 Bug 2 - "added" properties must preserve existing source values
 	// ---
 
 	test("added non-optional string property preserves existing source value over empty-string default", () => {
@@ -401,7 +399,7 @@ describe("MigrationHelper.applyEntityChain", () => {
 		expect(result).toEqual(entity);
 	});
 
-	test("applies a single step — adds a new optional field", () => {
+	test("applies a single step - adds a new optional field", () => {
 		const step: IResolvedMigrationStep = {
 			fromProperties: makeProps(
 				["id", EntitySchemaPropertyType.String],
@@ -421,7 +419,7 @@ describe("MigrationHelper.applyEntityChain", () => {
 		expect(result.extra).toBeUndefined();
 	});
 
-	test("applies a single step — adds a new required string field with default", () => {
+	test("applies a single step - adds a new required string field with default", () => {
 		const step: IResolvedMigrationStep = {
 			fromProperties: makeProps(["id", EntitySchemaPropertyType.String]),
 			toProperties: [
@@ -435,7 +433,7 @@ describe("MigrationHelper.applyEntityChain", () => {
 		expect(result.status).toBe("active");
 	});
 
-	test("applies multiple steps in sequence — each step's output feeds the next", () => {
+	test("applies multiple steps in sequence - each step's output feeds the next", () => {
 		const step1: IResolvedMigrationStep = {
 			fromProperties: makeProps(["id", EntitySchemaPropertyType.String]),
 			toProperties: makeProps(
@@ -608,9 +606,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 	test("wraps connector errors in a migrationFailed GeneralError", async () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([], target);
-		(source.finalizeMigration as ReturnType<typeof vi.fn>).mockRejectedValue(
-			new Error("store unavailable")
-		);
+		vi.mocked(source.finalizeMigration).mockRejectedValue(new Error("store unavailable"));
 
 		await expect(
 			MigrationHelper.migrateWithChain(
@@ -625,7 +621,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 	test("calls cleanupMigration when an error occurs after createTargetConnector", async () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([], target);
-		(source.finalizeMigration as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("boom"));
+		vi.mocked(source.finalizeMigration).mockRejectedValue(new Error("boom"));
 
 		await expect(
 			MigrationHelper.migrateWithChain(
@@ -652,10 +648,10 @@ describe("MigrationHelper.migrateWithChain", () => {
 			const target = makeTargetConnector();
 			const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
 
-			// Partitions carry short form — no "did:internal:" prefix — as real connectors
+			// Partitions carry short form - no "did:internal:" prefix - as real connectors
 			// do: they store the short value produced by ContextIdHelper.shortCombined.
 			let contextSeenByCount: IContextIds | undefined;
-			(source.count as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+			vi.mocked(source.count).mockImplementation(async () => {
 				contextSeenByCount = await ContextIdStore.getContextIds();
 				ContextIdHelper.combinedContextKey(contextSeenByCount, [ContextIdKeys.Node]);
 				return 1;
@@ -680,7 +676,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 			// undefined = not partitioned: MigrationHelper runs one pass with empty context {}
 			// so count() is called exactly once and no partition key is required.
 			let contextSeenByCount: IContextIds | undefined;
-			(source.count as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+			vi.mocked(source.count).mockImplementation(async () => {
 				contextSeenByCount = await ContextIdStore.getContextIds();
 				return 1;
 			});
@@ -702,7 +698,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 			const source = makeSourceConnector([], target);
 
 			// An empty partitions array means the table is partitioned but has no data.
-			// MigrationHelper skips the partition loop entirely so count() is never called —
+			// MigrationHelper skips the partition loop entirely so count() is never called -
 			// avoiding the "contextIdMissing" error that would occur if we fell back to [{}]
 			// and called count() without the required "node" key.
 			const { migrated } = await MigrationHelper.migrateWithChain(
@@ -736,7 +732,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
 
-		// Two partitions (empty context objects — no handler registration needed).
+		// Two partitions (empty context objects - no handler registration needed).
 		// source.count returns 1 and source.query returns 1 entity per partition pass,
 		// so the total migrated count should equal partitions.length.
 		const { migrated } = await MigrationHelper.migrateWithChain(

@@ -25,7 +25,7 @@ async function clearSchema(schemaName: string): Promise<void> {
 	}
 }
 
-describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () => {
+describe("MemoryEntityStorageConnector - SharedArrayBuffer concurrency", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 
@@ -169,7 +169,7 @@ describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () =>
 			)
 		]);
 
-		// Both sets of items must be present — no cross-write should clobber the other.
+		// Both sets of items must be present - no cross-write should clobber the other.
 		expect(await connector1.count()).toEqual(count * 2);
 	});
 
@@ -182,7 +182,7 @@ describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () =>
 		await Mutex.lock(schemaName, { throwOnTimeout: true });
 		try {
 			SharedObjectBuffer.remove(schemaName); // ensure clean state from prior runs
-			// 10 entities × ~60 bytes each ≈ 600 bytes — well above the 256-byte initial capacity.
+			// 10 entities × ~60 bytes each ≈ 600 bytes - well above the 256-byte initial capacity.
 			const entities = [...new Array(10).keys()].map(i => ({
 				id: `item-${i}`,
 				value1: `${"x".repeat(50)}-${i}`
@@ -207,7 +207,7 @@ describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () =>
 		await Mutex.lock(schemaName, { throwOnTimeout: true });
 		try {
 			SharedObjectBuffer.remove(schemaName); // ensure clean state from prior runs
-			// 1 200 entities × ~930 bytes each ≈ 1.1 MiB — exceeds DEFAULT_CAPACITY_BYTES.
+			// 1 200 entities × ~930 bytes each ≈ 1.1 MiB - exceeds DEFAULT_CAPACITY_BYTES.
 			const largeEntities = [...new Array(1200).keys()].map(i => ({
 				id: `item-${i}`,
 				value1: "x".repeat(900)
@@ -215,7 +215,7 @@ describe("MemoryEntityStorageConnector — SharedArrayBuffer concurrency", () =>
 			await SharedObjectBuffer.create(schemaName);
 			await SharedObjectBuffer.write<{ id: string; value1: string }[]>(schemaName, largeEntities);
 
-			// Now write a single tiny entity — triggers the shrink path.
+			// Now write a single tiny entity - triggers the shrink path.
 			await SharedObjectBuffer.write<{ id: string; value1: string }[]>(schemaName, [
 				{ id: "only", value1: "small" }
 			]);
@@ -266,7 +266,7 @@ parentPort.postMessage('done');
 			worker.once("error", reject);
 		});
 
-		// The main-thread connector reads the same memory — no copy, no serialisation.
+		// The main-thread connector reads the same memory - no copy, no serialisation.
 		const item = await connector.get("from-worker");
 		expect(item?.value1).toEqual("worker-value");
 	});

@@ -221,10 +221,9 @@ export class FileEntityStorageConnector<T = unknown>
 
 	/**
 	 * Returns the health status of the component.
-	 * @param lastTimestamp The Unix timestamp (ms) recorded at the start of the previous cycle.
 	 * @returns The health status of the component.
 	 */
-	public async health(lastTimestamp: number): Promise<IHealth[]> {
+	public async health(): Promise<IHealth[]> {
 		try {
 			const stats = await statfs(this._directory);
 			const freeBytes = stats.bavail * stats.bsize;
@@ -813,7 +812,7 @@ export class FileEntityStorageConnector<T = unknown>
 	/**
 	 * Read the store from file while holding the directory mutex.
 	 * Use this for standalone reads (get, query, count, getPartitionContextIds) where
-	 * no outer lock is held. Do not call from inside a withLock callback —
+	 * no outer lock is held. Do not call from inside a withLock callback -
 	 * use readStore instead to avoid a re-entrant deadlock.
 	 * @returns The store.
 	 * @internal
