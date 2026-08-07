@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.2-next.5](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.9.2-next.4...entity-storage-connector-mysql-v0.9.2-next.5) (2026-08-07)
+
+
+### Features
+
+* linting and dependency update ([c307b60](https://github.com/iotaledger/twin-entity-storage/commit/c307b606d03ea436b7c43d4e1764b5c08f415555))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.4 to 0.9.2-next.5
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.2-next.4 to 0.9.2-next.5
+
 ## [0.9.2-next.4](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.9.2-next.3...entity-storage-connector-mysql-v0.9.2-next.4) (2026-08-04)
 
 
