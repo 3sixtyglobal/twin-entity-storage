@@ -49,3 +49,11 @@ The name of the database to be used.
 > **tableName**: `string`
 
 The name of the table to be used.
+
+***
+
+### mutexTimeoutMs? {#mutextimeoutms}
+
+> `optional` **mutexTimeoutMs?**: `number`
+
+Milliseconds to wait for connector mutex locks before throwing.

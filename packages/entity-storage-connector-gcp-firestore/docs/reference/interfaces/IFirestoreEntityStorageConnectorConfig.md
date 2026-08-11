@@ -61,3 +61,11 @@ The maximum number of idle channels to keep open.
 > `optional` **timeout?**: `number`
 
 The custom timeout for requests (in milliseconds).
+
+***
+
+### mutexTimeoutMs? {#mutextimeoutms}
+
+> `optional` **mutexTimeoutMs?**: `number`
+
+Milliseconds to wait for connector mutex locks before throwing.

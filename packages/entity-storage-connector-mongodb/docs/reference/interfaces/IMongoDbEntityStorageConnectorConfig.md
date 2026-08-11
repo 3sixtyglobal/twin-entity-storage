@@ -49,3 +49,11 @@ The name of the database to be used.
 > **collection**: `string`
 
 The name of the collection to be used.
+
+***
+
+### mutexTimeoutMs? {#mutextimeoutms}
+
+> `optional` **mutexTimeoutMs?**: `number`
+
+Milliseconds to wait for connector mutex locks before throwing.

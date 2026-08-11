@@ -213,6 +213,10 @@ The optional conditions to match for the entities.
 
 The id of the entity.
 
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
+
 #### Implementation of
 
 `IEntityStorageMigrationConnector.set`

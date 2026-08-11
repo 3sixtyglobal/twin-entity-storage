@@ -196,6 +196,10 @@ The optional conditions to match for the entities.
 
 Resolves when the entity has been stored.
 
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
+
 #### Implementation of
 
 `IEntityStorageConnector.set`
@@ -253,6 +257,10 @@ The optional conditions to match for the entities.
 `Promise`\<`void`\>
 
 Nothing.
+
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions do not match the stored state.
 
 #### Implementation of
 

@@ -66,6 +66,18 @@ The port to connect to.
 
 ***
 
+### mutexTimeoutMs? {#mutextimeoutms}
+
+> `optional` **mutexTimeoutMs?**: `number`
+
+Milliseconds to wait for connector mutex locks before throwing.
+
+#### Inherited from
+
+[`IScyllaDBConfig`](IScyllaDBConfig.md).[`mutexTimeoutMs`](IScyllaDBConfig.md#mutextimeoutms)
+
+***
+
 ### tableName {#tablename}
 
 > **tableName**: `string`
