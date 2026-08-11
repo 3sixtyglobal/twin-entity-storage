@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.2-next.7](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-postgresql-v0.9.2-next.6...entity-storage-connector-postgresql-v0.9.2-next.7) (2026-08-11)
+
+
+### Features
+
+* optimistic locking ([#201](https://github.com/iotaledger/twin-entity-storage/issues/201)) ([80cbe3b](https://github.com/iotaledger/twin-entity-storage/commit/80cbe3b611c47b16328bceab02cfb8423fe1bbcd))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.6 to 0.9.2-next.7
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.2-next.6 to 0.9.2-next.7
+
 ## [0.9.2-next.6](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-postgresql-v0.9.2-next.5...entity-storage-connector-postgresql-v0.9.2-next.6) (2026-08-07)
 
 

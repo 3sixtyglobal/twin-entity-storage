@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2-next.7](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.2-next.6...entity-storage-models-v0.9.2-next.7) (2026-08-11)
+
+
+### Features
+
+* optimistic locking ([#201](https://github.com/iotaledger/twin-entity-storage/issues/201)) ([80cbe3b](https://github.com/iotaledger/twin-entity-storage/commit/80cbe3b611c47b16328bceab02cfb8423fe1bbcd))
+
 ## [0.9.2-next.6](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.2-next.5...entity-storage-models-v0.9.2-next.6) (2026-08-07)
 
 
