@@ -37,4 +37,9 @@ export interface ICosmosDbEntityStorageConnectorConfig {
 	 * instead of the mapped host port.
 	 */
 	disableEndpointDiscovery?: boolean;
+
+	/**
+	 * Milliseconds to wait for connector mutex locks before throwing.
+	 */
+	mutexTimeoutMs?: number;
 }

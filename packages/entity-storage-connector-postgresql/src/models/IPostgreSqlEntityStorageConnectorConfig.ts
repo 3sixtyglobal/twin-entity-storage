@@ -34,4 +34,9 @@ export interface IPostgreSqlEntityStorageConnectorConfig {
 	 * The name of the table to be used.
 	 */
 	tableName: string;
+
+	/**
+	 * Milliseconds to wait for connector mutex locks before throwing.
+	 */
+	mutexTimeoutMs?: number;
 }

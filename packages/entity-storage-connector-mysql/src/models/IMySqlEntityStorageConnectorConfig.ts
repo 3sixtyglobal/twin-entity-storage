@@ -77,7 +77,7 @@ export interface IMySqlEntityStorageConnectorConfig {
 	};
 
 	/**
-	 * Maximum milliseconds to wait for the per-directory write lock before throwing.
+	 * Maximum milliseconds to wait for optimistic-lock mutexes before throwing.
 	 */
 	mutexTimeoutMs?: number;
 }

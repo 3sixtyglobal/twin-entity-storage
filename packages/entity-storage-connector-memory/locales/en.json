@@ -5,6 +5,12 @@
 			"storeTornDown": "Entity storage torn down"
 		}
 	},
+	"error": {
+		"memoryEntityStorageConnector": {
+			"optimisticLockFailed": "The entity \"{conflictId}\" could not be written because the optimistic lock check failed",
+			"conditionFailed": "The entity \"{conflictId}\" could not be updated because the supplied conditions did not match the stored state"
+		}
+	},
 	"health": {
 		"memoryEntityStorageConnector": {
 			"healthDescription": "Memory entity storage for \"{entityType}\" is always available"

@@ -18,6 +18,7 @@ export interface IEntityStorageConnector<T = unknown> extends IComponent {
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The id of the entity.
+	 * @throws ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 	 */
 	set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void>;
 
@@ -46,6 +47,7 @@ export interface IEntityStorageConnector<T = unknown> extends IComponent {
 	 * @param id The id of the entity to remove.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns Nothing.
+	 * @throws ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 	 */
 	remove(id: string, conditions?: { property: keyof T; value: unknown }[]): Promise<void>;
 

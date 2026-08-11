@@ -11,6 +11,7 @@ import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	ConflictError,
 	Converter,
 	GeneralError,
 	Guards,
@@ -111,7 +112,13 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private readonly _primaryKeyProperty: IEntitySchemaProperty<T>;
 
 	/**
-	 * Milliseconds to wait for the directory lock before throwing.
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
 	 * @internal
 	 */
 	private readonly _mutexTimeoutMs?: number;
@@ -162,6 +169,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKeyProperty = EntitySchemaHelper.getPrimaryKey(this._entitySchema);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
 
 		this._config = options.config;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
@@ -406,6 +414,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The id of the entity.
+	 * @throws ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(MySqlEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
@@ -413,6 +422,12 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
 
 		const prepared = EntityStorageHelper.prepareEntity(
 			entity,
@@ -427,12 +442,46 @@ export class MySqlEntityStorageConnector<T = unknown>
 		);
 
 		const id = prepared[this._primaryKeyProperty.property] as unknown as string;
+		const optimisticMutexKey =
+			Is.stringValue(this._versionKey) || Is.arrayValue(conditions)
+				? this.buildOptimisticMutexKey(partitionKey, id)
+				: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			if (Is.arrayValue(conditions)) {
-				const itemData = await this.get(id);
-				if (Is.notEmpty(itemData) && !this.verifyConditions(conditions, itemData)) {
-					return;
+			if (hasVersionCheck) {
+				if (Is.arrayValue(conditions)) {
+					const currentEntity = await this.get(id);
+					if (!Is.empty(currentEntity) && !this.verifyConditions(conditions, currentEntity)) {
+						throw new ConflictError(MySqlEntityStorageConnector.CLASS_NAME, "conditionFailed", id);
+					}
+				}
+				ObjectHelper.propertySet(prepared, this._versionKey, submittedVersion + 1);
+			} else if (this._versionKey || Is.arrayValue(conditions)) {
+				const currentEntity = await this.get(id);
+				if (!Is.empty(currentEntity)) {
+					if (Is.arrayValue(conditions) && !this.verifyConditions(conditions, currentEntity)) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(
+								MySqlEntityStorageConnector.CLASS_NAME,
+								"conditionFailed",
+								id
+							);
+						}
+						return;
+					}
+				}
+				if (Is.stringValue(this._versionKey)) {
+					const storedVersion = !Is.empty(currentEntity)
+						? (ObjectHelper.propertyGet<number>(currentEntity, this._versionKey) ?? 0)
+						: 0;
+					ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
 				}
 			}
 
@@ -460,14 +509,38 @@ export class MySqlEntityStorageConnector<T = unknown>
 				}
 			}
 
-			let sql = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\``;
-			sql += ` (${keys.map(key => `\`${key}\``).join(", ")})`;
-			sql += ` VALUES (${values.map(() => "?").join(", ")})`;
-			sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
-
 			const pool = await this.getPool();
-			await pool.query(sql, values);
+
+			if (hasVersionCheck) {
+				const updateSql = `UPDATE \`${this._config.database}\`.\`${this._config.tableName}\` SET ${keys.map(key => `\`${key}\` = ?`).join(", ")} WHERE \`${this._primaryKeyProperty.property as string}\` = ? AND \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ? AND \`${this._versionKey}\` = ?`;
+				const updateValues = [
+					...values,
+					id,
+					partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE,
+					submittedVersion
+				];
+				const [result] = (await pool.query(updateSql, updateValues)) as unknown as [
+					{ affectedRows: number }
+				];
+				if (result.affectedRows === 0) {
+					throw new ConflictError(
+						MySqlEntityStorageConnector.CLASS_NAME,
+						"optimisticLockFailed",
+						id
+					);
+				}
+			} else {
+				let sql = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\``;
+				sql += ` (${keys.map(key => `\`${key}\``).join(", ")})`;
+				sql += ` VALUES (${values.map(() => "?").join(", ")})`;
+				sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
+
+				await pool.query(sql, values);
+			}
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
 			throw new GeneralError(
 				MySqlEntityStorageConnector.CLASS_NAME,
 				"setFailed",
@@ -476,6 +549,10 @@ export class MySqlEntityStorageConnector<T = unknown>
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -581,12 +658,30 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const optimisticMutexKey =
+			Is.stringValue(this._versionKey) || Is.arrayValue(conditions)
+				? this.buildOptimisticMutexKey(partitionKey, id)
+				: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
 			const pool = await this.getPool();
 
-			const itemData = await this.get(id, undefined, conditions);
-			if (Is.notEmpty(itemData)) {
+			const itemData = await this.get(id);
+			if (!Is.empty(itemData)) {
+				if (Is.arrayValue(conditions) && !this.verifyConditions(conditions, itemData)) {
+					if (Is.stringValue(this._versionKey)) {
+						throw new ConflictError(MySqlEntityStorageConnector.CLASS_NAME, "conditionFailed", id);
+					}
+					return;
+				}
+
 				const values: unknown[] = [];
 				const whereClauses: string[] = [];
 
@@ -609,6 +704,9 @@ export class MySqlEntityStorageConnector<T = unknown>
 				await pool.query(query, values);
 			}
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
 			throw new GeneralError(
 				MySqlEntityStorageConnector.CLASS_NAME,
 				"removeFailed",
@@ -617,6 +715,10 @@ export class MySqlEntityStorageConnector<T = unknown>
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -1411,6 +1513,17 @@ export class MySqlEntityStorageConnector<T = unknown>
 		return conditions.every(
 			condition => ObjectHelper.propertyGet(obj, condition.property as string) === condition.value
 		);
+	}
+
+	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param partitionKey The resolved partition key.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private buildOptimisticMutexKey(partitionKey: string | undefined, id: string): string {
+		return `${MySqlEntityStorageConnector.CLASS_NAME}:optimistic:${this._config.database}:${this._config.tableName}:${partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE}:${id}`;
 	}
 
 	/**

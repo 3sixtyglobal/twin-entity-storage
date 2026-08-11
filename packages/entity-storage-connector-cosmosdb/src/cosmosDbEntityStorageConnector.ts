@@ -26,9 +26,11 @@ import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	ConflictError,
 	GeneralError,
 	Guards,
 	Is,
+	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
 	Validation
@@ -110,10 +112,22 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	private readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
 	 * The configuration for the connector.
 	 * @internal
 	 */
 	private readonly _config: ICosmosDbEntityStorageConnectorConfig;
+
+	/**
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
+	 * @internal
+	 */
+	private readonly _mutexTimeoutMs?: number;
 
 	/**
 	 * The Cosmos DB client.
@@ -169,8 +183,10 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		this._partitionContextIds = options.partitionContextIds;
 
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
 
 		this._config = options.config;
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 
 		this._client = new CosmosClient({
 			endpoint: this._config.endpoint,
@@ -367,6 +383,9 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 				const { resource: item } = await this._container
 					.item(id, partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE)
 					.read<ItemDefinition>();
+				if (Is.empty(item)) {
+					return undefined;
+				}
 				return this.itemToEntity(item);
 			}
 
@@ -446,31 +465,90 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
+
 		const prepared = EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
 			nullBehavior: "omit"
 		});
 
 		const id = prepared[this._primaryKey.property] as string;
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			if (Is.arrayValue(conditions)) {
+			let itemEtag: string | undefined;
+
+			if (Is.stringValue(this._versionKey) || Is.arrayValue(conditions)) {
 				const item = this._container.item(
 					id,
 					partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
 				);
 				const { resource: itemData } = await item.read<ItemDefinition>();
-				if (Is.notEmpty(itemData) && !this.verifyConditions(conditions, itemData as T)) {
-					return;
+				if (!Is.empty(itemData)) {
+					if (hasVersionCheck) {
+						const storedVersion = ObjectHelper.propertyGet<number>(itemData, this._versionKey) ?? 0;
+						if (storedVersion !== submittedVersion) {
+							throw new ConflictError(
+								CosmosDbEntityStorageConnector.CLASS_NAME,
+								"optimisticLockFailed",
+								id
+							);
+						}
+					}
+					if (Is.arrayValue(conditions) && !this.verifyConditions(conditions, itemData as T)) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(
+								CosmosDbEntityStorageConnector.CLASS_NAME,
+								"conditionFailed",
+								id
+							);
+						}
+						return;
+					}
+					itemEtag = ObjectHelper.propertyGet(itemData, "_etag");
+				}
+				if (Is.stringValue(this._versionKey)) {
+					const storedVersion = !Is.empty(itemData)
+						? (ObjectHelper.propertyGet<number>(itemData, this._versionKey) ?? 0)
+						: 0;
+					ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
 				}
 			}
 
-			await this._container.items.upsert({
-				id,
-				[CosmosDbEntityStorageConnector._PARTITION_KEY]:
-					partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
-				...prepared
-			});
+			await this._container.items.upsert(
+				{
+					id,
+					[CosmosDbEntityStorageConnector._PARTITION_KEY]:
+						partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
+					...prepared
+				},
+				Is.stringValue(itemEtag)
+					? { accessCondition: { type: "IfMatch", condition: itemEtag } }
+					: undefined
+			);
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
+			if (Is.object<{ code?: number }>(err) && err.code === 412) {
+				throw new ConflictError(
+					CosmosDbEntityStorageConnector.CLASS_NAME,
+					"optimisticLockFailed",
+					id
+				);
+			}
 			if (BaseError.isAggregateError(err)) {
 				const errors = BaseError.fromAggregate(err);
 				if (BaseError.someErrorCode(errors, "ResourceNotFoundException")) {
@@ -492,6 +570,10 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -597,6 +679,16 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
 			const item = this._container.item(
@@ -606,12 +698,22 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 			const { resource: itemData } = await item.read<ItemDefinition>();
 			if (Is.notEmpty(itemData)) {
 				if (Is.arrayValue(conditions) && !this.verifyConditions(conditions, itemData as T)) {
+					if (Is.stringValue(this._versionKey)) {
+						throw new ConflictError(
+							CosmosDbEntityStorageConnector.CLASS_NAME,
+							"conditionFailed",
+							id
+						);
+					}
 					return;
 				}
 
 				await item.delete();
 			}
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
 			if (
 				BaseError.fromError(err) &&
 				Is.object<{ body?: { code?: string } }>(err) &&
@@ -627,6 +729,10 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -1296,6 +1402,17 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param partitionKey The resolved partition key.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private buildOptimisticMutexKey(partitionKey: string | undefined, id: string): string {
+		return `${CosmosDbEntityStorageConnector.CLASS_NAME}:optimistic:${this._config.databaseId}:${this._config.containerId}:${partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE}:${id}`;
+	}
+
+	/**
 	 * Convert an entity to an item.
 	 * @param item The item to convert.
 	 * @returns The entity.
@@ -1370,7 +1487,14 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 			}
 		}
 
-		return compositeIndexes.length > 0 ? { compositeIndexes } : undefined;
+		return compositeIndexes.length > 0
+			? {
+					indexingMode: "consistent",
+					automatic: true,
+					includedPaths: [{ path: "/*" }],
+					compositeIndexes
+				}
+			: undefined;
 	}
 
 	/**

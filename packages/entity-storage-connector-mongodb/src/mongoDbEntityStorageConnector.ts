@@ -9,10 +9,13 @@ import {
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
+	Coerce,
 	ComponentFactory,
+	ConflictError,
 	GeneralError,
 	Guards,
 	Is,
+	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
 	Validation
@@ -87,6 +90,18 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	private readonly _client: MongoClient;
 
 	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
+	 * @internal
+	 */
+	private readonly _mutexTimeoutMs?: number;
+
+	/**
 	 * Create a new instance of MongoDbEntityStorageConnector.
 	 * @param options The options for the connector.
 	 */
@@ -123,6 +138,8 @@ export class MongoDbEntityStorageConnector<T = unknown>
 		this._partitionContextIds = options.partitionContextIds;
 
 		this._config = options.config;
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 
 		this._client = new MongoClient(this.createConnectionConfig());
 	}
@@ -276,10 +293,10 @@ export class MongoDbEntityStorageConnector<T = unknown>
 
 			const collection = await this.getCollection();
 			const result = await collection.findOne(query);
-			ObjectHelper.propertyDelete(result, "_id");
-			return Is.objectValue(result)
-				? EntityStorageHelper.unPrepareEntity<T>(result as T, [])
-				: undefined;
+			if (!Is.objectValue(result)) {
+				return undefined;
+			}
+			return EntityStorageHelper.unPrepareEntity<T>(result as T, ["_id"]);
 		} catch (err) {
 			throw new GeneralError(
 				MongoDbEntityStorageConnector.CLASS_NAME,
@@ -297,34 +314,94 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The id of the entity.
+	 * @throws ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(MongoDbEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
+
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
 
 		const prepared = EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
 			nullBehavior: "omit"
 		});
 
 		const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
-		const id = prepared[primaryKey.property];
+		const id = prepared[primaryKey.property] as string;
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? await this.buildOptimisticMutexKey(id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			const filter: { [key in keyof T]?: unknown } = { [primaryKey.property]: id };
-
-			if (Is.arrayValue(conditions)) {
-				for (const condition of conditions) {
-					filter[condition.property] = condition.value;
-				}
-			}
-
 			const collection = await this.getCollection();
-			await collection.findOneAndUpdate(
-				filter,
-				{ $set: prepared as Partial<Document> },
-				{ upsert: true }
-			);
+
+			if (hasVersionCheck) {
+				ObjectHelper.propertySet(prepared, this._versionKey, submittedVersion + 1);
+
+				const updateFilter: { [key in keyof T]?: unknown } = {
+					[primaryKey.property]: id,
+					[this._versionKey as keyof T]: submittedVersion
+				};
+				if (Is.arrayValue(conditions)) {
+					for (const c of conditions) {
+						updateFilter[c.property] = c.value;
+					}
+				}
+
+				const result = await collection.updateOne(updateFilter, {
+					$set: prepared as Partial<Document>
+				});
+				if (result.matchedCount === 0) {
+					throw new ConflictError(
+						MongoDbEntityStorageConnector.CLASS_NAME,
+						"optimisticLockFailed",
+						id
+					);
+				}
+			} else {
+				if (Is.arrayValue(conditions)) {
+					const currentEntity = await this.get(id);
+					if (!Is.empty(currentEntity) && !this.verifyConditions(conditions, currentEntity)) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(
+								MongoDbEntityStorageConnector.CLASS_NAME,
+								"conditionFailed",
+								id
+							);
+						}
+						return;
+					}
+				}
+				if (Is.stringValue(this._versionKey)) {
+					const currentEntity = await this.get(id);
+					const storedVersion = !Is.empty(currentEntity)
+						? (ObjectHelper.propertyGet<number>(currentEntity, this._versionKey) ?? 0)
+						: 0;
+					ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
+				}
+
+				const filter: { [key in keyof T]?: unknown } = { [primaryKey.property]: id };
+				await collection.findOneAndUpdate(
+					filter,
+					{ $set: prepared as Partial<Document> },
+					{ upsert: true }
+				);
+			}
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
 			throw new GeneralError(
 				MongoDbEntityStorageConnector.CLASS_NAME,
 				"setFailed",
@@ -333,6 +410,10 @@ export class MongoDbEntityStorageConnector<T = unknown>
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -410,21 +491,47 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	): Promise<void> {
 		Guards.stringValue(MongoDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
 		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? await this.buildOptimisticMutexKey(id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
 			const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
-			const query: { [key in keyof T]?: unknown } = { [primaryKey.property]: id };
+			const collection = await this.getCollection();
 
-			if (conditions) {
-				for (const condition of conditions) {
-					query[condition.property] = condition.value;
+			const query: { [key in keyof T]?: unknown } = { [primaryKey.property]: id };
+			if (Is.arrayValue(conditions)) {
+				for (const c of conditions) {
+					query[c.property] = c.value;
 				}
 			}
-
-			const collection = await this.getCollection();
-			await collection.deleteOne(query);
+			const deleteResult = await collection.deleteOne(query);
+			if (
+				Is.stringValue(this._versionKey) &&
+				deleteResult.deletedCount === 0 &&
+				Is.arrayValue(conditions)
+			) {
+				const exists = await collection.findOne({ [primaryKey.property]: id });
+				if (!Is.empty(exists)) {
+					throw new ConflictError(MongoDbEntityStorageConnector.CLASS_NAME, "conditionFailed", id);
+				}
+			}
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
 			throw new GeneralError(MongoDbEntityStorageConnector.CLASS_NAME, "removeFailed", { id }, err);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -571,8 +678,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 
 		for (let i = 0; i < entities.length; i++) {
 			const entity = entities[i];
-			ObjectHelper.propertyDelete(entity, "_id");
-			entities[i] = EntityStorageHelper.unPrepareEntity(entity, []);
+			entities[i] = EntityStorageHelper.unPrepareEntity(entity, ["_id"]);
 		}
 
 		return {
@@ -757,6 +863,33 @@ export class MongoDbEntityStorageConnector<T = unknown>
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 		return Is.stringValue(partitionKey) ? `${base}_${partitionKey.replace(/[\0$]/g, "_")}` : base;
+	}
+
+	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private async buildOptimisticMutexKey(id: string): Promise<string> {
+		const collectionName = await this.resolveCollectionName(this._config.collection);
+		return `${MongoDbEntityStorageConnector.CLASS_NAME}:optimistic:${this._config.database}:${collectionName}:${id}`;
+	}
+
+	/**
+	 * Check whether every condition holds against the given object.
+	 * @param conditions The conditions to verify.
+	 * @param obj The object to check against.
+	 * @returns True when all conditions match.
+	 * @internal
+	 */
+	private verifyConditions(
+		conditions: { property: keyof T; value: unknown }[],
+		obj: { [key in keyof T]: unknown }
+	): boolean {
+		return conditions.every(
+			condition => ObjectHelper.propertyGet(obj, condition.property as string) === condition.value
+		);
 	}
 
 	/**

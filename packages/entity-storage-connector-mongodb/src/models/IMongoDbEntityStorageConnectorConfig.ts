@@ -34,4 +34,9 @@ export interface IMongoDbEntityStorageConnectorConfig {
 	 * The name of the collection to be used.
 	 */
 	collection: string;
+
+	/**
+	 * Milliseconds to wait for connector mutex locks before throwing.
+	 */
+	mutexTimeoutMs?: number;
 }

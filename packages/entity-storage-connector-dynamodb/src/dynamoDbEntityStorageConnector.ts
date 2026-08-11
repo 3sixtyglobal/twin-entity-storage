@@ -32,10 +32,12 @@ import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	ConflictError,
 	Converter,
 	GeneralError,
 	Guards,
 	Is,
+	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
 	Validation
@@ -117,10 +119,22 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	private readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
 	 * The configuration for the connector.
 	 * @internal
 	 */
 	private readonly _config: IDynamoDbEntityStorageConnectorConfig;
+
+	/**
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
+	 * @internal
+	 */
+	private readonly _mutexTimeoutMs?: number;
 
 	/**
 	 * Create a new instance of DynamoDbEntityStorageConnector.
@@ -169,11 +183,13 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		this._entitySchemaName = options.entitySchema;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
 
 		this._config = options.config;
 		this._config.endpoint = Is.stringValue(this._config.endpoint)
 			? this._config.endpoint
 			: undefined;
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 	}
 
 	/**
@@ -491,6 +507,12 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
+
 		const prepared = EntityStorageHelper.prepareEntity(
 			entity,
 			this._entitySchema,
@@ -506,21 +528,61 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		);
 
 		const id = (prepared as { [id: string]: unknown })[this._primaryKey.property as string];
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, String(id))
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
+			const pk = this._primaryKey.property as string;
+			let useExistsOnly = false;
+
+			// Build the set of conditions for the DB-level check (user conditions + version)
+			const allConditions: { property: keyof T; value: unknown }[] = [...(conditions ?? [])];
+
+			if (Is.stringValue(this._versionKey) && hasVersionCheck) {
+				// Update path: entity must already exist with the submitted version
+				ObjectHelper.propertySet(prepared, this._versionKey, (submittedVersion ?? 0) + 1);
+				allConditions.push({ property: this._versionKey as keyof T, value: submittedVersion });
+				useExistsOnly = true;
+			} else if (Is.stringValue(this._versionKey)) {
+				// Unversioned write: read current version, then write with that version as condition
+				const currentEntity = await this.get(String(id));
+				if (!Is.empty(currentEntity)) {
+					const storedVersion =
+						ObjectHelper.propertyGet<number>(currentEntity, this._versionKey) ?? 0;
+					ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
+					allConditions.push({ property: this._versionKey as keyof T, value: storedVersion });
+					useExistsOnly = true;
+				} else {
+					ObjectHelper.propertySet(prepared, this._versionKey, 1);
+				}
+			}
+
 			const docClient = this.createDocClient();
 
 			const { conditionExpression, attributeNames, attributeValues } =
-				this.buildConditionExpression(conditions);
+				this.buildConditionExpression(allConditions);
+
+			let finalConditionExpression: string | undefined;
+			if (useExistsOnly) {
+				finalConditionExpression = Is.stringValue(conditionExpression)
+					? `attribute_exists(${pk}) AND ${conditionExpression}`
+					: `attribute_exists(${pk})`;
+			} else if (Is.stringValue(conditionExpression)) {
+				finalConditionExpression = `(attribute_exists(${pk}) AND ${conditionExpression}) OR attribute_not_exists(${pk})`;
+			}
 
 			const putCommand = new PutCommand({
 				TableName: this._config.tableName,
 				Item: prepared as { [id: string]: unknown },
-				// Only set the condition expression if we have conditions to match
-				// and the primary key exists, otherwise we are creating a new object
-				ConditionExpression: Is.stringValue(conditionExpression)
-					? `(attribute_exists(${this._primaryKey.property as string}) AND ${conditionExpression}) OR attribute_not_exists(${this._primaryKey.property as string})`
-					: undefined,
+				ConditionExpression: finalConditionExpression,
 				ExpressionAttributeNames: attributeNames,
 				ExpressionAttributeValues: attributeValues
 			});
@@ -528,6 +590,13 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 			await docClient.send(putCommand);
 		} catch (err) {
 			if (BaseError.isErrorName(err, "ConditionalCheckFailedException")) {
+				if (Is.stringValue(this._versionKey)) {
+					throw new ConflictError(
+						DynamoDbEntityStorageConnector.CLASS_NAME,
+						hasVersionCheck ? "optimisticLockFailed" : "conditionFailed",
+						String(id)
+					);
+				}
 				return;
 			}
 
@@ -550,6 +619,10 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -701,6 +774,16 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
 			const docClient = this.createDocClient();
@@ -715,7 +798,9 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 						partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE,
 					[this._primaryKey.property as string]: id
 				},
-				ConditionExpression: conditionExpression,
+				ConditionExpression: Is.stringValue(conditionExpression)
+					? `attribute_not_exists(${this._primaryKey.property as string}) OR (attribute_exists(${this._primaryKey.property as string}) AND ${conditionExpression})`
+					: undefined,
 				ExpressionAttributeNames: attributeNames,
 				ExpressionAttributeValues: attributeValues
 			});
@@ -723,6 +808,9 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 			await docClient.send(deleteCommand);
 		} catch (err) {
 			if (BaseError.isErrorName(err, "ConditionalCheckFailedException")) {
+				if (Is.stringValue(this._versionKey)) {
+					throw new ConflictError(DynamoDbEntityStorageConnector.CLASS_NAME, "conditionFailed", id);
+				}
 				return;
 			}
 			if (BaseError.isErrorCode(err, "ResourceNotFoundException")) {
@@ -744,6 +832,10 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -2148,5 +2240,16 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 				return alias;
 			})
 			.join(", ");
+	}
+
+	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param partitionKey The resolved partition key.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private buildOptimisticMutexKey(partitionKey: string | undefined, id: string): string {
+		return `${DynamoDbEntityStorageConnector.CLASS_NAME}:optimistic:${this._config.tableName}:${partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE}:${id}`;
 	}
 }

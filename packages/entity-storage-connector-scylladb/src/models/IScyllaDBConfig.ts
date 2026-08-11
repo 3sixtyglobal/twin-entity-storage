@@ -25,4 +25,9 @@ export interface IScyllaDBConfig {
 	 * @default 9042
 	 */
 	port?: number;
+
+	/**
+	 * Milliseconds to wait for connector mutex locks before throwing.
+	 */
+	mutexTimeoutMs?: number;
 }

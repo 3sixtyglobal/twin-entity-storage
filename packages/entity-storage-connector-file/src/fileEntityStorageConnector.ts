@@ -13,6 +13,7 @@ import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	ConflictError,
 	GeneralError,
 	Guards,
 	Is,
@@ -103,6 +104,12 @@ export class FileEntityStorageConnector<T = unknown>
 	private readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
 	 * The directory to use for storage.
 	 * @internal
 	 */
@@ -147,6 +154,7 @@ export class FileEntityStorageConnector<T = unknown>
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
 		this._directory = path.resolve(options.config.directory);
 		this._diskErrorThresholdBytes =
 			options.config.diskErrorThresholdBytes ??
@@ -310,7 +318,7 @@ export class FileEntityStorageConnector<T = unknown>
 
 		const store = await this.readStoreWithLock();
 
-		const finalConditions = conditions ?? [];
+		const finalConditions = conditions ? [...conditions] : [];
 		if (Is.stringValue(partitionKey)) {
 			finalConditions.push({
 				property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
@@ -335,6 +343,7 @@ export class FileEntityStorageConnector<T = unknown>
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The id of the entity.
+	 * @throws ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(FileEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
@@ -342,6 +351,12 @@ export class FileEntityStorageConnector<T = unknown>
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
 
 		const prepared = EntityStorageHelper.prepareEntity(
 			entity,
@@ -355,23 +370,54 @@ export class FileEntityStorageConnector<T = unknown>
 		await this.withLock(async () => {
 			const store = await this.readStore();
 
-			const finalConditions = conditions ?? [];
+			const baseConditions: { property: keyof T; value: unknown }[] = [];
 			if (Is.stringValue(partitionKey)) {
-				finalConditions.push({
+				baseConditions.push({
 					property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
 					value: partitionKey
 				});
 			}
 
-			const existingIndex = this.findItem(
-				store,
-				prepared[this._primaryKey.property] as string,
-				undefined,
-				finalConditions
-			);
+			const fullConditions: { property: keyof T; value: unknown }[] = [
+				...baseConditions,
+				...(conditions ?? [])
+			];
+			if (hasVersionCheck) {
+				fullConditions.push({ property: this._versionKey as keyof T, value: submittedVersion });
+			}
+
+			const entityId = prepared[this._primaryKey.property] as string;
+			const existingIndex = this.findItem(store, entityId, undefined, fullConditions);
+
 			if (existingIndex >= 0) {
+				if (Is.stringValue(this._versionKey)) {
+					const storedVersion =
+						ObjectHelper.propertyGet<number>(store[existingIndex], this._versionKey) ?? 0;
+					ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
+				}
 				store[existingIndex] = prepared;
 			} else {
+				const existsIndex = this.findItem(store, entityId, undefined, baseConditions);
+				if (existsIndex >= 0) {
+					if (Is.stringValue(this._versionKey)) {
+						if (hasVersionCheck) {
+							throw new ConflictError(
+								FileEntityStorageConnector.CLASS_NAME,
+								"optimisticLockFailed",
+								entityId
+							);
+						}
+						throw new ConflictError(
+							FileEntityStorageConnector.CLASS_NAME,
+							"conditionFailed",
+							entityId
+						);
+					}
+					return;
+				}
+				if (Is.stringValue(this._versionKey)) {
+					ObjectHelper.propertySet(prepared, this._versionKey, 1);
+				}
 				store.push(prepared);
 			}
 
@@ -536,6 +582,7 @@ export class FileEntityStorageConnector<T = unknown>
 	 * @param id The id of the entity to remove.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns Nothing.
+	 * @throws ConflictError when the entity exists but the supplied conditions do not match the stored state.
 	 */
 	public async remove(
 		id: string,
@@ -550,19 +597,28 @@ export class FileEntityStorageConnector<T = unknown>
 		await this.withLock(async () => {
 			const store = await this.readStore();
 
-			const finalConditions = conditions ?? [];
+			const baseConditions: { property: keyof T; value: unknown }[] = [];
 			if (Is.stringValue(partitionKey)) {
-				finalConditions.push({
+				baseConditions.push({
 					property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
 					value: partitionKey
 				});
 			}
 
-			const index = this.findItem(store, id, undefined, finalConditions);
+			const fullConditions: { property: keyof T; value: unknown }[] = [
+				...baseConditions,
+				...(conditions ?? [])
+			];
+			const index = this.findItem(store, id, undefined, fullConditions);
 
 			if (index >= 0) {
 				store.splice(index, 1);
 				await this.writeStore(store);
+			} else if (Is.arrayValue(conditions)) {
+				const existsIndex = this.findItem(store, id, undefined, baseConditions);
+				if (existsIndex >= 0 && this._versionKey) {
+					throw new ConflictError(FileEntityStorageConnector.CLASS_NAME, "conditionFailed", id);
+				}
 			}
 		});
 	}

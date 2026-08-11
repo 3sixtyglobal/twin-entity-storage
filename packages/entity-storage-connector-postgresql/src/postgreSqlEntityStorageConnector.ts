@@ -11,9 +11,11 @@ import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	ConflictError,
 	GeneralError,
 	Guards,
 	Is,
+	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
 	Validation
@@ -95,10 +97,22 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	private readonly _primaryKeyProperty: IEntitySchemaProperty<T>;
 
 	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
 	 * The configuration for the connector.
 	 * @internal
 	 */
 	private readonly _config: IPostgreSqlEntityStorageConnectorConfig;
+
+	/**
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
+	 * @internal
+	 */
+	private readonly _mutexTimeoutMs?: number;
 
 	/**
 	 * The configuration for the connector.
@@ -152,8 +166,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKeyProperty = EntitySchemaHelper.getPrimaryKey(this._entitySchema);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
 
 		this._config = options.config;
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 	}
 
 	/**
@@ -390,6 +406,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The id of the entity.
+	 * @throws ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(PostgreSqlEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
@@ -397,6 +414,12 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? Coerce.integer(ObjectHelper.propertyGet(entity, this._versionKey))
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
 
 		const prepared = EntityStorageHelper.prepareEntity(
 			entity,
@@ -411,12 +434,52 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		);
 
 		const id = prepared[this._primaryKeyProperty.property] as unknown as string;
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			if (Is.arrayValue(conditions)) {
-				const itemData = await this.get(id);
-				if (Is.notEmpty(itemData) && !this.verifyConditions(conditions, itemData)) {
-					return;
+			if (hasVersionCheck) {
+				if (Is.arrayValue(conditions)) {
+					const currentEntity = await this.get(id);
+					if (!Is.empty(currentEntity) && !this.verifyConditions(conditions, currentEntity)) {
+						throw new ConflictError(
+							PostgreSqlEntityStorageConnector.CLASS_NAME,
+							"conditionFailed",
+							id
+						);
+					}
+				}
+				ObjectHelper.propertySet(prepared, this._versionKey, submittedVersion + 1);
+			} else if (this._versionKey || Is.arrayValue(conditions)) {
+				const currentEntity = await this.get(id);
+				if (!Is.empty(currentEntity)) {
+					if (Is.arrayValue(conditions) && !this.verifyConditions(conditions, currentEntity)) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(
+								PostgreSqlEntityStorageConnector.CLASS_NAME,
+								"conditionFailed",
+								id
+							);
+						}
+						return;
+					}
+				}
+				if (Is.stringValue(this._versionKey)) {
+					const storedVersion =
+						Coerce.integer(
+							!Is.empty(currentEntity)
+								? ObjectHelper.propertyGet(currentEntity, this._versionKey)
+								: 0
+						) ?? 0;
+					ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
 				}
 			}
 
@@ -439,11 +502,29 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			sql += ` (${keys.map(key => `"${key}"`).join(", ")})`;
 			sql += ` VALUES (${values.map((value, i) => `$${i + 1}`).join(", ")})`;
 			sql += ` ON CONFLICT ("${PostgreSqlEntityStorageConnector._PARTITION_KEY}", "${this._primaryKeyProperty.property as string}")`;
-			sql += ` DO UPDATE SET ${keys.map(key => `"${key}" = EXCLUDED."${key}"`).join(", ")};`;
+
+			if (hasVersionCheck) {
+				sql += ` DO UPDATE SET ${keys.map(key => `"${key}" = EXCLUDED."${key}"`).join(", ")}`;
+				sql += ` WHERE "${this._config.tableName}"."${this._versionKey}" = $${values.length + 1}`;
+				values.push(submittedVersion);
+			} else {
+				sql += ` DO UPDATE SET ${keys.map(key => `"${key}" = EXCLUDED."${key}"`).join(", ")};`;
+			}
 
 			const dbConnection = await this.createConnection();
-			await dbConnection.unsafe(sql, values as ParameterOrJSON<never>[]);
+			const result = await dbConnection.unsafe(sql, values as ParameterOrJSON<never>[]);
+
+			if (hasVersionCheck && result.count === 0) {
+				throw new ConflictError(
+					PostgreSqlEntityStorageConnector.CLASS_NAME,
+					"optimisticLockFailed",
+					id
+				);
+			}
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
 			throw new GeneralError(
 				PostgreSqlEntityStorageConnector.CLASS_NAME,
 				"setFailed",
@@ -452,6 +533,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -558,12 +643,33 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
 			const dbConnection = await this.createConnection();
 
 			const itemData = await this.get(id);
-			if (Is.notEmpty(itemData)) {
+			if (!Is.empty(itemData)) {
+				if (Is.arrayValue(conditions) && !this.verifyConditions(conditions, itemData)) {
+					if (Is.stringValue(this._versionKey)) {
+						throw new ConflictError(
+							PostgreSqlEntityStorageConnector.CLASS_NAME,
+							"conditionFailed",
+							id
+						);
+					}
+					return;
+				}
+
 				const values: unknown[] = [];
 				const whereClauses: string[] = [];
 
@@ -590,6 +696,9 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				await dbConnection.unsafe(query, values as postgres.ParameterOrJSON<never>[]);
 			}
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
 			throw new GeneralError(
 				PostgreSqlEntityStorageConnector.CLASS_NAME,
 				"removeFailed",
@@ -598,6 +707,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -1343,6 +1456,17 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		return conditions.every(
 			condition => ObjectHelper.propertyGet(obj, condition.property as string) === condition.value
 		);
+	}
+
+	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param partitionKey The resolved partition key.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private buildOptimisticMutexKey(partitionKey: string | undefined, id: string): string {
+		return `${PostgreSqlEntityStorageConnector.CLASS_NAME}:optimistic:${this._config.tableName}:${partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE}:${id}`;
 	}
 
 	/**

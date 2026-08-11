@@ -16,11 +16,14 @@ import {
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
+	Coerce,
 	ComponentFactory,
+	ConflictError,
 	Converter,
 	GeneralError,
 	Guards,
 	Is,
+	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
 	Validation
@@ -97,10 +100,22 @@ export class FirestoreEntityStorageConnector<T = unknown>
 	private readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
 	 * The configuration for the connector.
 	 * @internal
 	 */
 	private readonly _config: IFirestoreEntityStorageConnectorConfig;
+
+	/**
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
+	 * @internal
+	 */
+	private readonly _mutexTimeoutMs?: number;
 
 	/**
 	 * The Firestore client.
@@ -152,6 +167,8 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 
 		const firestoreOptions: Settings = {
 			projectId: this._config.projectId,
@@ -351,30 +368,64 @@ export class FirestoreEntityStorageConnector<T = unknown>
 			FirestoreEntityStorageConnector._PARTITION_SEPARATOR
 		);
 
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
+
 		const prepared = EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
 			nullBehavior: "nullify"
 		});
+		const id = prepared[this._primaryKey.property] as string;
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		let conflictError: ConflictError | undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			const id = prepared[this._primaryKey.property] as string;
-
 			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
 
 			const docRef = collection.doc(id);
 
-			if (!Is.arrayValue(conditions)) {
+			if (!Is.arrayValue(conditions) && !Is.stringValue(this._versionKey)) {
 				await docRef.set(prepared);
 			} else {
 				await this._firestoreClient.runTransaction(async transaction => {
+					conflictError = undefined;
 					const docSnapshot = await transaction.get(docRef);
 
 					if (!docSnapshot.exists) {
+						if (Is.stringValue(this._versionKey)) {
+							ObjectHelper.propertySet(prepared, this._versionKey, 1);
+						}
 						transaction.set(docRef, prepared as object);
 					} else {
 						const data = docSnapshot.data() as T;
 
+						if (hasVersionCheck) {
+							const storedVersion = ObjectHelper.propertyGet<number>(data, this._versionKey) ?? 0;
+							if (storedVersion !== submittedVersion) {
+								conflictError = new ConflictError(
+									FirestoreEntityStorageConnector.CLASS_NAME,
+									"optimisticLockFailed",
+									id
+								);
+								return;
+							}
+						}
+
 						if (
-							EntityConditions.check(data, {
+							Is.arrayValue(conditions) &&
+							!EntityConditions.check(data, {
 								conditions: conditions.map(c => ({
 									property: c.property as string,
 									comparison: ComparisonOperator.Equals,
@@ -382,8 +433,21 @@ export class FirestoreEntityStorageConnector<T = unknown>
 								}))
 							})
 						) {
-							transaction.set(docRef, prepared as object);
+							if (Is.stringValue(this._versionKey)) {
+								conflictError = new ConflictError(
+									FirestoreEntityStorageConnector.CLASS_NAME,
+									"conditionFailed",
+									id
+								);
+							}
+							return;
 						}
+
+						if (Is.stringValue(this._versionKey)) {
+							const storedVersion = ObjectHelper.propertyGet<number>(data, this._versionKey) ?? 0;
+							ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
+						}
+						transaction.set(docRef, prepared as object);
 					}
 				});
 			}
@@ -391,9 +455,17 @@ export class FirestoreEntityStorageConnector<T = unknown>
 			throw new GeneralError(
 				FirestoreEntityStorageConnector.CLASS_NAME,
 				"setEntityFailed",
-				{ id: entity.id },
+				{ id: ObjectHelper.propertyGet<string>(entity, "id") },
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
+		}
+
+		if (conflictError) {
+			throw conflictError;
 		}
 	}
 
@@ -494,6 +566,18 @@ export class FirestoreEntityStorageConnector<T = unknown>
 			this._partitionContextIds,
 			FirestoreEntityStorageConnector._PARTITION_SEPARATOR
 		);
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		let conflictError: ConflictError | undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
 			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
@@ -503,6 +587,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 				await docRef.delete();
 			} else {
 				await this._firestoreClient.runTransaction(async transaction => {
+					conflictError = undefined;
 					const docSnapshot = await transaction.get(docRef);
 
 					if (docSnapshot.exists) {
@@ -517,6 +602,12 @@ export class FirestoreEntityStorageConnector<T = unknown>
 							})
 						) {
 							transaction.delete(docRef);
+						} else if (Is.stringValue(this._versionKey)) {
+							conflictError = new ConflictError(
+								FirestoreEntityStorageConnector.CLASS_NAME,
+								"conditionFailed",
+								id
+							);
 						}
 					}
 				});
@@ -528,6 +619,14 @@ export class FirestoreEntityStorageConnector<T = unknown>
 				{ id },
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
+		}
+
+		if (conflictError) {
+			throw conflictError;
 		}
 	}
 
@@ -1198,5 +1297,16 @@ export class FirestoreEntityStorageConnector<T = unknown>
 	 */
 	private collectionName(partitionKey?: string): string {
 		return `${this._config.collectionName}_${partitionKey ?? "default"}`;
+	}
+
+	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param partitionKey The resolved partition key.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private buildOptimisticMutexKey(partitionKey: string | undefined, id: string): string {
+		return `${FirestoreEntityStorageConnector.CLASS_NAME}:optimistic:${this._config.collectionName}:${partitionKey ?? "default"}:${id}`;
 	}
 }

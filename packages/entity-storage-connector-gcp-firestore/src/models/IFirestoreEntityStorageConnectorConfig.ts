@@ -44,4 +44,9 @@ export interface IFirestoreEntityStorageConnectorConfig {
 		 */
 		timeout?: number;
 	};
+
+	/**
+	 * Milliseconds to wait for connector mutex locks before throwing.
+	 */
+	mutexTimeoutMs?: number;
 }

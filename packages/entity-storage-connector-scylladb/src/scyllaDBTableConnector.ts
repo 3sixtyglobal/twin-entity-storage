@@ -7,7 +7,18 @@ import {
 	type IHealthProviderComponent
 } from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
-import { BaseError, ComponentFactory, GeneralError, Guards, Is, type IError } from "@twin.org/core";
+import {
+	BaseError,
+	Coerce,
+	ComponentFactory,
+	ConflictError,
+	GeneralError,
+	Guards,
+	Is,
+	type IError,
+	Mutex,
+	ObjectHelper
+} from "@twin.org/core";
 import {
 	EntitySchemaFactory,
 	EntitySchemaPropertyType,
@@ -227,6 +238,7 @@ export class ScyllaDBTableConnector<T = unknown>
 	 * Set an entity.
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.
+	 * @throws ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(ScyllaDBTableConnector.CLASS_NAME, nameof(entity), entity);
@@ -234,6 +246,13 @@ export class ScyllaDBTableConnector<T = unknown>
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? Coerce.integer(ObjectHelper.propertyGet(entity, this._versionKey))
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
+		let unversionedWriteStoredVersion: number | undefined;
 
 		const normalizedEntity = EntityStorageHelper.prepareEntity(
 			entity,
@@ -246,7 +265,65 @@ export class ScyllaDBTableConnector<T = unknown>
 
 		let connection;
 		const id = normalizedEntity[this._primaryKey?.property] as string;
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
+
 		try {
+			if (hasVersionCheck) {
+				if (Is.arrayValue(conditions)) {
+					const currentEntity = await this.get(id);
+					const currentObj = (!Is.empty(currentEntity) ? currentEntity : {}) as {
+						[key: string]: unknown;
+					};
+					if (
+						!conditions.every(
+							c => ObjectHelper.propertyGet(currentObj, c.property as string) === c.value
+						)
+					) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(ScyllaDBTableConnector.CLASS_NAME, "conditionFailed", id);
+						}
+						return;
+					}
+				}
+				ObjectHelper.propertySet(normalizedEntity, this._versionKey, submittedVersion + 1);
+			} else if (this._versionKey || Is.arrayValue(conditions)) {
+				const currentEntity = await this.get(id);
+				if (!Is.empty(currentEntity)) {
+					if (
+						Is.arrayValue(conditions) &&
+						!conditions.every(
+							c => ObjectHelper.propertyGet(currentEntity, c.property as string) === c.value
+						)
+					) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(ScyllaDBTableConnector.CLASS_NAME, "conditionFailed", id);
+						}
+						return;
+					}
+				}
+				if (Is.stringValue(this._versionKey)) {
+					const storedVersion =
+						Coerce.integer(
+							!Is.empty(currentEntity)
+								? ObjectHelper.propertyGet(currentEntity, this._versionKey)
+								: 0
+						) ?? 0;
+					ObjectHelper.propertySet(normalizedEntity, this._versionKey, storedVersion + 1);
+					if (!Is.empty(currentEntity)) {
+						unversionedWriteStoredVersion = storedVersion;
+					}
+				}
+			}
+
 			const propValues: unknown[] = [];
 			const updateValues: string[] = [];
 
@@ -272,18 +349,24 @@ export class ScyllaDBTableConnector<T = unknown>
 				}
 			}
 
-			if (Is.arrayValue(conditions)) {
-				finalConditions.push(...conditions);
-			}
-
 			const { sqlCondition, conditionValues } = this.buildConditions(finalConditions);
 
 			let sql: string;
 			let execParams: unknown[];
-			if (updateValues.length > 0 || Is.arrayValue(conditions)) {
+			if (updateValues.length > 0) {
 				propValues.push(...conditionValues);
 				sql = `UPDATE "${this.safeTableName(this._fullTableName)}" SET ${updateValues.join(",")} WHERE ${sqlCondition}`;
 				execParams = propValues;
+				if (hasVersionCheck) {
+					sql += ` IF "${this._versionKey}" = ?`;
+					execParams = [...propValues, submittedVersion];
+				} else if (
+					Is.stringValue(this._versionKey) &&
+					unversionedWriteStoredVersion !== undefined
+				) {
+					sql += ` IF "${this._versionKey}" = ?`;
+					execParams = [...propValues, unversionedWriteStoredVersion];
+				}
 			} else {
 				// No non-null data columns and no extra conditions - INSERT writes a row marker
 				// so the entity remains visible in SELECT even when all data fields are null.
@@ -303,8 +386,19 @@ export class ScyllaDBTableConnector<T = unknown>
 
 			connection = await this.openConnection();
 
-			await this.execute(connection, sql, execParams);
+			const resultSet = await this.execute(connection, sql, execParams);
+
+			if (
+				(hasVersionCheck || unversionedWriteStoredVersion !== undefined) &&
+				updateValues.length > 0 &&
+				resultSet.first()?.["[applied]"] === false
+			) {
+				throw new ConflictError(ScyllaDBTableConnector.CLASS_NAME, "optimisticLockFailed", id);
+			}
 		} catch (error) {
+			if (BaseError.isErrorName(error, ConflictError.CLASS_NAME)) {
+				throw error;
+			}
 			throw new GeneralError(
 				ScyllaDBTableConnector.CLASS_NAME,
 				"setFailed",
@@ -314,6 +408,9 @@ export class ScyllaDBTableConnector<T = unknown>
 				error
 			);
 		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 			await this.closeConnection(connection);
 		}
 	}
@@ -481,18 +578,44 @@ export class ScyllaDBTableConnector<T = unknown>
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
 
 		let connection;
 
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
+
 		try {
-			conditions ??= [];
-			conditions.unshift({
+			if (Is.arrayValue(conditions)) {
+				const currentEntity = await this.get(id);
+				if (!Is.empty(currentEntity)) {
+					if (
+						!conditions.every(
+							c => ObjectHelper.propertyGet(currentEntity, c.property as string) === c.value
+						)
+					) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(ScyllaDBTableConnector.CLASS_NAME, "conditionFailed", id);
+						}
+						return;
+					}
+				}
+			}
+
+			const deleteConditions: { property: keyof T; value: unknown }[] = [];
+			deleteConditions.unshift({
 				property: AbstractScyllaDBConnector.PARTITION_KEY as keyof T,
 				value: partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE
 			});
-			conditions.unshift({ property: this._primaryKey?.property, value: id });
+			deleteConditions.unshift({ property: this._primaryKey?.property, value: id });
 
-			const { sqlCondition, conditionValues } = this.buildConditions(conditions);
+			const { sqlCondition, conditionValues } = this.buildConditions(deleteConditions);
 
 			const sql = `DELETE FROM "${this.safeTableName(this._fullTableName)}" WHERE ${sqlCondition}`;
 
@@ -508,6 +631,9 @@ export class ScyllaDBTableConnector<T = unknown>
 
 			await this.execute(connection, sql, conditionValues);
 		} catch (error) {
+			if (BaseError.isErrorName(error, ConflictError.CLASS_NAME)) {
+				throw error;
+			}
 			throw new GeneralError(
 				ScyllaDBTableConnector.CLASS_NAME,
 				"removeFailed",
@@ -517,6 +643,9 @@ export class ScyllaDBTableConnector<T = unknown>
 				error
 			);
 		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 			await this.closeConnection(connection);
 		}
 	}
@@ -929,5 +1058,16 @@ export class ScyllaDBTableConnector<T = unknown>
 		}
 
 		return fields.join(", ");
+	}
+
+	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param partitionKey The resolved partition key.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private buildOptimisticMutexKey(partitionKey: string | undefined, id: string): string {
+		return `${ScyllaDBTableConnector.CLASS_NAME}:optimistic:${this._config.keyspace}:${this._fullTableName}:${partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE}:${id}`;
 	}
 }

@@ -93,6 +93,18 @@ export abstract class AbstractScyllaDBConnector<T> {
 	protected readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	protected readonly _versionKey?: string;
+
+	/**
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
+	 * @internal
+	 */
+	protected readonly _mutexTimeoutMs?: number;
+
+	/**
 	 * Cached persistent client (keyspace-scoped). Reused across all operations on this
 	 * connector instance so the expensive cassandra-driver `connect()` only runs once.
 	 * Closed by `closePersistentClient()` which callers (e.g. `teardown()`) must invoke.
@@ -146,6 +158,8 @@ export abstract class AbstractScyllaDBConnector<T> {
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 
 		this._config = options.config;
 		this._fullTableName = options.config.tableName;
