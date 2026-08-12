@@ -41,7 +41,7 @@ export interface IMySqlEntityStorageConnectorConfig {
 	pool?: {
 		/**
 		 * Maximum number of connections in pool.
-		 * @default 10
+		 * @default 20
 		 */
 		connectionLimit?: number;
 

@@ -38,6 +38,7 @@ import {
 import {
 	ConnectionHelper,
 	EntityStorageHelper,
+	IndexHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -352,7 +353,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 						prop.type === EntitySchemaPropertyType.String &&
 						prop.format !== EntitySchemaPropertyFormat.Uuid;
 					const indexCol = needsPrefix ? `\`${columnName}\`(255)` : `\`${columnName}\``;
-					const indexName = `idx_${this._config.tableName}_${columnName}`;
+					const indexName = IndexHelper.generateName(this._config.tableName, columnName);
 					const [indexRows] = await pool.query(
 						"SELECT COUNT(1) AS indexExists FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND index_name = ?",
 						[this._config.database, this._config.tableName, indexName]
@@ -1281,7 +1282,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 			user: this._config.user,
 			password: this._config.password,
 
-			connectionLimit: this._config.pool?.connectionLimit,
+			connectionLimit: this._config.pool?.connectionLimit ?? 20,
 			maxIdle: this._config.pool?.maxIdle,
 			idleTimeout: this._config.pool?.idleTimeout,
 			enableKeepAlive: this._config.pool?.enableKeepAlive,

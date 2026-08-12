@@ -17,6 +17,18 @@ class TestType {
 	public value1!: string;
 }
 
+@entity()
+class LongNameTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", isSecondary: true })
+	public dateCreatedWithLongerNameForIndex!: string;
+
+	@property({ type: "string", isSecondary: true })
+	public dateModifiedWithLongerNameForIndex!: string;
+}
+
 describe("DynamoDbEntityStorageConnector - constructor and health", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
@@ -206,6 +218,31 @@ describe("DynamoDbEntityStorageConnector - constructor and health", () => {
 			.fn()
 			.mockImplementation(() => ({ node: "node", tenant: "tenant", user: "user" }));
 
+		await connector.teardown();
+	});
+});
+
+describe("DynamoDbEntityStorageConnector - long identifier bootstrap", () => {
+	beforeAll(() => {
+		EntitySchemaFactory.register(nameof<LongNameTestType>(), () =>
+			EntitySchemaHelper.getSchema(LongNameTestType)
+		);
+
+		ContextIdStore.getContextIds = vi
+			.fn()
+			.mockImplementation(() => ({ node: "node", tenant: "tenant", user: "user" }));
+	});
+
+	test("can bootstrap with a long identifier name", async () => {
+		const connector = new DynamoDbEntityStorageConnector<LongNameTestType>({
+			entitySchema: nameof<LongNameTestType>(),
+			config: {
+				...TEST_DYNAMODB_CONFIG,
+				tableName: "long-org-prefix-entity-storage-record-type-with-long-name"
+			}
+		});
+		const bootstrapped = await connector.bootstrap();
+		expect(bootstrapped).toBe(true);
 		await connector.teardown();
 	});
 });

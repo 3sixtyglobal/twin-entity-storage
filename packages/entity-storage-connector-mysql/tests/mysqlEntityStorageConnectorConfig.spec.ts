@@ -187,3 +187,37 @@ describe("MySqlEntityStorageConnector - constructor and health", () => {
 		await connector.stop?.();
 	});
 });
+
+@entity()
+class LongNameTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", isSecondary: true })
+	public dateCreatedWithLongerNameForIndex!: string;
+
+	@property({ type: "string", isSecondary: true })
+	public dateModifiedWithLongerNameForIndex!: string;
+}
+
+describe("MySqlEntityStorageConnector - long identifier bootstrap", () => {
+	beforeAll(() => {
+		EntitySchemaFactory.register(nameof<LongNameTestType>(), () =>
+			EntitySchemaHelper.getSchema(LongNameTestType)
+		);
+	});
+
+	test("can bootstrap with a long identifier name", async () => {
+		const connector = new MySqlEntityStorageConnector<LongNameTestType>({
+			entitySchema: nameof<LongNameTestType>(),
+			config: {
+				...TEST_MYSQL_CONFIG,
+				tableName: "long-org-prefix-entity-storage-record-type-with-long-name"
+			}
+		});
+		const bootstrapped = await connector.bootstrap();
+		expect(bootstrapped).toBe(true);
+		await connector.teardown();
+		await connector.stop?.();
+	});
+});

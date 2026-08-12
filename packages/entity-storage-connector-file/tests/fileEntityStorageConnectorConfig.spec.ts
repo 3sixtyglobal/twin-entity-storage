@@ -17,6 +17,18 @@ class TestType {
 	public value1!: string;
 }
 
+@entity()
+class LongNameTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", isSecondary: true })
+	public dateCreatedWithLongerNameForIndex!: string;
+
+	@property({ type: "string", isSecondary: true })
+	public dateModifiedWithLongerNameForIndex!: string;
+}
+
 describe("FileEntityStorageConnector - constructor, bootstrap, and health", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
@@ -166,6 +178,28 @@ describe("FileEntityStorageConnector - constructor, bootstrap, and health", () =
 		expect(result).toHaveLength(1);
 		expect(result[0].status).toEqual(HealthStatus.Error);
 		expect(result[0].description).toEqual("healthDescription");
+		await connector.teardown?.();
+	});
+});
+
+describe("FileEntityStorageConnector - long identifier bootstrap", () => {
+	beforeAll(() => {
+		EntitySchemaFactory.register(nameof<LongNameTestType>(), () =>
+			EntitySchemaHelper.getSchema(LongNameTestType)
+		);
+	});
+
+	afterAll(async () => {
+		await rm("./.tmp/long-identifier-test/", { recursive: true, force: true });
+	});
+
+	test("can bootstrap with a long identifier name", async () => {
+		const connector = new FileEntityStorageConnector<LongNameTestType>({
+			entitySchema: nameof<LongNameTestType>(),
+			config: { directory: "./.tmp/long-identifier-test/" }
+		});
+		const bootstrapped = await connector.bootstrap?.();
+		expect(bootstrapped).toBe(true);
 		await connector.teardown?.();
 	});
 });

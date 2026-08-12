@@ -1,0 +1,49 @@
+// Copyright 2024 IOTA Stiftung.
+// SPDX-License-Identifier: Apache-2.0.
+import { IndexHelper } from "../../src/helpers/indexHelper.js";
+
+describe("IndexHelper.generateName", () => {
+	test("output length is within the 63-character limit using the default", () => {
+		const name = IndexHelper.generateName("some_table", "someColumn");
+		expect(name.length).toBeLessThanOrEqual(IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH);
+		expect(IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH).toBe(63);
+	});
+
+	test("respects a custom maxIdentifierLength", () => {
+		const name = IndexHelper.generateName("some_table", "someColumn", 64);
+		expect(name.length).toBeLessThanOrEqual(64);
+	});
+
+	test("output always starts with idx_", () => {
+		const name = IndexHelper.generateName("t", "c");
+		expect(name.startsWith("idx_")).toBe(true);
+	});
+
+	test("is deterministic same inputs always produce the same name", () => {
+		const a = IndexHelper.generateName("my_table", "my_column");
+		const b = IndexHelper.generateName("my_table", "my_column");
+		expect(a).toBe(b);
+	});
+
+	test("different inputs produce different names", () => {
+		const a = IndexHelper.generateName("my_table", "col_a");
+		const b = IndexHelper.generateName("my_table", "col_b");
+		expect(a).not.toBe(b);
+	});
+
+	test("long table prefix + long table name + long column stays within limits", () => {
+		const name = IndexHelper.generateName(
+			"aaaaaaaaaaaaaaaaaa-auditable-item-graph-vertex",
+			"dateCreated"
+		);
+		expect(name.length).toBeLessThanOrEqual(63);
+		expect(name.length).toBeLessThanOrEqual(64);
+	});
+
+	test("extremely long inputs still produce a bounded name", () => {
+		const table = "a".repeat(200);
+		const column = "b".repeat(200);
+		const name = IndexHelper.generateName(table, column);
+		expect(name.length).toBeLessThanOrEqual(63);
+	});
+});

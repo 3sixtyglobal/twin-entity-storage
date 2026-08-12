@@ -4,6 +4,7 @@ export * from "./factories/entityStorageConnectorFactory.js";
 export * from "./factories/schemaMigrationFactory.js";
 export * from "./helpers/connectionHelper.js";
 export * from "./helpers/entityStorageHelper.js";
+export * from "./helpers/indexHelper.js";
 export * from "./helpers/migrationHelper.js";
 export * from "./models/api/IEntityStorageCountRequest.js";
 export * from "./models/api/IEntityStorageCountResponse.js";

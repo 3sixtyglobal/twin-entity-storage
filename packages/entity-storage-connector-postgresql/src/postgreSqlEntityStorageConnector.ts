@@ -37,6 +37,7 @@ import {
 import {
 	ConnectionHelper,
 	EntityStorageHelper,
+	IndexHelper,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
 } from "@twin.org/entity-storage-models";
@@ -285,7 +286,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 					prop.type !== EntitySchemaPropertyType.Array
 				) {
 					const columnName = String(prop.property);
-					const indexName = `idx_${this._config.tableName}_${columnName}`;
+					const indexName = IndexHelper.generateName(this._config.tableName, columnName);
 					await dbConnection.unsafe(
 						`CREATE INDEX IF NOT EXISTS "${indexName}" ON "${this._config.tableName}" ("${columnName}")`
 					);

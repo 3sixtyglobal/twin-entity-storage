@@ -1,0 +1,43 @@
+// Copyright 2024 IOTA Stiftung.
+// SPDX-License-Identifier: Apache-2.0.
+import { Converter } from "@twin.org/core";
+import { Blake2b } from "@twin.org/crypto";
+
+/**
+ * Helper for generating bounded database index names.
+ */
+export class IndexHelper {
+	/**
+	 * Default maximum identifier length.
+	 */
+	public static readonly DEFAULT_MAX_IDENTIFIER_LENGTH: number = 63;
+
+	/**
+	 * Fixed prefix applied to every generated index name.
+	 * @internal
+	 */
+	private static readonly _PREFIX: string = "idx_";
+
+	/**
+	 * Generate a deterministic, length-bounded index name from the table and column names.
+	 * The name is derived from a blake2b-256 hash of the combined input so it always fits
+	 * within the given identifier length limit regardless of table prefix or column name length.
+	 * Index names are scoped per table in both MySQL and PostgreSQL, so hash collisions
+	 * across different tables are not a concern.
+	 * @param tableName The fully-qualified table name, including any deployment prefix.
+	 * @param columnName The column being indexed.
+	 * @param maxIdentifierLength The maximum identifier length allowed by the target database.
+	 * @returns A deterministic index name no longer than maxIdentifierLength characters.
+	 */
+	public static generateName(
+		tableName: string,
+		columnName: string,
+		maxIdentifierLength: number = IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH
+	): string {
+		const input = `${tableName}_${columnName}`;
+		const hash = Blake2b.sum256(Converter.utf8ToBytes(input));
+		const hex = Converter.bytesToHex(hash);
+		const maxHashChars = maxIdentifierLength - IndexHelper._PREFIX.length;
+		return `${IndexHelper._PREFIX}${hex.slice(0, maxHashChars)}`;
+	}
+}
