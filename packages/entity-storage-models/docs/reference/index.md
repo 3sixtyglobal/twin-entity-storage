@@ -4,6 +4,7 @@
 
 - [ConnectionHelper](classes/ConnectionHelper.md)
 - [EntityStorageHelper](classes/EntityStorageHelper.md)
+- [IndexHelper](classes/IndexHelper.md)
 - [MigrationHelper](classes/MigrationHelper.md)
 
 ## Interfaces

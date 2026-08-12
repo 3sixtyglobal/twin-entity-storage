@@ -67,7 +67,7 @@ Maximum number of connections in pool.
 ##### Default
 
 ```ts
-10
+20
 ```
 
 #### maxIdle?
