@@ -289,6 +289,24 @@ The total count of entities in the storage.
 
 ***
 
+### connectorVersion() {#connectorversion}
+
+> **connectorVersion**(): `number`
+
+Get the current version of this connector's implementation.
+Increment this when the connector's bootstrap logic changes in a way that
+requires re-running bootstrap on existing tables (e.g. new index definitions).
+SchemaVersionService detects a mismatch and calls bootstrap() again on start-up,
+so the method must be idempotent (CREATE INDEX IF NOT EXISTS, ensureIndex, etc.).
+
+#### Returns
+
+`number`
+
+The connector implementation version.
+
+***
+
 ### getPartitionContextIds() {#getpartitioncontextids}
 
 > **getPartitionContextIds**(): `Promise`\<`IContextIds`[] \| `undefined`\>

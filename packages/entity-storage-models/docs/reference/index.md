@@ -2,6 +2,7 @@
 
 ## Classes
 
+- [ConnectionHelper](classes/ConnectionHelper.md)
 - [EntityStorageHelper](classes/EntityStorageHelper.md)
 - [MigrationHelper](classes/MigrationHelper.md)
 

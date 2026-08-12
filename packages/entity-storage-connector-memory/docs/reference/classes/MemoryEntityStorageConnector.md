@@ -429,6 +429,24 @@ All stored entities with partition keys removed.
 
 ***
 
+### connectorVersion() {#connectorversion}
+
+> **connectorVersion**(): `number`
+
+Get the connector implementation version.
+
+#### Returns
+
+`number`
+
+The connector implementation version.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.connectorVersion`
+
+***
+
 ### getPartitionContextIds() {#getpartitioncontextids}
 
 > **getPartitionContextIds**(): `Promise`\<`IContextIds`[] \| `undefined`\>

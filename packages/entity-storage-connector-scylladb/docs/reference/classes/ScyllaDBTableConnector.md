@@ -77,6 +77,36 @@ The schema for the entities.
 
 ***
 
+### stop() {#stop}
+
+> **stop**(`nodeLoggingComponentType?`): `Promise`\<`void`\>
+
+The component needs to be stopped when the node is closed.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.stop`
+
+#### Inherited from
+
+`AbstractScyllaDBConnector.stop`
+
+***
+
 ### get() {#get}
 
 > **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>
@@ -457,6 +487,24 @@ True if the teardown process was successful.
 #### Implementation of
 
 `IEntityStorageMigrationConnector.teardown`
+
+***
+
+### connectorVersion() {#connectorversion}
+
+> **connectorVersion**(): `number`
+
+Get the connector implementation version.
+
+#### Returns
+
+`number`
+
+The connector implementation version.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.connectorVersion`
 
 ***
 

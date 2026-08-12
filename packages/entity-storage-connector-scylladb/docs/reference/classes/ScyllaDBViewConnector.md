@@ -76,6 +76,36 @@ The schema for the entities.
 
 ***
 
+### stop() {#stop}
+
+> **stop**(`nodeLoggingComponentType?`): `Promise`\<`void`\>
+
+The component needs to be stopped when the node is closed.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageConnector.stop`
+
+#### Inherited from
+
+`AbstractScyllaDBConnector.stop`
+
+***
+
 ### get() {#get}
 
 > **get**(`id`, `secondaryIndex?`, `conditions?`): `Promise`\<`T` \| `undefined`\>

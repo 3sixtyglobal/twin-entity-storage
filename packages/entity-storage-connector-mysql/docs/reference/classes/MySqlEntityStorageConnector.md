@@ -446,6 +446,24 @@ An array of context id objects, one per unique partition.
 
 ***
 
+### connectorVersion() {#connectorversion}
+
+> **connectorVersion**(): `number`
+
+Get the connector implementation version.
+
+#### Returns
+
+`number`
+
+The connector implementation version.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.connectorVersion`
+
+***
+
 ### createTargetConnector() {#createtargetconnector}
 
 > **createTargetConnector**\<`U`\>(`newEntitySchema`): `Promise`\<`IEntityStorageConnector`\<`U`\>\>

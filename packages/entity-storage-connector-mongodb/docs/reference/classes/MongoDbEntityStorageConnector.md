@@ -69,9 +69,9 @@ A promise that resolves to a boolean indicating success.
 
 ***
 
-### stop()? {#stop}
+### stop() {#stop}
 
-> `optional` **stop**(`nodeLoggingComponentType?`): `Promise`\<`void`\>
+> **stop**(`nodeLoggingComponentType?`): `Promise`\<`void`\>
 
 The component needs to be stopped when the node is closed.
 
@@ -443,6 +443,24 @@ An array of context id objects, one per unique partition.
 #### Implementation of
 
 `IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### connectorVersion() {#connectorversion}
+
+> **connectorVersion**(): `number`
+
+Get the connector implementation version.
+
+#### Returns
+
+`number`
+
+The connector implementation version.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.connectorVersion`
 
 ***
 

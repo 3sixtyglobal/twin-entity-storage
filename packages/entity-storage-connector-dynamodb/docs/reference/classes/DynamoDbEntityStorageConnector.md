@@ -61,6 +61,30 @@ The class name of the component.
 
 ***
 
+### stop() {#stop}
+
+> **stop**(`nodeLoggingComponentType?`): `Promise`\<`void`\>
+
+Stop the component.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.stop`
+
+***
+
 ### health() {#health}
 
 > **health**(): `Promise`\<`IHealth`[]\>
@@ -413,6 +437,24 @@ The list of unique context ids.
 #### Implementation of
 
 `IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### connectorVersion() {#connectorversion}
+
+> **connectorVersion**(): `number`
+
+Get the connector implementation version.
+
+#### Returns
+
+`number`
+
+The connector implementation version.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.connectorVersion`
 
 ***
 

@@ -52,6 +52,50 @@ The name of the collection to be used.
 
 ***
 
+### pool? {#pool}
+
+> `optional` **pool?**: `object`
+
+Optional connection pool configuration.
+
+#### maxPoolSize?
+
+> `optional` **maxPoolSize?**: `number`
+
+Maximum number of connections in the pool.
+
+##### Default
+
+```ts
+100
+```
+
+#### minPoolSize?
+
+> `optional` **minPoolSize?**: `number`
+
+Minimum number of connections to maintain in the pool.
+
+##### Default
+
+```ts
+0
+```
+
+#### maxIdleTimeMs?
+
+> `optional` **maxIdleTimeMs?**: `number`
+
+Milliseconds a connection can remain idle before being removed.
+
+#### waitQueueTimeoutMs?
+
+> `optional` **waitQueueTimeoutMs?**: `number`
+
+Milliseconds to wait for a connection before throwing.
+
+***
+
 ### mutexTimeoutMs? {#mutextimeoutms}
 
 > `optional` **mutexTimeoutMs?**: `number`
