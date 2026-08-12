@@ -33,6 +33,7 @@ import {
 	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
+	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
@@ -48,6 +49,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
+	ConnectionHelper,
 	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
@@ -142,16 +144,10 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	private readonly _mutexTimeoutMs?: number;
 
 	/**
-	 * The Cosmos DB client.
+	 * Unique identifier for this connector instance, used to track references in SharedStore.
 	 * @internal
 	 */
-	private readonly _client: CosmosClient;
-
-	/**
-	 * Container user for the data storage.
-	 * @internal
-	 */
-	private readonly _container: Container;
+	private readonly _instanceId: string;
 
 	/**
 	 * Create a new instance of CosmosDbEntityStorageConnector.
@@ -199,18 +195,22 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 
 		this._config = options.config;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
+		this._instanceId = RandomHelper.generateUuidV7("compact");
+	}
 
-		this._client = new CosmosClient({
-			endpoint: this._config.endpoint,
-			key: this._config.key,
-			connectionPolicy: {
-				enableEndpointDiscovery: !this._config.disableEndpointDiscovery
-			}
-		});
-
-		this._container = this._client
-			.database(this._config.databaseId)
-			.container(this._config.containerId);
+	/**
+	 * The component needs to be stopped when the node is closed.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns Nothing.
+	 */
+	public async stop(nodeLoggingComponentType?: string): Promise<void> {
+		await ConnectionHelper.closeClient<CosmosClient>(
+			"cosmosDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async client => client.dispose()
+		);
 	}
 
 	/**
@@ -220,6 +220,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	 */
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+		const client = await this.getClient();
 
 		// Create the database if it does not exist
 		try {
@@ -246,7 +247,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 					}
 				});
 
-				await this._client.databases.create({
+				await client.databases.create({
 					id: this._config.databaseId
 				});
 
@@ -291,7 +292,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 					}
 				});
 
-				await this._client.database(this._config.databaseId).containers.create(
+				await client.database(this._config.databaseId).containers.create(
 					{
 						id: this._config.containerId,
 						partitionKey: {
@@ -336,10 +337,8 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	 */
 	public async health(): Promise<IHealth[]> {
 		try {
-			await this._client
-				.database(this._config.databaseId)
-				.container(this._config.containerId)
-				.read();
+			const container = await this.getContainer();
+			await container.read();
 			return [
 				{
 					source: CosmosDbEntityStorageConnector.CLASS_NAME,
@@ -390,9 +389,10 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
+			const container = await this.getContainer();
 			// No secondary index or conditions
 			if (Is.empty(secondaryIndex) && !Is.arrayValue(conditions)) {
-				const { resource: item } = await this._container
+				const { resource: item } = await container
 					.item(id, partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE)
 					.read<ItemDefinition>();
 				if (Is.empty(item)) {
@@ -436,7 +436,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 				parameters: conditionValues
 			};
 
-			const { resources: items } = await this._container.items.query(query).fetchAll();
+			const { resources: items } = await container.items.query(query).fetchAll();
 
 			if (items.length === 1) {
 				return this.itemToEntity(items[0]);
@@ -500,10 +500,11 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		}
 
 		try {
+			const container = await this.getContainer();
 			let itemEtag: string | undefined;
 
 			if (Is.stringValue(this._versionKey) || Is.arrayValue(conditions)) {
-				const item = this._container.item(
+				const item = container.item(
 					id,
 					partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
 				);
@@ -539,7 +540,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 				}
 			}
 
-			await this._container.items.upsert(
+			await container.items.upsert(
 				{
 					id,
 					[CosmosDbEntityStorageConnector._PARTITION_KEY]:
@@ -607,6 +608,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		);
 
 		try {
+			const container = await this.getContainer();
 			const pk = partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE;
 			const chunkSize = CosmosDbEntityStorageConnector._BATCH_CHUNK_SIZE;
 			const concurrency = CosmosDbEntityStorageConnector._WRITE_CONCURRENCY;
@@ -618,7 +620,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 					const chunk = window.slice(j, j + chunkSize);
 					sends.push(
 						(async () => {
-							await this._container.items.executeBulkOperations(
+							await container.items.executeBulkOperations(
 								chunk.map(
 									prepared =>
 										({
@@ -657,10 +659,11 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		const pk = partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE;
 
 		try {
+			const container = await this.getContainer();
 			let continuationToken: string | undefined;
 			do {
 				const feedOptions: FeedOptions = { maxItemCount: 100, continuationToken };
-				const { resources, continuationToken: nextToken } = await this._container.items
+				const { resources, continuationToken: nextToken } = await container.items
 					.query<{ id: string }>(
 						{
 							query: `SELECT c.id FROM c WHERE c.${CosmosDbEntityStorageConnector._PARTITION_KEY} = @pk`,
@@ -678,7 +681,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 						id: r.id,
 						partitionKey: pk
 					}));
-					await this._container.items.executeBulkOperations(operations);
+					await container.items.executeBulkOperations(operations);
 				}
 			} while (Is.stringValue(continuationToken));
 		} catch (err) {
@@ -718,7 +721,8 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		}
 
 		try {
-			const item = this._container.item(
+			const container = await this.getContainer();
+			const item = container.item(
 				id,
 				partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
 			);
@@ -775,13 +779,14 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
+			const container = await this.getContainer();
 			const operations: OperationInput[] = ids.map(id => ({
 				operationType: BulkOperationType.Delete,
 				id,
 				partitionKey: partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
 			}));
 
-			await this._container.items.executeBulkOperations(operations);
+			await container.items.executeBulkOperations(operations);
 		} catch (err) {
 			throw new GeneralError(
 				CosmosDbEntityStorageConnector.CLASS_NAME,
@@ -809,8 +814,9 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		});
 
 		try {
+			const container = await this.getContainer();
 			if (await this.containerExists()) {
-				await this._container.delete();
+				await container.delete();
 				await this.waitForContainerNotExists();
 			}
 
@@ -885,6 +891,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		}
 
 		try {
+			const container = await this.getContainer();
 			const returnSize = limit ?? CosmosDbEntityStorageConnector._DEFAULT_LIMIT;
 
 			let orderByClause: string = "";
@@ -930,7 +937,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 			const startIndex = Coerce.number(cursor) ?? 0;
 			sql = `${baseQuery} ${orderByClause} OFFSET ${startIndex} LIMIT ${returnSize + 1}`;
 			const sortedQuerySpecs: SqlQuerySpec = { query: sql, parameters: queryParameters };
-			const sortedResponse = await this._container.items
+			const sortedResponse = await container.items
 				.query(sortedQuerySpecs, {
 					partitionKey: queryPartitionKey,
 					maxItemCount: returnSize + 1
@@ -962,6 +969,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
 		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 		try {
+			const container = await this.getContainer();
 			const contextIds = await ContextIdStore.getContextIds();
 			const partitionKey = ContextIdHelper.combinedContextKey(
 				contextIds,
@@ -990,7 +998,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 					)
 				]
 			};
-			const { resources } = await this._container.items.query(querySpec).fetchAll();
+			const { resources } = await container.items.query(querySpec).fetchAll();
 			return resources[0] ?? 0;
 		} catch (err) {
 			throw new GeneralError(
@@ -1012,7 +1020,8 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 			return undefined;
 		}
 		try {
-			const { resources: partitionIds } = await this._container.items
+			const container = await this.getContainer();
+			const { resources: partitionIds } = await container.items
 				.query<string>({
 					query: `SELECT DISTINCT VALUE c.${CosmosDbEntityStorageConnector._PARTITION_KEY} FROM c`
 				})
@@ -1143,7 +1152,9 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 			let continuationToken: string | undefined;
 			do {
 				const feedOptions: FeedOptions = { maxItemCount: batchSize, continuationToken };
-				const { resources, continuationToken: nextToken } = await sourceConnector._container.items
+				const { resources, continuationToken: nextToken } = await (
+					await sourceConnector.getContainer()
+				).items
 					.query<ItemDefinition & Resource>(
 						{
 							query: `SELECT * FROM c WHERE c.${CosmosDbEntityStorageConnector._PARTITION_KEY} = @partitionId`,
@@ -1170,7 +1181,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 							resourceBody: rest
 						})
 					);
-					await destConnector._container.items.executeBulkOperations(operations);
+					await (await destConnector.getContainer()).items.executeBulkOperations(operations);
 				}
 			} while (Is.stringValue(continuationToken));
 		}
@@ -1465,13 +1476,56 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Retrieve (or lazily create) the shared Cosmos DB client for this endpoint.
+	 * @returns The shared client.
+	 * @internal
+	 */
+	private async getClient(): Promise<CosmosClient> {
+		return ConnectionHelper.openClient<CosmosClient>(
+			"cosmosDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async () =>
+				new CosmosClient({
+					endpoint: this._config.endpoint,
+					key: this._config.key,
+					connectionPolicy: {
+						enableEndpointDiscovery: !this._config.disableEndpointDiscovery
+					}
+				})
+		);
+	}
+
+	/**
+	 * Get the container for this connector's configured database and container.
+	 * @returns The container reference.
+	 * @internal
+	 */
+	private async getContainer(): Promise<Container> {
+		return (await this.getClient())
+			.database(this._config.databaseId)
+			.container(this._config.containerId);
+	}
+
+	/**
+	 * Build a stable cache key for the shared client based on connection parameters.
+	 * @returns The client cache key.
+	 * @internal
+	 */
+	private createClientId(): string {
+		return `${this._config.endpoint}|${this._config.databaseId}|${this._config.containerId}`;
+	}
+
+	/**
 	 * Check if the database exists.
 	 * @returns True if the database exists, false otherwise.
 	 * @internal
 	 */
 	private async databaseExists(): Promise<boolean> {
 		try {
-			const { resources: databaseList } = await this._client.databases.readAll().fetchAll();
+			const client = await this.getClient();
+			const { resources: databaseList } = await client.databases.readAll().fetchAll();
 
 			return databaseList.some((db: Resource) => db.id === this._config.databaseId);
 		} catch {
@@ -1539,7 +1593,8 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	 */
 	private async containerExists(): Promise<boolean> {
 		try {
-			const { resources: containers } = await this._client
+			const client = await this.getClient();
+			const { resources: containers } = await client
 				.database(this._config.databaseId)
 				.containers.readAll()
 				.fetchAll();

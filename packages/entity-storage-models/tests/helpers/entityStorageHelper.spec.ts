@@ -12,7 +12,7 @@ import {
 } from "@twin.org/entity";
 import type { EntityCondition, IComparator } from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
-import { EntityStorageHelper } from "../src/helpers/entityStorageHelper.js";
+import { EntityStorageHelper } from "../../src/helpers/entityStorageHelper.js";
 
 @entity()
 class ValidationTestType {

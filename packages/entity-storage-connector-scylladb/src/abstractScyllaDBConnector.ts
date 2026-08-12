@@ -8,11 +8,14 @@ import {
 	Guards,
 	Is,
 	type IValidationFailure,
+	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
+	EntitySchemaPropertyFormat,
+	EntitySchemaPropertyType,
 	EntitySchemaHelper,
 	LogicalOperator,
 	SortDirection,
@@ -22,7 +25,7 @@ import {
 	type IEntitySchema,
 	type IEntitySchemaProperty
 } from "@twin.org/entity";
-import { EntityStorageHelper } from "@twin.org/entity-storage-models";
+import { ConnectionHelper, EntityStorageHelper } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import { types as CassandraTypes, Client } from "cassandra-driver";
@@ -105,12 +108,16 @@ export abstract class AbstractScyllaDBConnector<T> {
 	protected readonly _mutexTimeoutMs?: number;
 
 	/**
-	 * Cached persistent client (keyspace-scoped). Reused across all operations on this
-	 * connector instance so the expensive cassandra-driver `connect()` only runs once.
-	 * Closed by `closePersistentClient()` which callers (e.g. `teardown()`) must invoke.
+	 * Unique identifier for this connector instance, used to track references in SharedStore.
 	 * @internal
 	 */
-	private _persistentClient: Client | undefined;
+	private readonly _instanceId: string;
+
+	/**
+	 * Temporary connections opened with skipKeySpace=true, tracked for lifecycle management.
+	 * @internal
+	 */
+	private readonly _temporaryConnections: WeakSet<Client>;
 
 	/**
 	 * Create a new instance of AbstractScyllaDBConnector.
@@ -153,6 +160,22 @@ export abstract class AbstractScyllaDBConnector<T> {
 			options.config.keyspace
 		);
 
+		if (!Is.empty(options.config.pool?.coreConnectionsPerHost)) {
+			Guards.integer(
+				AbstractScyllaDBConnector.CLASS_NAME,
+				nameof(options.config.pool?.coreConnectionsPerHost),
+				options.config.pool?.coreConnectionsPerHost
+			);
+		}
+
+		if (!Is.empty(options.config.pool?.maxRequestsPerConnection)) {
+			Guards.integer(
+				AbstractScyllaDBConnector.CLASS_NAME,
+				nameof(options.config.pool?.maxRequestsPerConnection),
+				options.config.pool?.maxRequestsPerConnection
+			);
+		}
+
 		this._logging = ComponentFactory.getIfExists(options.loggingComponentType);
 
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
@@ -163,6 +186,8 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 		this._config = options.config;
 		this._fullTableName = options.config.tableName;
+		this._instanceId = RandomHelper.generateUuidV7("compact");
+		this._temporaryConnections = new WeakSet();
 	}
 
 	/**
@@ -179,6 +204,15 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 */
 	public getSchema(): IEntitySchema {
 		return this._entitySchema as IEntitySchema;
+	}
+
+	/**
+	 * The component needs to be stopped when the node is closed.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns Nothing.
+	 */
+	public async stop(nodeLoggingComponentType?: string): Promise<void> {
+		await this.closePersistentClient();
 	}
 
 	/**
@@ -199,7 +233,6 @@ export abstract class AbstractScyllaDBConnector<T> {
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		let connection;
 		try {
 			const indexField = secondaryIndex ?? this._primaryKey?.property;
 
@@ -229,7 +262,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 				data: { sql }
 			});
 
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 
 			const result = await this.queryDB(connection, sql, conditionValues);
 
@@ -245,8 +278,6 @@ export abstract class AbstractScyllaDBConnector<T> {
 				},
 				error
 			);
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -279,8 +310,6 @@ export abstract class AbstractScyllaDBConnector<T> {
 		 */
 		cursor?: string;
 	}> {
-		let connection;
-
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
@@ -343,7 +372,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 				sql += ` ORDER BY ${orderClauses.join(", ")}`;
 			}
 
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 
 			sql += " ALLOW FILTERING";
 
@@ -385,8 +414,6 @@ export abstract class AbstractScyllaDBConnector<T> {
 				{ table: this.safeTableName(this._fullTableName) },
 				error
 			);
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -396,8 +423,6 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @returns The total count of entities in the storage.
 	 */
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
-		let connection;
-
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 		const { whereClause, params, noResults } = this.buildCqlConditions(conditions, partitionKey);
@@ -409,76 +434,56 @@ export abstract class AbstractScyllaDBConnector<T> {
 		try {
 			const sql = `SELECT COUNT(*) FROM "${this.safeTableName(this._fullTableName)}" WHERE ${whereClause} ALLOW FILTERING`;
 
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 			const result = await this.queryDB(connection, sql, params);
 			return Number(result.rows[0]?.get("count") ?? 0);
 		} catch (err) {
 			throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "countFailed", undefined, err);
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
 	/**
-	 * Open a new database connection.
-	 * @param skipKeySpace Don't include the keyspace in the connection.
-	 * @returns The new connection.
+	 * Open a keyspace-free connection for bootstrap operations such as keyspace creation.
+	 * @returns A temporary client not bound to any keyspace.
 	 * @internal
 	 */
-	protected async openConnection(skipKeySpace: boolean = false): Promise<Client> {
-		// Reuse the cached keyspace-scoped client when available (avoids repeated
-		// cassandra-driver cluster-discovery on every operation).
-		if (!skipKeySpace && this._persistentClient !== undefined) {
-			return this._persistentClient;
-		}
-
+	protected async openConnectionNoKeyspace(): Promise<Client> {
 		const client = new Client({
 			contactPoints: this._config.hosts,
 			localDataCenter: this._config.localDataCenter,
-			keyspace: skipKeySpace ? undefined : this._config.keyspace,
-			protocolOptions: {
-				port: this._config.port
-			}
+			protocolOptions: { port: this._config.port }
 		});
 		await client.connect();
-
-		if (!skipKeySpace) {
-			this._persistentClient = client;
-		}
-
+		this._temporaryConnections.add(client);
 		return client;
 	}
 
 	/**
-	 * Close database connection.
-	 * When `connection` is the cached persistent client it is kept alive so it
-	 * can be reused by future operations; call `closePersistentClient()` to
-	 * explicitly shut it down (e.g. from `teardown()`).
-	 * @param connection The connection to close.
+	 * Close a temporary connection opened via openConnectionNoKeyspace.
+	 * @param connection The temporary connection to shut down.
 	 * @returns Nothing.
 	 * @internal
 	 */
-	protected async closeConnection(connection?: Client): Promise<void> {
-		if (!connection) {
-			return;
+	protected async closeConnectionNoKeyspace(connection: Client): Promise<void> {
+		if (this._temporaryConnections.has(connection)) {
+			this._temporaryConnections.delete(connection);
+			return connection.shutdown();
 		}
-		if (connection === this._persistentClient) {
-			// Keep the persistent client alive for reuse.
-			return;
-		}
-		return connection.shutdown();
 	}
 
 	/**
-	 * Shut down and clear the persistent client. Call this from `teardown()`
-	 * implementations to release the underlying TCP connection.
+	 * Release this instance's reference to the shared client. When the last reference
+	 * is released the underlying TCP connection is shut down.
 	 * @internal
 	 */
 	protected async closePersistentClient(): Promise<void> {
-		if (this._persistentClient !== undefined) {
-			await this._persistentClient.shutdown();
-			this._persistentClient = undefined;
-		}
+		await ConnectionHelper.closeClient<Client>(
+			"scyllaDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async client => client.shutdown()
+		);
 	}
 
 	/**
@@ -625,16 +630,19 @@ export abstract class AbstractScyllaDBConnector<T> {
 	protected dbValueToProperty(value: unknown, fieldDescriptor: IEntitySchemaProperty<T>): unknown {
 		if (
 			Is.stringValue(fieldDescriptor.itemTypeRef) &&
-			(fieldDescriptor.type === "object" || fieldDescriptor.type === "array")
+			(fieldDescriptor.type === EntitySchemaPropertyType.Object ||
+				fieldDescriptor.type === EntitySchemaPropertyType.Array)
 		) {
 			const objSchema = EntitySchemaFactory.get(fieldDescriptor.itemTypeRef);
 			return this.convertRowToObject(objSchema.properties, value as { [id: string]: unknown });
 		} else if (
 			// If the field is json format
-			(fieldDescriptor.type === "string" && fieldDescriptor.format === "json") ||
+			(fieldDescriptor.type === EntitySchemaPropertyType.String &&
+				fieldDescriptor.format === EntitySchemaPropertyFormat.Json) ||
 			// Or its and object or array without a type ref
 			(!Is.stringValue(fieldDescriptor.itemTypeRef) &&
-				(fieldDescriptor.type === "object" || fieldDescriptor.type === "array"))
+				(fieldDescriptor.type === EntitySchemaPropertyType.Object ||
+					fieldDescriptor.type === EntitySchemaPropertyType.Array))
 		) {
 			try {
 				return JSON.parse(value as string);
@@ -645,12 +653,13 @@ export abstract class AbstractScyllaDBConnector<T> {
 				});
 			}
 		} else if (
-			fieldDescriptor.type === "string" &&
-			(fieldDescriptor.format === "date-time" || fieldDescriptor.format === "date") &&
+			fieldDescriptor.type === EntitySchemaPropertyType.String &&
+			(fieldDescriptor.format === EntitySchemaPropertyFormat.DateTime ||
+				fieldDescriptor.format === EntitySchemaPropertyFormat.Date) &&
 			Is.date(value)
 		) {
 			return Coerce.string(value);
-		} else if (fieldDescriptor.type === "object") {
+		} else if (fieldDescriptor.type === EntitySchemaPropertyType.Object) {
 			if (
 				value === "null" ||
 				value === "undefined" ||
@@ -660,7 +669,7 @@ export abstract class AbstractScyllaDBConnector<T> {
 			) {
 				return null;
 			}
-		} else if (fieldDescriptor.format === "uuid") {
+		} else if (fieldDescriptor.format === EntitySchemaPropertyFormat.Uuid) {
 			return (value as CassandraTypes.Uuid).toString();
 		}
 
@@ -799,6 +808,46 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 */
 	protected safeTableName(name: string): string {
 		return name.replace(/[^\dA-Za-z]/g, "");
+	}
+
+	/**
+	 * Retrieve (or lazily create) the shared ScyllaDB client for this endpoint.
+	 * @returns The shared client.
+	 * @internal
+	 */
+	protected async getClient(): Promise<Client> {
+		return ConnectionHelper.openClient<Client>(
+			"scyllaDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async () => {
+				const client = new Client({
+					contactPoints: this._config.hosts,
+					localDataCenter: this._config.localDataCenter,
+					keyspace: this._config.keyspace,
+					protocolOptions: { port: this._config.port },
+					pooling: {
+						coreConnectionsPerHost: {
+							[CassandraTypes.distance.local]: this._config.pool?.coreConnectionsPerHost ?? 1,
+							[CassandraTypes.distance.remote]: 1
+						},
+						maxRequestsPerConnection: this._config.pool?.maxRequestsPerConnection
+					}
+				});
+				await client.connect();
+				return client;
+			}
+		);
+	}
+
+	/**
+	 * Build a stable cache key for the shared client based on connection parameters.
+	 * @returns The client cache key.
+	 * @internal
+	 */
+	private createClientId(): string {
+		return `${[...this._config.hosts].sort().join(",")}|${this._config.localDataCenter}|${this._config.keyspace}`;
 	}
 
 	/**

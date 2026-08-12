@@ -26,6 +26,7 @@ import {
 	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
+	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
@@ -40,6 +41,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
+	ConnectionHelper,
 	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
@@ -124,10 +126,16 @@ export class FirestoreEntityStorageConnector<T = unknown>
 	private readonly _mutexTimeoutMs?: number;
 
 	/**
-	 * The Firestore client.
+	 * The instance id for this connector.
 	 * @internal
 	 */
-	private readonly _firestoreClient: Firestore;
+	private readonly _instanceId: string;
+
+	/**
+	 * The parsed credentials for constructing the Firestore client.
+	 * @internal
+	 */
+	private readonly _credentials?: JWTInput;
 
 	/**
 	 * Create a new instance of FirestoreEntityStorageConnector.
@@ -175,22 +183,8 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
 		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
-
-		const firestoreOptions: Settings = {
-			projectId: this._config.projectId,
-			databaseId: this._config.databaseId,
-			collectionName: this._config.collectionName,
-			maxIdleChannels: this._config.settings?.maxIdleChannels,
-			timeout: this._config.settings?.timeout,
-			credentials
-		};
-
-		if (Is.stringValue(this._config.endpoint)) {
-			firestoreOptions.host = this._config.endpoint;
-			firestoreOptions.ssl = false;
-		}
-
-		this._firestoreClient = new Firestore(firestoreOptions);
+		this._credentials = credentials;
+		this._instanceId = RandomHelper.generateUuidV7("compact");
 	}
 
 	/**
@@ -202,12 +196,27 @@ export class FirestoreEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Stop the component.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 */
+	public async stop(nodeLoggingComponentType?: string): Promise<void> {
+		await ConnectionHelper.closeClient<Firestore>(
+			"firestoreClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async client => client.terminate()
+		);
+	}
+
+	/**
 	 * Returns the health status of the component.
 	 * @returns The health status of the component.
 	 */
 	public async health(): Promise<IHealth[]> {
 		try {
-			await this._firestoreClient.listCollections();
+			const client = await this.getClient();
+			await client.listCollections();
 			return [
 				{
 					source: FirestoreEntityStorageConnector.CLASS_NAME,
@@ -248,6 +257,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
+			const client = await this.getClient();
 			await nodeLogging?.log({
 				level: "info",
 				source: FirestoreEntityStorageConnector.CLASS_NAME,
@@ -261,7 +271,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 
 			// Firestore doesn't require explicit collection creation
 			// Perform a small write operation to ensure connectivity
-			const testDoc = this._firestoreClient.collection(this._config.collectionName).doc("test");
+			const testDoc = client.collection(this._config.collectionName).doc("test");
 			await testDoc.set({ test: true });
 			await testDoc.delete();
 
@@ -316,7 +326,8 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		);
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 
 			if (!Is.arrayValue(conditions)) {
 				const docRef = collection.doc(id);
@@ -398,14 +409,15 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		}
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 
 			const docRef = collection.doc(id);
 
 			if (!Is.arrayValue(conditions) && !Is.stringValue(this._versionKey)) {
 				await docRef.set(prepared);
 			} else {
-				await this._firestoreClient.runTransaction(async transaction => {
+				await client.runTransaction(async transaction => {
 					conflictError = undefined;
 					const docSnapshot = await transaction.get(docRef);
 
@@ -497,11 +509,12 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		);
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 			const chunkSize = FirestoreEntityStorageConnector._BATCH_CHUNK_SIZE;
 			for (let i = 0; i < preparedEntities.length; i += chunkSize) {
 				const chunk = preparedEntities.slice(i, i + chunkSize);
-				const batch = this._firestoreClient.batch();
+				const batch = client.batch();
 				for (const entity of chunk) {
 					const id = entity[this._primaryKey.property] as string;
 					const docRef = collection.doc(id);
@@ -532,12 +545,13 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		);
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 			const snapshot = await collection.get();
 			const chunkSize = 500;
 			for (let i = 0; i < snapshot.docs.length; i += chunkSize) {
 				const chunk = snapshot.docs.slice(i, i + chunkSize);
-				const batch = this._firestoreClient.batch();
+				const batch = client.batch();
 				for (const doc of chunk) {
 					batch.delete(doc.ref);
 				}
@@ -586,13 +600,14 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		}
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 			const docRef = collection.doc(id);
 
 			if (!Is.arrayValue(conditions)) {
 				await docRef.delete();
 			} else {
-				await this._firestoreClient.runTransaction(async transaction => {
+				await client.runTransaction(async transaction => {
 					conflictError = undefined;
 					const docSnapshot = await transaction.get(docRef);
 
@@ -652,11 +667,12 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		);
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 			const chunkSize = 500;
 			for (let i = 0; i < ids.length; i += chunkSize) {
 				const chunk = ids.slice(i, i + chunkSize);
-				const batch = this._firestoreClient.batch();
+				const batch = client.batch();
 				for (const id of chunk) {
 					const docRef = collection.doc(id);
 					batch.delete(docRef);
@@ -721,8 +737,9 @@ export class FirestoreEntityStorageConnector<T = unknown>
 			return undefined;
 		}
 		try {
+			const client = await this.getClient();
 			const prefix = `${this._config.collectionName}_`;
-			const collections = await this._firestoreClient.listCollections();
+			const collections = await client.listCollections();
 			const result: IContextIds[] = [];
 			for (const col of collections) {
 				if (col.id.startsWith(prefix)) {
@@ -883,7 +900,8 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		}
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 
 			// Firestore has no native substring search. When any condition needs in-memory
 			// filtering (string Includes / NotIncludes), fetch all matching docs and filter
@@ -966,7 +984,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 				// snapshot belongs to a different collection than the current query.
 				const cursorCollection = cursor.slice(0, cursor.lastIndexOf("/"));
 				if (cursorCollection === this.collectionName(partitionKey)) {
-					const cursorDoc = await this._firestoreClient.doc(cursor).get();
+					const cursorDoc = await client.doc(cursor).get();
 					if (cursorDoc?.exists) {
 						query = query.startAfter(cursorDoc);
 					}
@@ -1017,6 +1035,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 
 		try {
+			const client = await this.getClient();
 			const contextIds = await ContextIdStore.getContextIds();
 			const partitionKey = ContextIdHelper.combinedContextKey(
 				contextIds,
@@ -1024,7 +1043,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 				FirestoreEntityStorageConnector._PARTITION_SEPARATOR
 			);
 
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const collection = client.collection(this.collectionName(partitionKey));
 
 			if (this.hasEmptyInCondition(conditions)) {
 				return 0;
@@ -1090,10 +1109,10 @@ export class FirestoreEntityStorageConnector<T = unknown>
 						.join(FirestoreEntityStorageConnector._PARTITION_SEPARATOR)
 				: undefined;
 
-			const sourceCollection = sourceConnector._firestoreClient.collection(
+			const sourceCollection = (await sourceConnector.getClient()).collection(
 				sourceConnector.collectionName(partitionKey)
 			);
-			const destCollection = destConnector._firestoreClient.collection(
+			const destCollection = (await destConnector.getClient()).collection(
 				destConnector.collectionName(partitionKey)
 			);
 
@@ -1110,7 +1129,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 
 				for (let j = 0; j < docs.length; j += batchSize) {
 					const chunk = docs.slice(j, j + batchSize);
-					const batch = destConnector._firestoreClient.batch();
+					const batch = (await destConnector.getClient()).batch();
 					for (const doc of chunk) {
 						batch.set(destCollection.doc(doc.id), doc.data());
 					}
@@ -1129,15 +1148,16 @@ export class FirestoreEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private async deleteAllPartitionCollections(collectionName: string): Promise<void> {
+		const client = await this.getClient();
 		const prefix = `${collectionName}_`;
-		const collections = await this._firestoreClient.listCollections();
+		const collections = await client.listCollections();
 		const chunkSize = 500;
 		for (const col of collections) {
 			if (col.id.startsWith(prefix)) {
 				const snapshot = await col.get();
 				for (let i = 0; i < snapshot.docs.length; i += chunkSize) {
 					const chunk = snapshot.docs.slice(i, i + chunkSize);
-					const batch = this._firestoreClient.batch();
+					const batch = client.batch();
 					for (const doc of chunk) {
 						batch.delete(doc.ref);
 					}
@@ -1311,6 +1331,44 @@ export class FirestoreEntityStorageConnector<T = unknown>
 	 */
 	private collectionName(partitionKey?: string): string {
 		return `${this._config.collectionName}_${partitionKey ?? "default"}`;
+	}
+
+	/**
+	 * Get the shared Firestore client, opening it if needed.
+	 * @returns The Firestore client.
+	 * @internal
+	 */
+	private async getClient(): Promise<Firestore> {
+		return ConnectionHelper.openClient<Firestore>(
+			"firestoreClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async () => {
+				const firestoreOptions: Settings = {
+					projectId: this._config.projectId,
+					databaseId: this._config.databaseId,
+					collectionName: this._config.collectionName,
+					maxIdleChannels: this._config.settings?.maxIdleChannels,
+					timeout: this._config.settings?.timeout,
+					credentials: this._credentials
+				};
+				if (Is.stringValue(this._config.endpoint)) {
+					firestoreOptions.host = this._config.endpoint;
+					firestoreOptions.ssl = false;
+				}
+				return new Firestore(firestoreOptions);
+			}
+		);
+	}
+
+	/**
+	 * Create the client id for the shared store key.
+	 * @returns The client id string.
+	 * @internal
+	 */
+	private createClientId(): string {
+		return `${this._config.projectId}|${this._config.databaseId ?? ""}|${this._config.endpoint ?? ""}`;
 	}
 
 	/**

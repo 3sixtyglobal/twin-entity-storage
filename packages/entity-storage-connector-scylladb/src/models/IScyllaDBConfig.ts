@@ -27,6 +27,23 @@ export interface IScyllaDBConfig {
 	port?: number;
 
 	/**
+	 * Optional connection pool configuration.
+	 */
+	pool?: {
+		/**
+		 * Number of connections per local host.
+		 * @default 1
+		 */
+		coreConnectionsPerHost?: number;
+
+		/**
+		 * Maximum number of requests per connection.
+		 * @default 1024
+		 */
+		maxRequestsPerConnection?: number;
+	};
+
+	/**
 	 * Milliseconds to wait for connector mutex locks before throwing.
 	 */
 	mutexTimeoutMs?: number;

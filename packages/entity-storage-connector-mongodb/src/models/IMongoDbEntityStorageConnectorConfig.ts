@@ -36,6 +36,33 @@ export interface IMongoDbEntityStorageConnectorConfig {
 	collection: string;
 
 	/**
+	 * Optional connection pool configuration.
+	 */
+	pool?: {
+		/**
+		 * Maximum number of connections in the pool.
+		 * @default 100
+		 */
+		maxPoolSize?: number;
+
+		/**
+		 * Minimum number of connections to maintain in the pool.
+		 * @default 0
+		 */
+		minPoolSize?: number;
+
+		/**
+		 * Milliseconds a connection can remain idle before being removed.
+		 */
+		maxIdleTimeMs?: number;
+
+		/**
+		 * Milliseconds to wait for a connection before throwing.
+		 */
+		waitQueueTimeoutMs?: number;
+	};
+
+	/**
 	 * Milliseconds to wait for connector mutex locks before throwing.
 	 */
 	mutexTimeoutMs?: number;

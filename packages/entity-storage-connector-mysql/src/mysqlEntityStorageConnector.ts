@@ -19,7 +19,7 @@ import {
 	type IValidationFailure,
 	Mutex,
 	ObjectHelper,
-	SharedStore,
+	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
@@ -36,6 +36,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
+	ConnectionHelper,
 	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
@@ -107,10 +108,10 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private readonly _config: IMySqlEntityStorageConnectorConfig;
 
 	/**
-	 * The connection pool for MySql.
+	 * Unique identifier for this connector instance, used to track references in SharedStore.
 	 * @internal
 	 */
-	private _pool?: Pool;
+	private readonly _instanceId: string;
 
 	/**
 	 * The primary key property.
@@ -171,6 +172,48 @@ export class MySqlEntityStorageConnector<T = unknown>
 			nameof(options.config.tableName),
 			options.config.tableName
 		);
+		if (!Is.empty(options.config.pool?.connectionLimit)) {
+			Guards.integer(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.connectionLimit),
+				options.config.pool?.connectionLimit
+			);
+		}
+		if (!Is.empty(options.config.pool?.maxIdle)) {
+			Guards.integer(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.maxIdle),
+				options.config.pool?.maxIdle
+			);
+		}
+		if (!Is.empty(options.config.pool?.idleTimeout)) {
+			Guards.integer(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.idleTimeout),
+				options.config.pool?.idleTimeout
+			);
+		}
+		if (!Is.empty(options.config.pool?.queueLimit)) {
+			Guards.integer(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.queueLimit),
+				options.config.pool?.queueLimit
+			);
+		}
+		if (!Is.empty(options.config.pool?.enableKeepAlive)) {
+			Guards.boolean(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.enableKeepAlive),
+				options.config.pool?.enableKeepAlive
+			);
+		}
+		if (!Is.empty(options.config.pool?.waitForConnections)) {
+			Guards.boolean(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.waitForConnections),
+				options.config.pool?.waitForConnections
+			);
+		}
 
 		this._entitySchemaName = options.entitySchema;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
@@ -180,6 +223,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		this._config = options.config;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
+		this._instanceId = RandomHelper.generateUuidV7("compact");
 	}
 
 	/**
@@ -343,37 +387,13 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @returns Nothing.
 	 */
 	public async stop(nodeLoggingComponentType?: string): Promise<void> {
-		if (this._pool) {
-			const poolConfig = this.createPoolConfig();
-			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
-
-			try {
-				await Mutex.lock(`mySqlPools:${poolId}`, {
-					throwOnTimeout: true,
-					timeoutMs: this._mutexTimeoutMs
-				});
-				const sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
-					"mySqlPools",
-					() => ({})
-				);
-				if (sharedPools[poolId]) {
-					// Decrease the use counter and close the pool if no longer used
-					sharedPools[poolId].useCounter--;
-					if (sharedPools[poolId].useCounter <= 0) {
-						const poolInstance = sharedPools[poolId].pool;
-						await poolInstance.end();
-						delete sharedPools[poolId];
-						this._pool = undefined;
-					}
-					SharedStore.set("mySqlPools", sharedPools);
-				} else {
-					// Pool was already ended by another connector; clear our stale reference.
-					this._pool = undefined;
-				}
-			} finally {
-				Mutex.unlock(`mySqlPools:${poolId}`);
-			}
-		}
+		await ConnectionHelper.closeClient<Pool>(
+			"mySqlPools",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async pool => pool.end()
+		);
 	}
 
 	/**
@@ -1226,42 +1246,27 @@ export class MySqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Get or create the connection pool.
+	 * Get or create the shared connection pool for this endpoint.
 	 * @returns The MySql connection pool.
 	 * @internal
 	 */
 	private async getPool(): Promise<Pool> {
-		if (!this._pool) {
-			const poolConfig = this.createPoolConfig();
-			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
+		return ConnectionHelper.openClient<Pool>(
+			"mySqlPools",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async () => createPool(this.createPoolConfig())
+		);
+	}
 
-			try {
-				await Mutex.lock(`mySqlPools:${poolId}`, {
-					throwOnTimeout: true,
-					timeoutMs: this._mutexTimeoutMs
-				});
-
-				const sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
-					"mySqlPools",
-					() => ({})
-				);
-
-				// If there is no pool for the id, create it
-				if (!sharedPools[poolId]) {
-					sharedPools[poolId] = {
-						pool: createPool(poolConfig),
-						useCounter: 0
-					};
-					SharedStore.set("mySqlPools", sharedPools);
-				}
-				// Increase the use counter and return the pool
-				sharedPools[poolId].useCounter++;
-				this._pool = sharedPools[poolId].pool;
-			} finally {
-				Mutex.unlock(`mySqlPools:${poolId}`);
-			}
-		}
-		return this._pool;
+	/**
+	 * Build a stable cache key for the shared pool based on connection parameters.
+	 * @returns The pool cache key.
+	 * @internal
+	 */
+	private createClientId(): string {
+		return `${this._config.host}|${this._config.port ?? 3306}|${this._config.user}`;
 	}
 
 	/**
@@ -1270,21 +1275,18 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private createPoolConfig(): PoolOptions {
-		const poolConfig = this._config.pool ?? {};
-
 		return {
 			host: this._config.host,
-			port: this._config.port ?? 3306,
+			port: this._config.port,
 			user: this._config.user,
 			password: this._config.password,
 
-			connectionLimit: poolConfig.connectionLimit ?? 10,
-			maxIdle: poolConfig.maxIdle ?? 10,
-			idleTimeout: poolConfig.idleTimeout ?? 60000,
-			enableKeepAlive: poolConfig.enableKeepAlive ?? true,
-			keepAliveInitialDelay: 0,
-			waitForConnections: poolConfig.waitForConnections ?? true,
-			queueLimit: poolConfig.queueLimit ?? 0
+			connectionLimit: this._config.pool?.connectionLimit,
+			maxIdle: this._config.pool?.maxIdle,
+			idleTimeout: this._config.pool?.idleTimeout,
+			enableKeepAlive: this._config.pool?.enableKeepAlive,
+			waitForConnections: this._config.pool?.waitForConnections,
+			queueLimit: this._config.pool?.queueLimit
 		};
 	}
 

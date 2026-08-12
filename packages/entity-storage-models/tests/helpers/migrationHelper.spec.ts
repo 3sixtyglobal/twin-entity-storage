@@ -13,11 +13,11 @@ import {
 	type IEntitySchemaDiff,
 	type IEntitySchemaProperty
 } from "@twin.org/entity";
-import { TestContextIdHandler } from "./testContextIdHandler.js";
-import { MigrationHelper } from "../src/helpers/migrationHelper.js";
-import type { IEntityStorageConnector } from "../src/models/IEntityStorageConnector.js";
-import type { IEntityStorageMigrationConnector } from "../src/models/IEntityStorageMigrationConnector.js";
-import type { IResolvedMigrationStep } from "../src/models/IResolvedMigrationStep.js";
+import { MigrationHelper } from "../../src/helpers/migrationHelper.js";
+import type { IEntityStorageConnector } from "../../src/models/IEntityStorageConnector.js";
+import type { IEntityStorageMigrationConnector } from "../../src/models/IEntityStorageMigrationConnector.js";
+import type { IResolvedMigrationStep } from "../../src/models/IResolvedMigrationStep.js";
+import { TestContextIdHandler } from "../testContextIdHandler.js";
 
 // ---------------------------------------------------------------------------
 // String-indexed entity type so keyof resolves to string

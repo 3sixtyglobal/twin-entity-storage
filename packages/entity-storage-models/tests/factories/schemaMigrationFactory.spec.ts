@@ -1,7 +1,7 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { SchemaMigrationFactory } from "../src/factories/schemaMigrationFactory.js";
-import type { ISchemaMigration } from "../src/models/ISchemaMigration.js";
+import { SchemaMigrationFactory } from "../../src/factories/schemaMigrationFactory.js";
+import type { ISchemaMigration } from "../../src/models/ISchemaMigration.js";
 
 describe("SchemaMigrationFactory", () => {
 	const stepKey = "SchemaMigrationFactoryTestEntity_0_1";

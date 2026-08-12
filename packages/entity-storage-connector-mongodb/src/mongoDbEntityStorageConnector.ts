@@ -18,6 +18,7 @@ import {
 	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
+	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
@@ -31,6 +32,7 @@ import {
 	type SortDirection
 } from "@twin.org/entity";
 import {
+	ConnectionHelper,
 	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
@@ -90,10 +92,10 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	private readonly _config: IMongoDbEntityStorageConnectorConfig;
 
 	/**
-	 * The MongoDb client.
+	 * Unique identifier for this connector instance, used to track references in SharedStore.
 	 * @internal
 	 */
-	private readonly _client: MongoClient;
+	private readonly _instanceId: string;
 
 	/**
 	 * The name of the version property, if any.
@@ -139,6 +141,38 @@ export class MongoDbEntityStorageConnector<T = unknown>
 			options.config.collection
 		);
 
+		if (!Is.empty(options.config.pool?.maxIdleTimeMs)) {
+			Guards.integer(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.maxIdleTimeMs),
+				options.config.pool?.maxIdleTimeMs
+			);
+		}
+
+		if (!Is.empty(options.config.pool?.maxPoolSize)) {
+			Guards.integer(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.maxPoolSize),
+				options.config.pool?.maxPoolSize
+			);
+		}
+
+		if (!Is.empty(options.config.pool?.minPoolSize)) {
+			Guards.integer(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.minPoolSize),
+				options.config.pool?.minPoolSize
+			);
+		}
+
+		if (!Is.empty(options.config.pool?.waitQueueTimeoutMs)) {
+			Guards.integer(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.waitQueueTimeoutMs),
+				options.config.pool?.waitQueueTimeoutMs
+			);
+		}
+
 		this._entitySchemaName = options.entitySchema;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
@@ -146,8 +180,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 		this._config = options.config;
 		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
-
-		this._client = new MongoClient(this.createConnectionConfig());
+		this._instanceId = RandomHelper.generateUuidV7("compact");
 	}
 
 	/**
@@ -159,7 +192,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
-			await this._client.connect();
+			const client = await this.getClient();
 
 			await nodeLogging?.log({
 				level: "info",
@@ -172,7 +205,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 			});
 
 			// Create the database if it does not exist
-			this._client.db(this._config.database);
+			client.db(this._config.database);
 
 			await nodeLogging?.log({
 				level: "info",
@@ -225,8 +258,14 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns Nothing.
 	 */
-	public async stop?(nodeLoggingComponentType?: string): Promise<void> {
-		await this._client.close();
+	public async stop(nodeLoggingComponentType?: string): Promise<void> {
+		await ConnectionHelper.closeClient<MongoClient>(
+			"mongoDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async client => client.close()
+		);
 	}
 
 	/**
@@ -243,7 +282,8 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	 */
 	public async health(): Promise<IHealth[]> {
 		try {
-			await this._client
+			const client = await this.getClient();
+			await client
 				.db(this._config.database)
 				.collection(this._config.collection)
 				.estimatedDocumentCount();
@@ -598,7 +638,8 @@ export class MongoDbEntityStorageConnector<T = unknown>
 
 		try {
 			if (Is.arrayValue(this._partitionContextIds)) {
-				const db = this._client.db(this._config.database);
+				const client = await this.getClient();
+				const db = client.db(this._config.database);
 				const collections = await this.listPartitionCollections();
 				for (const col of collections) {
 					await db
@@ -739,7 +780,8 @@ export class MongoDbEntityStorageConnector<T = unknown>
 
 		try {
 			const prefix = `${this._config.collection}_`;
-			const db = this._client.db(this._config.database);
+			const client = await this.getClient();
+			const db = client.db(this._config.database);
 			const collections = await this.listPartitionCollections();
 			const result: IContextIds[] = [];
 			for (const col of collections) {
@@ -808,8 +850,10 @@ export class MongoDbEntityStorageConnector<T = unknown>
 		// without relying on context so that all partitions are handled in a single call.
 		const targetBase = targetConnector._config.collection;
 		const sourceBase = this._config.collection;
-		const targetDb = targetConnector._client.db(targetConnector._config.database);
-		const sourceDb = this._client.db(this._config.database);
+		const targetClient = await targetConnector.getClient();
+		const targetDb = targetClient.db(targetConnector._config.database);
+		const sourceClient = await this.getClient();
+		const sourceDb = sourceClient.db(this._config.database);
 
 		// Find all collections the target connector wrote to (exact base name or with a _suffix).
 		const allCollections = await targetDb.listCollections().toArray();
@@ -868,13 +912,46 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	 * @returns The MongoDb connection configuration.
 	 * @internal
 	 */
-	private createConnectionConfig(): string {
+	private createClientId(): string {
+		return `${this._config.host}|${this._config.port ?? 27017}|${this._config.user ?? ""}|${this._config.database}`;
+	}
+
+	/**
+	 * Build the MongoDB connection URL from config.
+	 * @returns The connection URL string.
+	 * @internal
+	 */
+	private createConnectionUrl(): string {
 		const { host, port, user, password, database } = this._config;
 		const portPart = port ? `:${port}` : "";
-		if (user && password) {
+		if (Is.stringValue(user) && Is.stringValue(password)) {
 			return `mongodb://${user}:${password}@${host}${portPart}/${database}`;
 		}
 		return `mongodb://${host}${portPart}/${database}`;
+	}
+
+	/**
+	 * Retrieve (or lazily create) the shared MongoClient for this endpoint.
+	 * @returns The shared client.
+	 * @internal
+	 */
+	private async getClient(): Promise<MongoClient> {
+		return ConnectionHelper.openClient<MongoClient>(
+			"mongoDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async () => {
+				const client = new MongoClient(this.createConnectionUrl(), {
+					maxPoolSize: this._config.pool?.maxPoolSize,
+					minPoolSize: this._config.pool?.minPoolSize,
+					maxIdleTimeMS: this._config.pool?.maxIdleTimeMs,
+					waitQueueTimeoutMS: this._config.pool?.waitQueueTimeoutMs
+				});
+				await client.connect();
+				return client;
+			}
+		);
 	}
 
 	/**
@@ -884,7 +961,8 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	 */
 	private async getCollection(): Promise<Collection> {
 		const collectionName = await this.resolveCollectionName(this._config.collection);
-		return this._client.db(this._config.database).collection(collectionName);
+		const client = await this.getClient();
+		return client.db(this._config.database).collection(collectionName);
 	}
 
 	/**
@@ -946,7 +1024,8 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	 */
 	private async listPartitionCollections(): Promise<{ name: string }[]> {
 		const prefix = `${this._config.collection}_`;
-		const db = this._client.db(this._config.database);
+		const client = await this.getClient();
+		const db = client.db(this._config.database);
 		return db.listCollections({ name: { $regex: `^${this.escapeRegex(prefix)}` } }).toArray();
 	}
 

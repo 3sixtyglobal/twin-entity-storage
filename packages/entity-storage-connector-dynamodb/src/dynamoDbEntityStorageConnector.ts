@@ -40,6 +40,7 @@ import {
 	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
+	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
@@ -55,6 +56,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
+	ConnectionHelper,
 	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
@@ -149,6 +151,12 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	private readonly _mutexTimeoutMs?: number;
 
 	/**
+	 * The instance id for this connector.
+	 * @internal
+	 */
+	private readonly _instanceId: string;
+
+	/**
 	 * Create a new instance of DynamoDbEntityStorageConnector.
 	 * @param options The options for the connector.
 	 */
@@ -202,6 +210,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 			? this._config.endpoint
 			: undefined;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
+		this._instanceId = RandomHelper.generateUuidV7("compact");
 	}
 
 	/**
@@ -213,12 +222,26 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Stop the component.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 */
+	public async stop(nodeLoggingComponentType?: string): Promise<void> {
+		await ConnectionHelper.closeClient<DynamoDB>(
+			"dynamoDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async client => client.destroy()
+		);
+	}
+
+	/**
 	 * Returns the health status of the component.
 	 * @returns The health status of the component.
 	 */
 	public async health(): Promise<IHealth[]> {
 		try {
-			const dbConnection = this.createConnection();
+			const dbConnection = await this.getClient();
 			await dbConnection.describeTable({ TableName: this._config.tableName });
 			return [
 				{
@@ -271,7 +294,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 			});
 
 			try {
-				const dbConnection = this.createConnection();
+				const dbConnection = await this.getClient();
 
 				const tableParams: CreateTableCommandInput = {
 					AttributeDefinitions: [],
@@ -424,7 +447,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const docClient = this.createDocClient();
+			const docClient = await this.getDocClient();
 
 			if (Is.empty(secondaryIndex) && Is.empty(conditions)) {
 				const getCommand = new GetCommand({
@@ -577,7 +600,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 				}
 			}
 
-			const docClient = this.createDocClient();
+			const docClient = await this.getDocClient();
 
 			const { conditionExpression, attributeNames, attributeValues } =
 				this.buildConditionExpression(allConditions);
@@ -666,7 +689,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		);
 
 		try {
-			const docClient = this.createDocClient();
+			const docClient = await this.getDocClient();
 			const chunkSize = DynamoDbEntityStorageConnector._BATCH_CHUNK_SIZE;
 			const concurrency = DynamoDbEntityStorageConnector._WRITE_CONCURRENCY;
 			const windowSize = chunkSize * concurrency;
@@ -726,7 +749,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 
 			const pKey = partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE;
 
-			const docClient = this.createDocClient();
+			const docClient = await this.getDocClient();
 			const chunkSize = 25;
 
 			let exclusiveStartKey: { [key: string]: NativeAttributeValue } | undefined;
@@ -809,7 +832,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		}
 
 		try {
-			const docClient = this.createDocClient();
+			const docClient = await this.getDocClient();
 
 			const { conditionExpression, attributeNames, attributeValues } =
 				this.buildConditionExpression(conditions);
@@ -874,7 +897,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const docClient = this.createDocClient();
+			const docClient = await this.getDocClient();
 			const chunkSize = 25;
 			const primaryKeyProperty = this._primaryKey.property as string;
 
@@ -923,7 +946,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		});
 
 		try {
-			const dbConnection = this.createConnection();
+			const dbConnection = await this.getClient();
 
 			await dbConnection.deleteTable({ TableName: this._config.tableName });
 
@@ -1057,7 +1080,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 				return 0;
 			}
 
-			const dbConnection = this.createConnection();
+			const dbConnection = await this.getClient();
 			let total = 0;
 			let exclusiveStartKey: { [key: string]: AttributeValue } | undefined;
 
@@ -1102,7 +1125,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		const contextIdsMap: { [id: string]: IContextIds } = {};
 
 		try {
-			const docClient = this.createDocClient();
+			const docClient = await this.getDocClient();
 			let exclusiveStartKey: { [key: string]: NativeAttributeValue } | undefined;
 
 			do {
@@ -1251,7 +1274,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		}
 		const partitionList = partitions ?? [{}];
 
-		const dbConnection = sourceConnector.createConnection();
+		const dbConnection = await sourceConnector.getClient();
 		const chunkSize = 25;
 
 		for (let i = 0; i < partitionList.length; i++) {
@@ -1652,31 +1675,44 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Create a doc client connection.
-	 * @returns The dynamo db document client.
+	 * Get the shared DynamoDB base client, opening it if needed.
+	 * @returns The DynamoDB client.
 	 * @internal
 	 */
-	private createDocClient(): DynamoDBDocumentClient {
-		return DynamoDBDocumentClient.from(
-			new DynamoDB({
-				apiVersion: "2012-10-08",
-				...this.createConnectionConfig()
-			}),
-			{
-				marshallOptions: {
-					removeUndefinedValues: true
-				}
-			}
+	private async getClient(): Promise<DynamoDB> {
+		return ConnectionHelper.openClient<DynamoDB>(
+			"dynamoDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async () =>
+				new DynamoDB({
+					apiVersion: "2012-10-08",
+					...this.createConnectionConfig()
+				})
 		);
 	}
 
 	/**
-	 * Create a new DB connection.
-	 * @returns The Dynamo DB connection.
+	 * Get a DynamoDB document client wrapping the shared base client.
+	 * @returns The DynamoDB document client.
 	 * @internal
 	 */
-	private createConnection(): DynamoDB {
-		return new DynamoDB(this.createConnectionConfig());
+	private async getDocClient(): Promise<DynamoDBDocumentClient> {
+		return DynamoDBDocumentClient.from(await this.getClient(), {
+			marshallOptions: {
+				removeUndefinedValues: true
+			}
+		});
+	}
+
+	/**
+	 * Create the client id for the shared store key.
+	 * @returns The client id string.
+	 * @internal
+	 */
+	private createClientId(): string {
+		return `${this._config.region}|${this._config.endpoint ?? ""}|${this._config.authMode ?? "credentials"}|${this._config.accessKeyId ?? ""}`;
 	}
 
 	/**
@@ -1722,7 +1758,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	 */
 	private async tableExists(tableName: string): Promise<boolean> {
 		try {
-			const dbConnection = this.createConnection();
+			const dbConnection = await this.getClient();
 
 			const result = await dbConnection.describeTable({ TableName: tableName });
 
@@ -1998,7 +2034,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 			scanFilter += ` AND ${filterCondition.trim()}`;
 		}
 
-		const dbConnection = this.createConnection();
+		const dbConnection = await this.getClient();
 		const matchingItems: { [id: string]: AttributeValue }[] = [];
 		let scanStartKey = this.decodeCursor(cursor);
 		let lastEvaluatedKey: { [id: string]: AttributeValue } | undefined;
@@ -2092,7 +2128,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		rawItems: { [id: string]: AttributeValue }[];
 		cursor?: string;
 	}> {
-		const connection = this.createDocClient();
+		const connection = await this.getDocClient();
 		const results = await connection.send(
 			new QueryCommand({
 				TableName: this._config.tableName,
@@ -2161,7 +2197,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		rawItems: { [id: string]: AttributeValue }[];
 		cursor?: string;
 	}> {
-		const connection = this.createDocClient();
+		const connection = await this.getDocClient();
 		const returnedRawItems: { [id: string]: AttributeValue }[] = [];
 		let lastEvaluatedKey: { [id: string]: AttributeValue } | undefined = this.decodeCursor(cursor);
 

@@ -19,6 +19,7 @@ import {
 	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
+	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
@@ -34,6 +35,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
+	ConnectionHelper,
 	EntityStorageHelper,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -122,10 +124,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	private readonly _mutexTimeoutMs?: number;
 
 	/**
-	 * The configuration for the connector.
+	 * Unique identifier for this connector instance, used to track references in SharedStore.
 	 * @internal
 	 */
-	private _connection?: postgres.Sql;
+	private readonly _instanceId: string;
 
 	/**
 	 * Create a new instance of PostgreSqlEntityStorageConnector.
@@ -169,6 +171,38 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			options.config.tableName
 		);
 
+		if (!Is.empty(options.config.pool?.connectTimeout)) {
+			Guards.integer(
+				PostgreSqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.connectTimeout),
+				options.config.pool?.connectTimeout
+			);
+		}
+
+		if (!Is.empty(options.config.pool?.idleTimeout)) {
+			Guards.integer(
+				PostgreSqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.idleTimeout),
+				options.config.pool?.idleTimeout
+			);
+		}
+
+		if (!Is.empty(options.config.pool?.max)) {
+			Guards.integer(
+				PostgreSqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.max),
+				options.config.pool?.max
+			);
+		}
+
+		if (!Is.empty(options.config.pool?.maxLifetime)) {
+			Guards.integer(
+				PostgreSqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.maxLifetime),
+				options.config.pool?.maxLifetime
+			);
+		}
+
 		this._entitySchemaName = options.entitySchema;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
@@ -177,6 +211,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 
 		this._config = options.config;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
+		this._instanceId = RandomHelper.generateUuidV7("compact");
 	}
 
 	/**
@@ -188,7 +223,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
-			const dbConnection = await this.createConnection();
+			const dbConnection = await this.getClient();
 
 			const databaseExists = await this.databaseExists();
 			if (!databaseExists) {
@@ -287,7 +322,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 */
 	public async health(): Promise<IHealth[]> {
 		try {
-			const sql = await this.createConnection();
+			const sql = await this.getClient();
 			await sql`SELECT 1 FROM ${sql(this._config.tableName)} LIMIT 0`;
 			return [
 				{
@@ -317,10 +352,13 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * @returns Nothing.
 	 */
 	public async stop(): Promise<void> {
-		if (this._connection) {
-			await this._connection.end();
-			this._connection = undefined;
-		}
+		await ConnectionHelper.closeClient<postgres.Sql>(
+			"postgreSqlConnections",
+			`${this._config.host}|${this._config.port ?? 5432}|${this._config.user}`,
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async sql => sql.end()
+		);
 	}
 
 	/**
@@ -350,7 +388,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const dbConnection = await this.createConnection();
+			const dbConnection = await this.getClient();
 
 			const whereClauses: string[] = [];
 			const values: unknown[] = [];
@@ -532,7 +570,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				sql += ` DO UPDATE SET ${keys.map(key => `"${key}" = EXCLUDED."${key}"`).join(", ")};`;
 			}
 
-			const dbConnection = await this.createConnection();
+			const dbConnection = await this.getClient();
 			const result = await dbConnection.unsafe(sql, values as ParameterOrJSON<never>[]);
 
 			if (hasVersionCheck && result.count === 0) {
@@ -594,7 +632,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			});
 			const keys = props.map(p => p.property as string);
 
-			const dbConnection = await this.createConnection();
+			const dbConnection = await this.getClient();
 			const chunkSize = PostgreSqlEntityStorageConnector._BATCH_CHUNK_SIZE;
 
 			for (let offset = 0; offset < preparedEntities.length; offset += chunkSize) {
@@ -640,7 +678,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 
 		try {
 			const sql = `DELETE FROM "${this._config.tableName}" WHERE "${PostgreSqlEntityStorageConnector._PARTITION_KEY}" = $1`;
-			const dbConnection = await this.createConnection();
+			const dbConnection = await this.getClient();
 			await dbConnection.unsafe(sql, [
 				partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE
 			]);
@@ -681,7 +719,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		}
 
 		try {
-			const dbConnection = await this.createConnection();
+			const dbConnection = await this.getClient();
 
 			const itemData = await this.get(id);
 			if (!Is.empty(itemData)) {
@@ -753,7 +791,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 
 		try {
 			const sql = `DELETE FROM "${this._config.tableName}" WHERE "${PostgreSqlEntityStorageConnector._PARTITION_KEY}" = $1 AND "${this._primaryKeyProperty.property as string}" = ANY($2)`;
-			const dbConnection = await this.createConnection();
+			const dbConnection = await this.getClient();
 			await dbConnection.unsafe(sql, [
 				partitionKey ?? PostgreSqlEntityStorageConnector._PARTITION_KEY_VALUE,
 				ids
@@ -787,7 +825,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		try {
 			const tableExists = await this.tableExists();
 			if (tableExists) {
-				const dbConnection = await this.createConnection();
+				const dbConnection = await this.getClient();
 				await dbConnection.unsafe(`DROP TABLE "${this._config.tableName}";`);
 				await this.waitForTableNotExists();
 			}
@@ -830,7 +868,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			return undefined;
 		}
 		try {
-			const dbConnection = await this.createConnection();
+			const dbConnection = await this.getClient();
 			const rows = await dbConnection.unsafe(
 				`SELECT DISTINCT "${PostgreSqlEntityStorageConnector._PARTITION_KEY}" FROM "${this._config.tableName}"`
 			);
@@ -881,7 +919,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		// Teardown the existing table with the original name to free up the name for the new table
 		await this.teardown(loggingComponentType);
 
-		const dbConnection = await targetConnector.createConnection();
+		const dbConnection = await targetConnector.getClient();
 		await dbConnection.unsafe(
 			`ALTER TABLE "${targetConnector._config.tableName}" RENAME TO "${this._config.tableName}"`
 		);
@@ -1019,7 +1057,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			}
 			sql += ` ${orderByClause} LIMIT ${returnSize + 1}`;
 
-			const dbConnection = await this.createConnection();
+			const dbConnection = await this.getClient();
 			const rows = await dbConnection.unsafe(sql, values);
 
 			if (this._entitySchema.properties) {
@@ -1098,7 +1136,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 
 		let queryStr: string | undefined;
 		try {
-			const dbConnection = await this.createConnection();
+			const dbConnection = await this.getClient();
 
 			const contextIds = await ContextIdStore.getContextIds();
 			const partitionKey = ContextIdHelper.combinedContextKey(
@@ -1132,7 +1170,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 */
 	private async databaseExists(): Promise<boolean> {
 		try {
-			const dbConnection = await this.createConnection();
+			const dbConnection = await this.getClient();
 			const res = await dbConnection.unsafe(
 				"SELECT datname FROM pg_catalog.pg_database WHERE datname = $1",
 				[this._config.database] as postgres.ParameterOrJSON<never>[]
@@ -1165,7 +1203,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 */
 	private async tableExists(): Promise<boolean> {
 		try {
-			const dbConnection = await this.createConnection();
+			const dbConnection = await this.getClient();
 			const res = await dbConnection.unsafe(
 				"SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = $1 LIMIT 1",
 				[this._config.tableName] as postgres.ParameterOrJSON<never>[]
@@ -1207,15 +1245,18 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Create a new DB connection.
-	 * @returns The PostgreSql connection.
+	 * Retrieve (or lazily create) the shared postgres connection for this endpoint.
+	 * @returns The shared connection.
 	 * @internal
 	 */
-	private async createConnection(): Promise<postgres.Sql> {
-		if (Is.empty(this._connection)) {
-			this._connection = postgres(this.createConnectionConfig());
-		}
-		return this._connection;
+	private async getClient(): Promise<postgres.Sql> {
+		return ConnectionHelper.openClient<postgres.Sql>(
+			"postgreSqlConnections",
+			`${this._config.host}|${this._config.port ?? 5432}|${this._config.user}`,
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async () => postgres(this.createConnectionConfig())
+		);
 	}
 
 	/**
@@ -1224,12 +1265,20 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private createConnectionConfig(): postgres.Options<{ [key: string]: postgres.PostgresType }> {
-		return {
+		const opts: { [key: string]: unknown } = {
 			host: this._config.host,
 			port: this._config.port ?? 5432,
 			user: this._config.user,
-			password: this._config.password
+			password: this._config.password,
+			max: this._config?.pool?.max,
+			// eslint-disable-next-line camelcase
+			idle_timeout: this._config?.pool?.idleTimeout,
+			// eslint-disable-next-line camelcase
+			connect_timeout: this._config?.pool?.connectTimeout,
+			// eslint-disable-next-line camelcase
+			max_lifetime: this._config?.pool?.maxLifetime
 		};
+		return opts;
 	}
 
 	/**

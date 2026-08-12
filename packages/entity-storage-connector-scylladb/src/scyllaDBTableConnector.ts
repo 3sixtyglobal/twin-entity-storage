@@ -81,9 +81,8 @@ export class ScyllaDBTableConnector<T = unknown>
 	 * @returns The health status of the component.
 	 */
 	public async health(): Promise<IHealth[]> {
-		let connection;
 		try {
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 			await this.queryDB(
 				connection,
 				`SELECT * FROM "${this.safeTableName(this._fullTableName)}" LIMIT 1`,
@@ -109,8 +108,6 @@ export class ScyllaDBTableConnector<T = unknown>
 					data: { table: this.safeTableName(this._fullTableName) }
 				}
 			];
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -123,7 +120,7 @@ export class ScyllaDBTableConnector<T = unknown>
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
-			let dbConnection = await this.openConnection(true);
+			let dbConnection = await this.openConnectionNoKeyspace();
 
 			const exists = await this.checkKeyspaceExists(dbConnection, this._config.keyspace);
 
@@ -149,8 +146,8 @@ export class ScyllaDBTableConnector<T = unknown>
 			}
 
 			// Connection has to be closed and now open a new one with our keyspace
-			await this.closeConnection(dbConnection);
-			dbConnection = await this.openConnection();
+			await this.closeConnectionNoKeyspace(dbConnection);
+			dbConnection = await this.getClient();
 
 			// Need to find structured properties (declared as type: object)
 			const structuredProperties = this._entitySchema.properties?.filter(
@@ -269,7 +266,6 @@ export class ScyllaDBTableConnector<T = unknown>
 			{ nullBehavior: "omit" }
 		);
 
-		let connection;
 		const id = normalizedEntity[this._primaryKey?.property] as string;
 		const optimisticMutexKey = Is.stringValue(this._versionKey)
 			? this.buildOptimisticMutexKey(partitionKey, id)
@@ -390,7 +386,7 @@ export class ScyllaDBTableConnector<T = unknown>
 				data: { sql }
 			});
 
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 
 			const resultSet = await this.execute(connection, sql, execParams);
 
@@ -417,7 +413,6 @@ export class ScyllaDBTableConnector<T = unknown>
 			if (Is.stringValue(optimisticMutexKey)) {
 				Mutex.unlock(optimisticMutexKey);
 			}
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -443,9 +438,8 @@ export class ScyllaDBTableConnector<T = unknown>
 			)
 		);
 
-		let connection;
 		try {
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 
 			// Delete existing rows first so that a change in the clustering key (secondary
 			// field) does not leave a stale row behind. Two separate batches are used to
@@ -514,8 +508,6 @@ export class ScyllaDBTableConnector<T = unknown>
 			}
 		} catch (err) {
 			throw new GeneralError(ScyllaDBTableConnector.CLASS_NAME, "setBatchFailed", undefined, err);
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -530,9 +522,8 @@ export class ScyllaDBTableConnector<T = unknown>
 			ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds) ??
 			AbstractScyllaDBConnector.PARTITION_KEY_VALUE;
 
-		let connection;
 		try {
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 
 			const result = await this.queryDB(
 				connection,
@@ -570,8 +561,6 @@ export class ScyllaDBTableConnector<T = unknown>
 			await connection.batch(queries, { prepare: true });
 		} catch (err) {
 			throw new GeneralError(ScyllaDBTableConnector.CLASS_NAME, "emptyFailed", undefined, err);
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -592,8 +581,6 @@ export class ScyllaDBTableConnector<T = unknown>
 		const optimisticMutexKey = Is.stringValue(this._versionKey)
 			? this.buildOptimisticMutexKey(partitionKey, id)
 			: undefined;
-
-		let connection;
 
 		if (Is.stringValue(optimisticMutexKey)) {
 			await Mutex.lock(optimisticMutexKey, {
@@ -638,7 +625,7 @@ export class ScyllaDBTableConnector<T = unknown>
 				data: { sql }
 			});
 
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 
 			await this.execute(connection, sql, conditionValues);
 		} catch (error) {
@@ -657,7 +644,6 @@ export class ScyllaDBTableConnector<T = unknown>
 			if (Is.stringValue(optimisticMutexKey)) {
 				Mutex.unlock(optimisticMutexKey);
 			}
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -671,9 +657,8 @@ export class ScyllaDBTableConnector<T = unknown>
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		let connection;
 		try {
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 			const queries: { query: string; params: unknown[] }[] = [];
 
 			for (const id of ids) {
@@ -699,8 +684,6 @@ export class ScyllaDBTableConnector<T = unknown>
 				undefined,
 				err
 			);
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -720,10 +703,8 @@ export class ScyllaDBTableConnector<T = unknown>
 			data: { table: this.safeTableName(this._fullTableName) }
 		});
 
-		let connection;
-
 		try {
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 			await connection.execute(`DROP TABLE IF EXISTS "${this.safeTableName(this._fullTableName)}"`);
 
 			await nodeLogging?.log({
@@ -761,7 +742,6 @@ export class ScyllaDBTableConnector<T = unknown>
 			});
 			return false;
 		} finally {
-			await this.closeConnection(connection);
 			await this.closePersistentClient();
 		}
 	}
@@ -782,9 +762,8 @@ export class ScyllaDBTableConnector<T = unknown>
 		if (!Is.arrayValue(this._partitionContextIds)) {
 			return undefined;
 		}
-		let connection;
 		try {
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 			const result = await this.queryDB(
 				connection,
 				`SELECT "${AbstractScyllaDBConnector.PARTITION_KEY}" FROM "${this.safeTableName(this._fullTableName)}" ALLOW FILTERING`,
@@ -809,8 +788,6 @@ export class ScyllaDBTableConnector<T = unknown>
 				undefined,
 				err
 			);
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -920,42 +897,37 @@ export class ScyllaDBTableConnector<T = unknown>
 		];
 		const insertSql = `INSERT INTO "${destConnector.safeTableName(destConnector._fullTableName)}" (${sourceColumns.map(c => `"${c}"`).join(", ")}) VALUES (${sourceColumns.map(() => "?").join(", ")})`;
 
-		let connection;
-		try {
-			connection = await sourceConnector.openConnection();
-			for (let i = 0; i < partitionList.length; i++) {
-				// Values from getPartitionContextIds are already short-form, so we join them
-				// directly rather than using combinedContextKey, which expects long-form input
-				// and calls guardAll (throwing if a registered handler rejects short-form values).
-				const partitionKey = Is.arrayValue(sourceConnector._partitionContextIds)
-					? sourceConnector._partitionContextIds.map(k => partitionList[i][k]).join("/")
-					: AbstractScyllaDBConnector.PARTITION_KEY_VALUE;
+		const connection = await sourceConnector.getClient();
+		for (let i = 0; i < partitionList.length; i++) {
+			// Values from getPartitionContextIds are already short-form, so we join them
+			// directly rather than using combinedContextKey, which expects long-form input
+			// and calls guardAll (throwing if a registered handler rejects short-form values).
+			const partitionKey = Is.arrayValue(sourceConnector._partitionContextIds)
+				? sourceConnector._partitionContextIds.map(k => partitionList[i][k]).join("/")
+				: AbstractScyllaDBConnector.PARTITION_KEY_VALUE;
 
-				let pageState: string | undefined;
-				do {
-					const result = await sourceConnector.queryDB(
-						connection,
-						`SELECT * FROM "${sourceConnector.safeTableName(sourceConnector._fullTableName)}" WHERE "${AbstractScyllaDBConnector.PARTITION_KEY}" = ? ALLOW FILTERING`,
-						[partitionKey],
-						pageState,
-						batchSize
+			let pageState: string | undefined;
+			do {
+				const result = await sourceConnector.queryDB(
+					connection,
+					`SELECT * FROM "${sourceConnector.safeTableName(sourceConnector._fullTableName)}" WHERE "${AbstractScyllaDBConnector.PARTITION_KEY}" = ? ALLOW FILTERING`,
+					[partitionKey],
+					pageState,
+					batchSize
+				);
+
+				pageState = Is.stringValue(result.pageState) ? result.pageState : undefined;
+
+				if (Is.arrayValue(result.rows)) {
+					await connection.batch(
+						result.rows.map((row: { [key: string]: unknown }) => ({
+							query: insertSql,
+							params: sourceColumns.map(col => row[col])
+						})),
+						{ prepare: true }
 					);
-
-					pageState = Is.stringValue(result.pageState) ? result.pageState : undefined;
-
-					if (Is.arrayValue(result.rows)) {
-						await connection.batch(
-							result.rows.map((row: { [key: string]: unknown }) => ({
-								query: insertSql,
-								params: sourceColumns.map(col => row[col])
-							})),
-							{ prepare: true }
-						);
-					}
-				} while (Is.stringValue(pageState));
-			}
-		} finally {
-			await sourceConnector.closeConnection(connection);
+				}
+			} while (Is.stringValue(pageState));
 		}
 	}
 
