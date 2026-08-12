@@ -4,6 +4,7 @@ import { ContextIdStore, type IContextIds } from "@twin.org/context";
 import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
 import {
 	MigrationHelper,
+	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IResolvedMigrationStep
 } from "@twin.org/entity-storage-models";
@@ -180,6 +181,8 @@ class MigMultiFieldB {
 
 let currentUser = "user";
 let currentConnector: IEntityStorageMigrationConnector | undefined;
+const originalMigrateWithChain = MigrationHelper.migrateWithChain.bind(MigrationHelper);
+let trackedConnectors: IEntityStorageConnector[] = [];
 
 // Swap this factory to run these tests against a different connector implementation.
 // It receives the entity schema name and optional partition context ids and must return
@@ -231,6 +234,7 @@ describe("DynamoDbEntityStorageConnector - partitioning and migration", () => {
 				config: TEST_DYNAMODB_CONFIG
 			});
 			await currentConnector.bootstrap?.();
+			trackedConnectors.push(currentConnector);
 			return currentConnector;
 		};
 
@@ -242,9 +246,15 @@ describe("DynamoDbEntityStorageConnector - partitioning and migration", () => {
 	afterEach(async () => {
 		currentUser = "user";
 
-		try {
-			await currentConnector?.teardown?.();
-		} catch {}
+		for (const connector of trackedConnectors) {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+		}
+		trackedConnectors = [];
 	});
 
 	describe("getPartitionContextIds", () => {
@@ -362,6 +372,13 @@ describe("DynamoDbEntityStorageConnector - partitioning and migration", () => {
 					} finally {
 						currentUser = prevUser;
 					}
+				}
+			);
+			vi.spyOn(MigrationHelper, "migrateWithChain").mockImplementation(
+				async (...args: Parameters<typeof MigrationHelper.migrateWithChain>) => {
+					const result = await originalMigrateWithChain(...args);
+					trackedConnectors.push(result.finalConnector);
+					return result;
 				}
 			);
 		});

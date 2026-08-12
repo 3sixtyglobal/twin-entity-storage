@@ -83,6 +83,18 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
+	 * Batch chunk size for bulk write operations.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 25;
+
+	/**
+	 * Number of BatchWriteCommand calls to dispatch concurrently in setBatch.
+	 * @internal
+	 */
+	private static readonly _WRITE_CONCURRENCY: number = 25;
+
+	/**
 	 * Partition id field name.
 	 * @internal
 	 */
@@ -655,21 +667,32 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 
 		try {
 			const docClient = this.createDocClient();
-			const chunkSize = 25;
+			const chunkSize = DynamoDbEntityStorageConnector._BATCH_CHUNK_SIZE;
+			const concurrency = DynamoDbEntityStorageConnector._WRITE_CONCURRENCY;
+			const windowSize = chunkSize * concurrency;
 
-			for (let i = 0; i < preparedEntities.length; i += chunkSize) {
-				const chunk = preparedEntities.slice(i, i + chunkSize);
-				await docClient.send(
-					new BatchWriteCommand({
-						RequestItems: {
-							[this._config.tableName]: chunk.map(entity => ({
-								PutRequest: {
-									Item: entity as { [id: string]: unknown }
-								}
-							}))
-						}
-					})
-				);
+			for (let i = 0; i < preparedEntities.length; i += windowSize) {
+				const window = preparedEntities.slice(i, i + windowSize);
+				const sends: Promise<void>[] = [];
+				for (let j = 0; j < window.length; j += chunkSize) {
+					const chunk = window.slice(j, j + chunkSize);
+					sends.push(
+						(async () => {
+							await docClient.send(
+								new BatchWriteCommand({
+									RequestItems: {
+										[this._config.tableName]: chunk.map(entity => ({
+											PutRequest: {
+												Item: entity as { [id: string]: unknown }
+											}
+										}))
+									}
+								})
+							);
+						})()
+					);
+				}
+				await Promise.all(sends);
 			}
 		} catch (err) {
 			if (BaseError.isErrorCode(err, "ResourceNotFoundException")) {
@@ -1116,6 +1139,14 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		}
 
 		return Object.values(contextIdsMap);
+	}
+
+	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
 	}
 
 	/**

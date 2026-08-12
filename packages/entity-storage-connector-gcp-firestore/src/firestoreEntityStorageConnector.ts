@@ -69,6 +69,12 @@ export class FirestoreEntityStorageConnector<T = unknown>
 	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
+	 * Batch chunk size for bulk write operations.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 500;
+
+	/**
 	 * Separator used between context ID parts in Firestore collection names.
 	 * Must not be "/" which Firestore interprets as a path separator.
 	 * @internal
@@ -492,7 +498,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 
 		try {
 			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
-			const chunkSize = FirestoreEntityStorageConnector._DEFAULT_LIMIT;
+			const chunkSize = FirestoreEntityStorageConnector._BATCH_CHUNK_SIZE;
 			for (let i = 0; i < preparedEntities.length; i += chunkSize) {
 				const chunk = preparedEntities.slice(i, i + chunkSize);
 				const batch = this._firestoreClient.batch();
@@ -741,6 +747,14 @@ export class FirestoreEntityStorageConnector<T = unknown>
 				err
 			);
 		}
+	}
+
+	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
 	}
 
 	/**

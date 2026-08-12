@@ -11,6 +11,8 @@
 		"schemaVersionService": {
 			"noMigrationRequired": "No migration required for schema \"{schemaName}\", version {version}.",
 			"migrationRequired": "Migration required for schema \"{schemaName}\" from version {from} to {to}.",
+			"connectorVersionUpdated": "Connector version changed from {from} to {to}; forcing schema migrations.",
+			"connectorVersionForceUpgrade": "Forcing migration for schema \"{schemaName}\" because connector version changed.",
 			"partitionStart": "Starting migration of {itemTotal} partitions.",
 			"partitionProgress": "Migrating partition {itemIndex} of {itemTotal}.",
 			"partitionEnd": "Completed migration of {itemTotal} partitions.",

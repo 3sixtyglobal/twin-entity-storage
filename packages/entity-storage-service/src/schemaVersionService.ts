@@ -55,6 +55,12 @@ export class SchemaVersionService implements IComponent {
 	private static readonly _VERSION_SUFFIX_RE = /^(.+)V(\d+)$/;
 
 	/**
+	 * Key used for the global connector-version record in the schema-version table.
+	 * @internal
+	 */
+	private static readonly _CONNECTOR_VERSION_KEY = "connectorVersion";
+
+	/**
 	 * The connector used to read and write SchemaVersion records.
 	 * Not readonly because finalizeMigration may return a replacement connector object.
 	 * @internal
@@ -130,6 +136,7 @@ export class SchemaVersionService implements IComponent {
 
 		// 2. Read ALL stored version records, paging through the full table.
 		const storedVersions = new Map<string, number>();
+		let storedConnectorVersion: number | undefined;
 		let cursor: string | undefined;
 		do {
 			const queryResult = await this._versionConnector.query(
@@ -140,11 +147,31 @@ export class SchemaVersionService implements IComponent {
 			);
 			for (const record of queryResult.entities ?? []) {
 				if (Is.object<SchemaVersion>(record)) {
-					storedVersions.set(record.schemaName, record.version);
+					if (record.schemaName === SchemaVersionService._CONNECTOR_VERSION_KEY) {
+						storedConnectorVersion = record.version;
+					} else {
+						storedVersions.set(record.schemaName, record.version);
+					}
 				}
 			}
 			cursor = queryResult.cursor;
 		} while (Is.stringValue(cursor));
+
+		const currentConnectorVersion = await this.calculateConnectorVersion();
+		const effectiveStoredConnectorVersion = storedConnectorVersion ?? 0;
+		const forceUpgradeAllSchemas = effectiveStoredConnectorVersion !== currentConnectorVersion;
+
+		if (forceUpgradeAllSchemas) {
+			await logging?.log({
+				source: SchemaVersionService.CLASS_NAME,
+				level: "info",
+				message: "connectorVersionUpdated",
+				data: {
+					from: effectiveStoredConnectorVersion,
+					to: currentConnectorVersion
+				}
+			});
+		}
 
 		// 3. Process SchemaVersion first so the version store itself is fully migrated
 		//    before any version records are written for other schemas.
@@ -157,6 +184,7 @@ export class SchemaVersionService implements IComponent {
 				schemaVersionSchema,
 				storedVersions,
 				historicalByBase.get(schemaVersionName),
+				forceUpgradeAllSchemas,
 				migrationOptions,
 				nodeLoggingComponentType,
 				logging
@@ -170,10 +198,18 @@ export class SchemaVersionService implements IComponent {
 				schema,
 				storedVersions,
 				historicalByBase.get(schemaName),
+				forceUpgradeAllSchemas,
 				migrationOptions,
 				nodeLoggingComponentType,
 				logging
 			);
+		}
+
+		if (
+			effectiveStoredConnectorVersion !== currentConnectorVersion ||
+			Is.undefined(storedConnectorVersion)
+		) {
+			await this.writeConnectorVersion(currentConnectorVersion);
 		}
 	}
 
@@ -184,6 +220,7 @@ export class SchemaVersionService implements IComponent {
 	 * @param schema The current schema definition.
 	 * @param storedVersions The full map of stored version records.
 	 * @param history The versioned-schema map for this schema (historicalByBase.get(schemaName)), or undefined if none exist.
+	 * @param forceUpgradeAllSchemas True when any connector version changed and all schemas must re-run connector bootstrap.
 	 * @param migrationOptions The migration options to pass through to MigrationHelper.
 	 * @param loggingComponentType The optional component type to use for logging the migration progress.
 	 * @param logging An optional logging component to pass through to MigrationHelper for migration progress logging.
@@ -194,6 +231,7 @@ export class SchemaVersionService implements IComponent {
 		schema: IEntitySchema,
 		storedVersions: Map<string, number>,
 		history: Map<number, IEntitySchema> | undefined,
+		forceUpgradeAllSchemas: boolean,
 		migrationOptions: IMigrationOptions,
 		loggingComponentType: string | undefined,
 		logging: ILoggingComponent | undefined
@@ -258,16 +296,27 @@ export class SchemaVersionService implements IComponent {
 
 		// No-op: stored version already matches current.
 		if (resolvedStoredVersion === currentVersion) {
+			if (!forceUpgradeAllSchemas) {
+				await logging?.log({
+					source: SchemaVersionService.CLASS_NAME,
+					level: "info",
+					message: "noMigrationRequired",
+					data: {
+						schemaName,
+						version: resolvedStoredVersion
+					}
+				});
+				return;
+			}
+
 			await logging?.log({
 				source: SchemaVersionService.CLASS_NAME,
 				level: "info",
-				message: "noMigrationRequired",
+				message: "connectorVersionForceUpgrade",
 				data: {
-					schemaName,
-					version: resolvedStoredVersion
+					schemaName
 				}
 			});
-			return;
 		}
 
 		await logging?.log({
@@ -377,6 +426,39 @@ export class SchemaVersionService implements IComponent {
 			version,
 			updatedAt: new Date().toISOString()
 		});
+	}
+
+	/**
+	 * Upserts the global connector-version record.
+	 * @param connectorVersion The connector implementation version.
+	 * @internal
+	 */
+	private async writeConnectorVersion(connectorVersion: number): Promise<void> {
+		await this._versionConnector.set({
+			schemaName: SchemaVersionService._CONNECTOR_VERSION_KEY,
+			version: connectorVersion,
+			updatedAt: new Date().toISOString()
+		});
+	}
+
+	/**
+	 * Get the global connector version from a migration-capable connector.
+	 * Missing connectorVersion support is treated as version 0.
+	 * @returns The connector version.
+	 * @internal
+	 */
+	private async calculateConnectorVersion(): Promise<number> {
+		if (!this._versionConnector || !("connectorVersion" in this._versionConnector)) {
+			return 0;
+		}
+
+		const connector = this._versionConnector as IEntityStorageMigrationConnector;
+		const boundConnectorVersion = connector.connectorVersion.bind(connector);
+		if (Is.function(boundConnectorVersion)) {
+			return boundConnectorVersion();
+		}
+
+		return 0;
 	}
 
 	/**

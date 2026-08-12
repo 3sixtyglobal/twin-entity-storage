@@ -26,6 +26,7 @@ import {
 	ComparisonOperator,
 	type EntityCondition,
 	EntitySchemaFactory,
+	EntitySchemaPropertyFormat,
 	EntitySchemaHelper,
 	EntitySchemaPropertyType,
 	type IComparator,
@@ -74,6 +75,12 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _PARTITION_KEY_VALUE: string = "root";
+
+	/**
+	 * Maximum number of rows per INSERT statement in setBatch.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
 
 	/**
 	 * The name for the schema.
@@ -288,6 +295,30 @@ export class MySqlEntityStorageConnector<T = unknown>
 						tableName: this._config.tableName
 					}
 				});
+			}
+
+			for (const prop of this._entitySchema.properties ?? []) {
+				if (
+					(prop.isSecondary === true || !Is.empty(prop.sortDirection)) &&
+					prop.type !== EntitySchemaPropertyType.Object &&
+					prop.type !== EntitySchemaPropertyType.Array
+				) {
+					const columnName = String(prop.property);
+					const needsPrefix =
+						prop.type === EntitySchemaPropertyType.String &&
+						prop.format !== EntitySchemaPropertyFormat.Uuid;
+					const indexCol = needsPrefix ? `\`${columnName}\`(255)` : `\`${columnName}\``;
+					const indexName = `idx_${this._config.tableName}_${columnName}`;
+					const [indexRows] = await pool.query(
+						"SELECT COUNT(1) AS indexExists FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND index_name = ?",
+						[this._config.database, this._config.tableName, indexName]
+					);
+					if (Is.array(indexRows) && ObjectHelper.propertyGet(indexRows[0], "indexExists") === 0) {
+						await pool.query(
+							`CREATE INDEX \`${indexName}\` ON \`${this._config.database}\`.\`${this._config.tableName}\` (${indexCol})`
+						);
+					}
+				}
 			}
 		} catch (error) {
 			await nodeLogging?.log({
@@ -589,30 +620,38 @@ export class MySqlEntityStorageConnector<T = unknown>
 			});
 
 			const keys = props.map(p => p.property as string);
-			const allValues: unknown[] = [];
-
-			for (const prepared of preparedEntities) {
-				for (const prop of props) {
-					const val = prepared[prop.property];
-					if (
-						prop.type === EntitySchemaPropertyType.Object ||
-						prop.type === EntitySchemaPropertyType.Array
-					) {
-						allValues.push(Is.empty(val) ? null : JSON.stringify(val));
-					} else {
-						allValues.push(Is.empty(val) ? null : val);
-					}
-				}
-			}
-
 			const rowPlaceholder = `(${keys.map(() => "?").join(", ")})`;
-			let sql = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\``;
-			sql += ` (${keys.map(key => `\`${key}\``).join(", ")})`;
-			sql += ` VALUES ${entities.map(() => rowPlaceholder).join(", ")}`;
-			sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
+			const columnList = `(${keys.map(key => `\`${key}\``).join(", ")})`;
+			const updateClause = keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ");
+			const baseInsert = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\` ${columnList} VALUES `;
+			const onDuplicate = ` ON DUPLICATE KEY UPDATE ${updateClause};`;
 
 			const pool = await this.getPool();
-			await pool.query(sql, allValues);
+			const chunkSize = MySqlEntityStorageConnector._BATCH_CHUNK_SIZE;
+
+			for (let offset = 0; offset < preparedEntities.length; offset += chunkSize) {
+				const chunk = preparedEntities.slice(offset, offset + chunkSize);
+				const chunkValues: unknown[] = [];
+
+				for (const prepared of chunk) {
+					for (const prop of props) {
+						const val = prepared[prop.property];
+						if (
+							prop.type === EntitySchemaPropertyType.Object ||
+							prop.type === EntitySchemaPropertyType.Array
+						) {
+							chunkValues.push(Is.empty(val) ? null : JSON.stringify(val));
+						} else {
+							chunkValues.push(Is.empty(val) ? null : val);
+						}
+					}
+				}
+
+				await pool.query(
+					`${baseInsert}${chunk.map(() => rowPlaceholder).join(", ")}${onDuplicate}`,
+					chunkValues
+				);
+			}
 		} catch (err) {
 			throw new GeneralError(
 				MySqlEntityStorageConnector.CLASS_NAME,
@@ -1008,6 +1047,14 @@ export class MySqlEntityStorageConnector<T = unknown>
 				err
 			);
 		}
+	}
+
+	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
 	}
 
 	/**

@@ -12,6 +12,7 @@ import {
 	Coerce,
 	ComponentFactory,
 	ConflictError,
+	Converter,
 	GeneralError,
 	Guards,
 	Is,
@@ -71,6 +72,12 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _PARTITION_KEY_VALUE: string = "root";
+
+	/**
+	 * Maximum number of rows per INSERT statement in setBatch.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
 
 	/**
 	 * The name for the schema.
@@ -234,6 +241,20 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 						tableName: this._config.tableName
 					}
 				});
+			}
+
+			for (const prop of this._entitySchema.properties ?? []) {
+				if (
+					(prop.isSecondary === true || !Is.empty(prop.sortDirection)) &&
+					prop.type !== EntitySchemaPropertyType.Object &&
+					prop.type !== EntitySchemaPropertyType.Array
+				) {
+					const columnName = String(prop.property);
+					const indexName = `idx_${this._config.tableName}_${columnName}`;
+					await dbConnection.unsafe(
+						`CREATE INDEX IF NOT EXISTS "${indexName}" ON "${this._config.tableName}" ("${columnName}")`
+					);
+				}
 			}
 		} catch (error) {
 			await nodeLogging?.log({
@@ -573,27 +594,32 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			});
 			const keys = props.map(p => p.property as string);
 
-			const allValues: unknown[] = [];
-			const rowPlaceholders: string[] = [];
-
-			for (const prepared of preparedEntities) {
-				const rowValues: string[] = [];
-				for (const prop of props) {
-					const val = prepared[prop.property];
-					allValues.push(Is.empty(val) ? null : val);
-					rowValues.push(`$${allValues.length}`);
-				}
-				rowPlaceholders.push(`(${rowValues.join(", ")})`);
-			}
-
-			let sql = `INSERT INTO "${this._config.tableName}"`;
-			sql += ` (${keys.map(key => `"${key}"`).join(", ")})`;
-			sql += ` VALUES ${rowPlaceholders.join(", ")}`;
-			sql += ` ON CONFLICT ("${PostgreSqlEntityStorageConnector._PARTITION_KEY}", "${this._primaryKeyProperty.property as string}")`;
-			sql += ` DO UPDATE SET ${keys.map(key => `"${key}" = EXCLUDED."${key}"`).join(", ")};`;
-
 			const dbConnection = await this.createConnection();
-			await dbConnection.unsafe(sql, allValues as ParameterOrJSON<never>[]);
+			const chunkSize = PostgreSqlEntityStorageConnector._BATCH_CHUNK_SIZE;
+
+			for (let offset = 0; offset < preparedEntities.length; offset += chunkSize) {
+				const chunk = preparedEntities.slice(offset, offset + chunkSize);
+				const allValues: unknown[] = [];
+				const rowPlaceholders: string[] = [];
+
+				for (const prepared of chunk) {
+					const rowValues: string[] = [];
+					for (const prop of props) {
+						const val = prepared[prop.property];
+						allValues.push(Is.empty(val) ? null : val);
+						rowValues.push(`$${allValues.length}`);
+					}
+					rowPlaceholders.push(`(${rowValues.join(", ")})`);
+				}
+
+				let sql = `INSERT INTO "${this._config.tableName}"`;
+				sql += ` (${keys.map(key => `"${key}"`).join(", ")})`;
+				sql += ` VALUES ${rowPlaceholders.join(", ")}`;
+				sql += ` ON CONFLICT ("${PostgreSqlEntityStorageConnector._PARTITION_KEY}", "${this._primaryKeyProperty.property as string}")`;
+				sql += ` DO UPDATE SET ${keys.map(key => `"${key}" = EXCLUDED."${key}"`).join(", ")};`;
+
+				await dbConnection.unsafe(sql, allValues as ParameterOrJSON<never>[]);
+			}
 		} catch (err) {
 			throw new GeneralError(
 				PostgreSqlEntityStorageConnector.CLASS_NAME,
@@ -788,6 +814,14 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
+	}
+
+	/**
 	 * Get all the distinct partition context ids from the storage.
 	 * @returns An array of context id objects, one per unique partition.
 	 */
@@ -920,25 +954,70 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		try {
 			const returnSize = limit ?? PostgreSqlEntityStorageConnector._DEFAULT_LIMIT;
 
-			let orderByClause: string = "";
-			if (Is.arrayValue(sortProperties)) {
-				const orderClauses: string[] = [];
-				for (const sortProperty of sortProperties) {
-					const direction = sortProperty.sortDirection === SortDirection.Ascending ? "ASC" : "DESC";
-					orderClauses.push(`"${String(sortProperty.property)}" ${direction}`);
+			const pkPropName = String(this._primaryKeyProperty.property);
+
+			const sortsByPK =
+				Is.array(sortProperties) && sortProperties.some(s => String(s.property) === pkPropName);
+
+			const keySetCols: { prop: string; asc: boolean }[] = [];
+			if (Is.array(sortProperties)) {
+				for (const s of sortProperties) {
+					keySetCols.push({
+						prop: String(s.property),
+						asc: s.sortDirection === SortDirection.Ascending
+					});
 				}
-				orderByClause = `ORDER BY ${orderClauses.join(", ")}`;
 			}
+			if (!sortsByPK) {
+				keySetCols.push({ prop: pkPropName, asc: true });
+			}
+
+			const requestedProps = properties ? new Set(properties.map(p => String(p))) : undefined;
+			const internallyAdded = new Set<string>();
+
+			let selectClause: string;
+			if (requestedProps) {
+				const selectSet = new Set(requestedProps);
+				for (const col of keySetCols) {
+					if (!selectSet.has(col.prop)) {
+						selectSet.add(col.prop);
+						internallyAdded.add(col.prop);
+					}
+				}
+				selectClause = [...selectSet].map(p => `"${p}"`).join(", ");
+			} else {
+				selectClause = "*";
+			}
+
+			const orderByClause = `ORDER BY ${keySetCols.map(c => `"${c.prop}" ${c.asc ? "ASC" : "DESC"}`).join(", ")}`;
 
 			const { whereClauses, values } = this.buildWhereClause(conditions, partitionKey);
 
-			const startIndex = Coerce.number(cursor) ?? 0;
+			if (Is.stringBase64(cursor)) {
+				const parsedCursor = ObjectHelper.fromBytes<{ i: string; sv?: unknown[] }>(
+					Converter.base64ToBytes(cursor)
+				);
+				const lastValues: unknown[] = [...(parsedCursor.sv ?? []), parsedCursor.i];
+				const orParts: string[] = [];
+				for (let i = 0; i < keySetCols.length; i++) {
+					const parts: string[] = [];
+					for (let j = 0; j < i; j++) {
+						values.push(lastValues[j] as ParameterOrJSON<never>);
+						parts.push(`"${keySetCols[j].prop}" = $${values.length}`);
+					}
+					const op = keySetCols[i].asc ? ">" : "<";
+					values.push(lastValues[i] as ParameterOrJSON<never>);
+					parts.push(`"${keySetCols[i].prop}" ${op} $${values.length}`);
+					orParts.push(parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`);
+				}
+				whereClauses.push(`(${orParts.join(" OR ")})`);
+			}
 
-			sql = `SELECT ${properties ? properties.map(p => `"${String(p)}"`).join(", ") : "*"} FROM "${this._config.tableName}"`;
+			sql = `SELECT ${selectClause} FROM "${this._config.tableName}"`;
 			if (whereClauses.length > 0) {
 				sql += ` WHERE ${whereClauses.join(" AND ")}`;
 			}
-			sql += ` ${orderByClause} LIMIT ${returnSize + 1} OFFSET ${startIndex}`;
+			sql += ` ${orderByClause} LIMIT ${returnSize + 1}`;
 
 			const dbConnection = await this.createConnection();
 			const rows = await dbConnection.unsafe(sql, values);
@@ -974,16 +1053,31 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			const hasMore = Is.array(rows) && rows.length > returnSize;
 			const resultRows = hasMore ? rows.slice(0, returnSize) : rows;
 			const entities = resultRows as unknown as Partial<T>[];
+
+			let nextCursor: string | undefined;
+			if (hasMore && entities.length > 0) {
+				const lastRow = entities[entities.length - 1];
+				const sortValues = keySetCols
+					.slice(0, -1)
+					.map(c => ObjectHelper.propertyGet(lastRow, c.prop));
+				const lastId = ObjectHelper.propertyGet<string>(lastRow, pkPropName);
+				if (Is.stringValue(lastId)) {
+					const cursorData: { i: string; sv?: unknown[] } =
+						sortValues.length > 0 ? { i: lastId, sv: sortValues } : { i: lastId };
+					nextCursor = Converter.bytesToBase64(ObjectHelper.toBytes(cursorData));
+				}
+			}
+
 			for (let i = 0; i < entities.length; i++) {
 				entities[i] = EntityStorageHelper.unPrepareEntity(entities[i], [
 					PostgreSqlEntityStorageConnector._PARTITION_KEY
 				]);
+				for (const col of internallyAdded) {
+					ObjectHelper.propertyDelete(entities[i], col);
+				}
 			}
 
-			return {
-				entities,
-				cursor: hasMore ? Coerce.string(startIndex + returnSize) : undefined
-			};
+			return { entities, cursor: nextCursor };
 		} catch (err) {
 			throw new GeneralError(
 				PostgreSqlEntityStorageConnector.CLASS_NAME,

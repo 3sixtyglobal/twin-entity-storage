@@ -60,6 +60,12 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	private static readonly _DEFAULT_LIMIT: number = 40;
 
 	/**
+	 * Maximum number of documents per bulkWrite call.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
 	 * The name for the schema.
 	 * @internal
 	 */
@@ -178,7 +184,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 				}
 			});
 
-			await this.getCollection();
+			const collection = await this.getCollection();
 
 			await nodeLogging?.log({
 				level: "info",
@@ -189,6 +195,14 @@ export class MongoDbEntityStorageConnector<T = unknown>
 					collectionName: this._config.collection
 				}
 			});
+
+			for (const prop of this._entitySchema.properties ?? []) {
+				if (prop.isPrimary === true) {
+					await collection.createIndex({ [String(prop.property)]: 1 }, { unique: true });
+				} else if (prop.isSecondary === true || !Is.empty(prop.sortDirection)) {
+					await collection.createIndex({ [String(prop.property)]: 1 });
+				}
+			}
 		} catch (error) {
 			await nodeLogging?.log({
 				level: "error",
@@ -435,22 +449,27 @@ export class MongoDbEntityStorageConnector<T = unknown>
 
 		try {
 			const collection = await this.getCollection();
-			await collection.bulkWrite(
-				preparedEntities.map(prepared => {
-					const filter: { [key: string]: unknown } = {
-						[primaryKey.property]: prepared[primaryKey.property]
-					};
-					return {
-						updateOne: {
-							filter,
-							update: {
-								$set: prepared as Partial<Document>
-							},
-							upsert: true
-						}
-					};
-				})
-			);
+			const chunkSize = MongoDbEntityStorageConnector._BATCH_CHUNK_SIZE;
+			for (let offset = 0; offset < preparedEntities.length; offset += chunkSize) {
+				const chunk = preparedEntities.slice(offset, offset + chunkSize);
+				await collection.bulkWrite(
+					chunk.map(prepared => {
+						const filter: { [key: string]: unknown } = {
+							[primaryKey.property]: prepared[primaryKey.property]
+						};
+						return {
+							updateOne: {
+								filter,
+								update: {
+									$set: prepared as Partial<Document>
+								},
+								upsert: true
+							}
+						};
+					}),
+					{ ordered: false }
+				);
+			}
 		} catch (err) {
 			throw new GeneralError(
 				MongoDbEntityStorageConnector.CLASS_NAME,
@@ -720,11 +739,21 @@ export class MongoDbEntityStorageConnector<T = unknown>
 
 		try {
 			const prefix = `${this._config.collection}_`;
+			const db = this._client.db(this._config.database);
 			const collections = await this.listPartitionCollections();
-
-			return collections.map(col =>
-				ContextIdHelper.shortSplit(this._partitionContextIds ?? [], col.name.slice(prefix.length))
-			);
+			const result: IContextIds[] = [];
+			for (const col of collections) {
+				const count = await db.collection(col.name).estimatedDocumentCount();
+				if (count > 0) {
+					result.push(
+						ContextIdHelper.shortSplit(
+							this._partitionContextIds ?? [],
+							col.name.slice(prefix.length)
+						)
+					);
+				}
+			}
+			return result;
 		} catch (err) {
 			throw new GeneralError(
 				MongoDbEntityStorageConnector.CLASS_NAME,
@@ -733,6 +762,14 @@ export class MongoDbEntityStorageConnector<T = unknown>
 				err
 			);
 		}
+	}
+
+	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
 	}
 
 	/**

@@ -28,14 +28,26 @@ function makeSchema(type: string, version?: number): IEntitySchema {
 	return { type, properties: [], version };
 }
 
+const CONNECTOR_VERSION_KEY = "connectorVersion";
+
+function makeConnectorVersionRecord(version: number): SchemaVersion {
+	return {
+		schemaName: CONNECTOR_VERSION_KEY,
+		version,
+		updatedAt: ""
+	};
+}
+
 function makeVersionConnector(
 	records: SchemaVersion[] = [],
-	bootstrapResult = true
-): IEntityStorageConnector<SchemaVersion> {
+	bootstrapResult = true,
+	connectorVersion = 0
+): IEntityStorageMigrationConnector<SchemaVersion> {
 	return {
 		className: () => "VersionConnectorStub",
 		getSchema: vi.fn().mockReturnValue(makeSchema("SchemaVersion", 0)),
 		bootstrap: vi.fn().mockResolvedValue(bootstrapResult),
+		connectorVersion: vi.fn().mockReturnValue(connectorVersion),
 		start: vi.fn().mockResolvedValue(undefined),
 		query: vi.fn().mockResolvedValue({ entities: records }),
 		set: vi.fn().mockResolvedValue(undefined),
@@ -44,7 +56,11 @@ function makeVersionConnector(
 		removeBatch: vi.fn(),
 		setBatch: vi.fn(),
 		count: vi.fn(),
-		empty: vi.fn()
+		empty: vi.fn(),
+		getPartitionContextIds: vi.fn().mockResolvedValue(undefined),
+		createTargetConnector: vi.fn().mockResolvedValue(undefined),
+		finalizeMigration: vi.fn().mockResolvedValue(undefined),
+		cleanupMigration: vi.fn().mockResolvedValue(undefined)
 	};
 }
 
@@ -65,6 +81,7 @@ function makeMigConnector(schemaName: string, version = 0): IEntityStorageMigrat
 		// override this with mockResolvedValue(0).
 		count: vi.fn().mockResolvedValue(1),
 		empty: vi.fn(),
+		connectorVersion: vi.fn().mockReturnValue(0),
 		// Default to undefined ("not partitioned") so existing tests keep exercising the
 		// bare count() path they were written against. Tests exercising the partitioned
 		// contract override this explicitly to [] or a populated array -
@@ -117,9 +134,9 @@ describe("SchemaVersionService", () => {
 				return makeNonMigConnector("Unknown");
 			});
 		migrateWithChainSpy = vi.spyOn(MigrationHelper, "migrateWithChain").mockResolvedValue({
-			finalConnector: undefined as unknown,
+			finalConnector: makeNonMigConnector("Unknown"),
 			migrated: 0
-		} as unknown as Awaited<ReturnType<typeof MigrationHelper.migrateWithChain>>);
+		});
 	});
 
 	afterEach(() => {
@@ -666,5 +683,264 @@ describe("SchemaVersionService", () => {
 
 		expect(connector.count).toHaveBeenCalledTimes(1);
 		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
+	});
+
+	// -------------------------------------------------------------------------
+	// start() - connector version tracking
+	// -------------------------------------------------------------------------
+
+	test("start() does not re-bootstrap when connector version matches stored connector version", async () => {
+		const schemaName = "Widget";
+		const currentVersion = 2;
+		const connectorVer = 3;
+		const connector = makeMigConnector(schemaName, currentVersion);
+		connector.connectorVersion = vi.fn().mockReturnValue(connectorVer);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(makeSchema(schemaName, currentVersion));
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector(
+			[
+				{ schemaName, version: currentVersion, updatedAt: "" },
+				makeConnectorVersionRecord(connectorVer)
+			],
+			true,
+			connectorVer
+		);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(connector.bootstrap).not.toHaveBeenCalled();
+		expect(migrateWithChainSpy).not.toHaveBeenCalled();
+		expect(vc.set).not.toHaveBeenCalled();
+	});
+
+	test("start() re-migrates when connector version has changed without a schema migration", async () => {
+		const schemaName = "Widget";
+		const currentVersion = 2;
+		const newConnectorVer = 2;
+		const connector = makeMigConnector(schemaName, currentVersion);
+		connector.connectorVersion = vi.fn().mockReturnValue(newConnectorVer);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(makeSchema(schemaName, currentVersion));
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector(
+			[{ schemaName, version: currentVersion, updatedAt: "" }, makeConnectorVersionRecord(1)],
+			true,
+			newConnectorVer
+		);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(migrateWithChainSpy).toHaveBeenCalledTimes(1);
+		expect(vc.set).toHaveBeenCalledWith(
+			expect.objectContaining({
+				schemaName,
+				version: currentVersion
+			})
+		);
+		expect(vc.set).toHaveBeenCalledWith(
+			expect.objectContaining({
+				schemaName: CONNECTOR_VERSION_KEY,
+				version: newConnectorVer
+			})
+		);
+	});
+
+	test("start() logs connectorVersionUpdated when connector version changes", async () => {
+		const schemaName = "Widget";
+		const currentVersion = 1;
+		const connector = makeMigConnector(schemaName, currentVersion);
+		connector.connectorVersion = vi.fn().mockReturnValue(2);
+		(connector.bootstrap as ReturnType<typeof vi.fn>).mockResolvedValue(true);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(makeSchema(schemaName, currentVersion));
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector(
+			[{ schemaName, version: currentVersion, updatedAt: "" }, makeConnectorVersionRecord(1)],
+			true,
+			2
+		);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		const logSpy = vi.fn();
+		ComponentFactory.register("test-logging", () => ({
+			className: () => "TestLogging",
+			log: logSpy
+		}));
+
+		try {
+			await new SchemaVersionService().start("test-logging");
+
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "connectorVersionUpdated",
+					data: { from: 1, to: 2 }
+				})
+			);
+		} finally {
+			ComponentFactory.unregister("test-logging");
+		}
+	});
+
+	test("start() forces connector migration for all schemas when any connector version changes", async () => {
+		const schemaA = "WidgetA";
+		const schemaB = "WidgetB";
+		const currentVersion = 1;
+
+		const connectorA = makeMigConnector(schemaA, currentVersion);
+		const connectorB = makeMigConnector(schemaB, currentVersion);
+		connectorA.connectorVersion = vi.fn().mockReturnValue(2);
+		connectorB.connectorVersion = vi.fn().mockReturnValue(1);
+
+		schemaNamesSpy.mockReturnValue([schemaA, schemaB]);
+		schemaGetSpy.mockImplementation((name: string) => makeSchema(name, currentVersion));
+		connectorNamesSpy.mockReturnValue([schemaA, schemaB]);
+
+		const vc = makeVersionConnector(
+			[
+				{ schemaName: schemaA, version: currentVersion, updatedAt: "" },
+				{ schemaName: schemaB, version: currentVersion, updatedAt: "" },
+				makeConnectorVersionRecord(1)
+			],
+			true,
+			2
+		);
+
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			if (name === schemaA) {
+				return connectorA;
+			}
+			return connectorB;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(migrateWithChainSpy).toHaveBeenCalledTimes(2);
+		expect(vc.set).toHaveBeenCalledWith(
+			expect.objectContaining({ schemaName: CONNECTOR_VERSION_KEY, version: 2 })
+		);
+	});
+
+	test("start() stores connector version in a separate schema-version entry on fresh install", async () => {
+		const schemaName = "Widget";
+		const currentVersion = 1;
+		const connectorVer = 2;
+		const connector = makeMigConnector(schemaName, currentVersion);
+		connector.connectorVersion = vi.fn().mockReturnValue(connectorVer);
+		(connector.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(makeSchema(schemaName, currentVersion));
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([], true, connectorVer);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(migrateWithChainSpy).not.toHaveBeenCalled();
+		expect(vc.set).toHaveBeenCalledWith(
+			expect.objectContaining({
+				schemaName,
+				version: currentVersion
+			})
+		);
+		expect(vc.set).toHaveBeenCalledWith(
+			expect.objectContaining({
+				schemaName: CONNECTOR_VERSION_KEY,
+				version: connectorVer
+			})
+		);
+	});
+
+	test("start() stores connector version in a separate schema-version entry after migration", async () => {
+		const schemaName = "Widget";
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connectorVer = 3;
+		const connector = makeMigConnector(schemaName, 1); // count() defaults to 1 (non-empty)
+		connector.connectorVersion = vi.fn().mockReturnValue(connectorVer);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([], true, connectorVer); // no stored record; count > 0 triggers legacy v0 path
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(migrateWithChainSpy).toHaveBeenCalled();
+		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
+		expect(vc.set).toHaveBeenCalledWith(
+			expect.objectContaining({
+				schemaName: CONNECTOR_VERSION_KEY,
+				version: connectorVer
+			})
+		);
+	});
+
+	test("start() does not force re-bootstrap when no connector-version entry exists", async () => {
+		const schemaName = "Widget";
+		const currentVersion = 2;
+		const connector = makeMigConnector(schemaName, currentVersion);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(makeSchema(schemaName, currentVersion));
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([{ schemaName, version: currentVersion, updatedAt: "" }]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(connector.bootstrap).not.toHaveBeenCalled();
+		expect(migrateWithChainSpy).not.toHaveBeenCalled();
 	});
 });

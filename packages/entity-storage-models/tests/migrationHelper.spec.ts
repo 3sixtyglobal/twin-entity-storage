@@ -528,6 +528,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 	): IEntityStorageMigrationConnector<{ [key: string]: unknown }> {
 		return {
 			className: () => "SourceStub",
+			connectorVersion: vi.fn().mockReturnValue(1),
 			getSchema: vi.fn().mockReturnValue({ type: "SourceSchema", properties: v0Props }),
 			bootstrap: vi.fn().mockResolvedValue(undefined),
 			start: vi.fn().mockResolvedValue(undefined),

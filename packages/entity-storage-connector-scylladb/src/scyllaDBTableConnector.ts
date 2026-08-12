@@ -48,6 +48,12 @@ export class ScyllaDBTableConnector<T = unknown>
 	public static readonly CLASS_NAME: string = nameof<ScyllaDBTableConnector>();
 
 	/**
+	 * Maximum number of queries per CQL BATCH statement in setBatch.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
 	 * The name for the schema.
 	 * @internal
 	 */
@@ -499,8 +505,13 @@ export class ScyllaDBTableConnector<T = unknown>
 				upsertQueries.push({ query: sql, params: queryParams });
 			}
 
-			await connection.batch(deleteQueries, { prepare: true });
-			await connection.batch(upsertQueries, { prepare: true });
+			const chunkSize = ScyllaDBTableConnector._BATCH_CHUNK_SIZE;
+			for (let i = 0; i < deleteQueries.length; i += chunkSize) {
+				await connection.batch(deleteQueries.slice(i, i + chunkSize), { prepare: true });
+			}
+			for (let i = 0; i < upsertQueries.length; i += chunkSize) {
+				await connection.batch(upsertQueries.slice(i, i + chunkSize), { prepare: true });
+			}
 		} catch (err) {
 			throw new GeneralError(ScyllaDBTableConnector.CLASS_NAME, "setBatchFailed", undefined, err);
 		} finally {
@@ -753,6 +764,14 @@ export class ScyllaDBTableConnector<T = unknown>
 			await this.closeConnection(connection);
 			await this.closePersistentClient();
 		}
+	}
+
+	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
 	}
 
 	/**

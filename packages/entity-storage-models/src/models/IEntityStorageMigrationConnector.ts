@@ -9,6 +9,16 @@ import type { IMigrationOptions } from "./IMigrationOptions.js";
  */
 export interface IEntityStorageMigrationConnector<T = unknown> extends IEntityStorageConnector<T> {
 	/**
+	 * Get the current version of this connector's implementation.
+	 * Increment this when the connector's bootstrap logic changes in a way that
+	 * requires re-running bootstrap on existing tables (e.g. new index definitions).
+	 * SchemaVersionService detects a mismatch and calls bootstrap() again on start-up,
+	 * so the method must be idempotent (CREATE INDEX IF NOT EXISTS, ensureIndex, etc.).
+	 * @returns The connector implementation version.
+	 */
+	connectorVersion(): number;
+
+	/**
 	 * Get a unique list of all the context ids from the storage.
 	 * Returns undefined when the connector has no partition context ids configured
 	 * (run migration once with an empty context), or an empty array when the connector

@@ -88,6 +88,18 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	private static readonly _PARTITION_KEY_VALUE: string = "root";
 
 	/**
+	 * Batch chunk size for bulk write operations.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
+	 * Number of bulk operation chunks to dispatch concurrently in setBatch.
+	 * @internal
+	 */
+	private static readonly _WRITE_CONCURRENCY: number = 10;
+
+	/**
 	 * The name for the schema.
 	 * @internal
 	 */
@@ -595,21 +607,36 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		);
 
 		try {
-			await this._container.items.executeBulkOperations(
-				preparedEntities.map(
-					prepared =>
-						({
-							operationType: BulkOperationType.Upsert,
-							partitionKey: partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
-							resourceBody: {
-								id: prepared[this._primaryKey.property] as string,
-								[CosmosDbEntityStorageConnector._PARTITION_KEY]:
-									partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
-								...(prepared as { [key: string]: unknown })
-							}
-						}) as OperationInput
-				)
-			);
+			const pk = partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE;
+			const chunkSize = CosmosDbEntityStorageConnector._BATCH_CHUNK_SIZE;
+			const concurrency = CosmosDbEntityStorageConnector._WRITE_CONCURRENCY;
+			const windowSize = chunkSize * concurrency;
+			for (let offset = 0; offset < preparedEntities.length; offset += windowSize) {
+				const window = preparedEntities.slice(offset, offset + windowSize);
+				const sends: Promise<void>[] = [];
+				for (let j = 0; j < window.length; j += chunkSize) {
+					const chunk = window.slice(j, j + chunkSize);
+					sends.push(
+						(async () => {
+							await this._container.items.executeBulkOperations(
+								chunk.map(
+									prepared =>
+										({
+											operationType: BulkOperationType.Upsert,
+											partitionKey: pk,
+											resourceBody: {
+												id: prepared[this._primaryKey.property] as string,
+												[CosmosDbEntityStorageConnector._PARTITION_KEY]: pk,
+												...(prepared as { [key: string]: unknown })
+											}
+										}) as OperationInput
+								)
+							);
+						})()
+					);
+				}
+				await Promise.all(sends);
+			}
 		} catch (err) {
 			throw new GeneralError(
 				CosmosDbEntityStorageConnector.CLASS_NAME,
@@ -1001,6 +1028,14 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 				err
 			);
 		}
+	}
+
+	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
 	}
 
 	/**

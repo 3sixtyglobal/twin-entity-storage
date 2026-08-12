@@ -768,6 +768,14 @@ export class FileEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
+	}
+
+	/**
 	 * Get a unique list of all the context ids from the storage.
 	 * @returns The list of unique context ids.
 	 */
