@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-scylladb",
-	"version": "0.9.2-next.8",
+	"version": "0.9.2-next.9",
 	"description": "ScyllaDB connector for distributed, high-throughput persistence.",
 	"repository": {
 		"type": "git",
@@ -31,14 +31,14 @@
 		"@twin.org/context": "next",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.9.2-next.8",
+		"@twin.org/entity-storage-models": "0.9.2-next.9",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next",
 		"cassandra-driver": "4.9.0",
 		"@twin.org/api-models": "next"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.9.2-next.8",
+		"@twin.org/entity-storage-connector-memory": "0.9.2-next.9",
 		"@twin.org/logging-connector-entity-storage": "next",
 		"@twin.org/logging-service": "next",
 		"@twin.org/nameof-transformer": "next",

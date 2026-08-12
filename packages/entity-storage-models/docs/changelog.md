@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2-next.9](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.2-next.8...entity-storage-models-v0.9.2-next.9) (2026-08-12)
+
+
+### Bug Fixes
+
+* use hashing to restrict index name length ([757d572](https://github.com/iotaledger/twin-entity-storage/commit/757d5728161a00c1d1865ad6df3231eecfad16f2))
+
 ## [0.9.2-next.8](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.2-next.7...entity-storage-models-v0.9.2-next.8) (2026-08-12)
 
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.2-next.9](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-file-v0.9.2-next.8...entity-storage-connector-file-v0.9.2-next.9) (2026-08-12)
+
+
+### Bug Fixes
+
+* use hashing to restrict index name length ([757d572](https://github.com/iotaledger/twin-entity-storage/commit/757d5728161a00c1d1865ad6df3231eecfad16f2))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.8 to 0.9.2-next.9
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.2-next.8 to 0.9.2-next.9
+
 ## [0.9.2-next.8](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-file-v0.9.2-next.7...entity-storage-connector-file-v0.9.2-next.8) (2026-08-12)
 
 
