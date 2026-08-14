@@ -84,6 +84,9 @@ whose stored version is behind the current version declared in EntitySchemaFacto
 SchemaVersion itself is processed first so the version store is migrated before any
 version records are written for other schemas.
 
+When config.enabled is false the service runs in detect-only mode: it identifies schemas
+that need migration and logs a warning for each one, but applies no changes.
+
 Runs after all component bootstraps, so every managed table already exists.
 
 #### Parameters
