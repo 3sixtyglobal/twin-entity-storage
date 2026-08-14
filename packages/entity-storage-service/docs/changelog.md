@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.2-next.10](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.9.2-next.9...entity-storage-service-v0.9.2-next.10) (2026-08-14)
+
+
+### Features
+
+* schema service warning ([#215](https://github.com/iotaledger/twin-entity-storage/issues/215)) ([a69c9ae](https://github.com/iotaledger/twin-entity-storage/commit/a69c9ae54506a1f5dafd0e073678a105cd9ec9b9))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.9 to 0.9.2-next.10
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.2-next.9 to 0.9.2-next.10
+
 ## [0.9.2-next.9](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.9.2-next.8...entity-storage-service-v0.9.2-next.9) (2026-08-12)
 
 
