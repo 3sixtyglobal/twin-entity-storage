@@ -99,11 +99,15 @@ export class SchemaVersionService implements IComponent {
 	 * SchemaVersion itself is processed first so the version store is migrated before any
 	 * version records are written for other schemas.
 	 *
+	 * When config.enabled is false the service runs in detect-only mode: it identifies schemas
+	 * that need migration and logs a warning for each one, but applies no changes.
+	 *
 	 * Runs after all component bootstraps, so every managed table already exists.
 	 * @param nodeLoggingComponentType An optional logging component type.
 	 */
 	public async start(nodeLoggingComponentType?: string): Promise<void> {
 		const logging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+		const enabled = this._config?.enabled !== false;
 
 		const migrationOptions: IMigrationOptions = {
 			batchSize: this._config?.batchSize,
@@ -157,6 +161,29 @@ export class SchemaVersionService implements IComponent {
 			cursor = queryResult.cursor;
 		} while (Is.stringValue(cursor));
 
+		if (!enabled) {
+			// Detect-only: compare stored vs declared versions and warn about any lagging schemas.
+			// Schemas with no stored version record are skipped — they are either fresh installs
+			// or pre-tracking tables, neither of which can be diagnosed safely here.
+			for (const [schemaName, schema] of currentSchemas) {
+				const storedVersion = storedVersions.get(schemaName);
+				const currentVersion = EntitySchemaHelper.getVersion(schema);
+				if (!Is.undefined(storedVersion) && storedVersion < currentVersion) {
+					await logging?.log({
+						source: SchemaVersionService.CLASS_NAME,
+						level: "warn",
+						message: "migrationDisabled",
+						data: {
+							schemaName,
+							from: storedVersion,
+							to: currentVersion
+						}
+					});
+				}
+			}
+			return;
+		}
+
 		const currentConnectorVersion = await this.calculateConnectorVersion();
 		const effectiveStoredConnectorVersion = storedConnectorVersion ?? 0;
 		const forceUpgradeAllSchemas = effectiveStoredConnectorVersion !== currentConnectorVersion;
@@ -182,7 +209,7 @@ export class SchemaVersionService implements IComponent {
 			await this.processSchema(
 				schemaVersionName,
 				schemaVersionSchema,
-				storedVersions,
+				storedVersions.get(schemaVersionName),
 				historicalByBase.get(schemaVersionName),
 				forceUpgradeAllSchemas,
 				migrationOptions,
@@ -196,7 +223,7 @@ export class SchemaVersionService implements IComponent {
 			await this.processSchema(
 				schemaName,
 				schema,
-				storedVersions,
+				storedVersions.get(schemaName),
 				historicalByBase.get(schemaName),
 				forceUpgradeAllSchemas,
 				migrationOptions,
@@ -218,7 +245,7 @@ export class SchemaVersionService implements IComponent {
 	 * Extracted to avoid continue statements in the outer loop.
 	 * @param schemaName The base schema name.
 	 * @param schema The current schema definition.
-	 * @param storedVersions The full map of stored version records.
+	 * @param storedVersion The full map of stored version records.
 	 * @param history The versioned-schema map for this schema (historicalByBase.get(schemaName)), or undefined if none exist.
 	 * @param forceUpgradeAllSchemas True when any connector version changed and all schemas must re-run connector bootstrap.
 	 * @param migrationOptions The migration options to pass through to MigrationHelper.
@@ -229,7 +256,7 @@ export class SchemaVersionService implements IComponent {
 	private async processSchema(
 		schemaName: string,
 		schema: IEntitySchema,
-		storedVersions: Map<string, number>,
+		storedVersion: number | undefined,
 		history: Map<number, IEntitySchema> | undefined,
 		forceUpgradeAllSchemas: boolean,
 		migrationOptions: IMigrationOptions,
@@ -252,7 +279,6 @@ export class SchemaVersionService implements IComponent {
 		const { connector, factoryKey } = connectorEntry;
 
 		// Resolve the stored version, applying the backwards-compat baseline when no record exists.
-		const stored = storedVersions.get(schemaName);
 		let resolvedStoredVersion: number;
 
 		// Captured when the fresh-vs-legacy check below already resolved the connector's
@@ -267,7 +293,7 @@ export class SchemaVersionService implements IComponent {
 			partitions = await boundGetPartitionContextIds();
 		}
 
-		if (stored === undefined) {
+		if (storedVersion === undefined) {
 			// No version record: check whether the table has any data.
 			// Empty table → this is a fresh bootstrap; seed at the current version so the
 			// migration chain never runs over an already-current-shape (or empty) table.
@@ -291,7 +317,7 @@ export class SchemaVersionService implements IComponent {
 			resolvedStoredVersion = 0;
 			await this.writeVersion(schemaName, 0);
 		} else {
-			resolvedStoredVersion = stored;
+			resolvedStoredVersion = storedVersion;
 		}
 
 		// No-op: stored version already matches current.

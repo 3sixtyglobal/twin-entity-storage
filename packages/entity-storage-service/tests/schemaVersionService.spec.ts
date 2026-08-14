@@ -943,4 +943,149 @@ describe("SchemaVersionService", () => {
 		expect(connector.bootstrap).not.toHaveBeenCalled();
 		expect(migrateWithChainSpy).not.toHaveBeenCalled();
 	});
+
+	// -------------------------------------------------------------------------
+	// start() - enabled: false (detect-only mode)
+	// -------------------------------------------------------------------------
+
+	test("start() with enabled:false does not migrate when a schema needs migration", async () => {
+		const schemaName = "Widget";
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([{ schemaName, version: 0, updatedAt: "" }]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService({ config: { enabled: false } }).start();
+
+		expect(migrateWithChainSpy).not.toHaveBeenCalled();
+		expect(vc.set).not.toHaveBeenCalled();
+	});
+
+	test("start() with enabled:false logs migrationDisabled for each schema with a pending migration", async () => {
+		const schemaName = "Widget";
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([{ schemaName, version: 0, updatedAt: "" }]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		const logSpy = vi.fn();
+		ComponentFactory.register("test-logging", () => ({
+			className: () => "TestLogging",
+			log: logSpy
+		}));
+
+		try {
+			await new SchemaVersionService({ config: { enabled: false } }).start("test-logging");
+
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					level: "warn",
+					message: "migrationDisabled",
+					data: { schemaName, from: 0, to: 1 }
+				})
+			);
+		} finally {
+			ComponentFactory.unregister("test-logging");
+		}
+	});
+
+	test("start() with enabled:false skips schemas with no stored version record", async () => {
+		const schemaName = "Widget";
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(currentSchema);
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		// No stored version record for the schema.
+		const vc = makeVersionConnector([]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		const logSpy = vi.fn();
+		ComponentFactory.register("test-logging", () => ({
+			className: () => "TestLogging",
+			log: logSpy
+		}));
+
+		try {
+			await new SchemaVersionService({ config: { enabled: false } }).start("test-logging");
+
+			expect(logSpy).not.toHaveBeenCalledWith(
+				expect.objectContaining({ message: "migrationDisabled" })
+			);
+		} finally {
+			ComponentFactory.unregister("test-logging");
+		}
+	});
+
+	test("start() with enabled:false does not warn for schemas already at current version", async () => {
+		const schemaName = "Widget";
+		const currentVersion = 2;
+		const currentSchema = makeSchema(schemaName, currentVersion);
+		const connector = makeMigConnector(schemaName, currentVersion);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(currentSchema);
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([{ schemaName, version: currentVersion, updatedAt: "" }]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		const logSpy = vi.fn();
+		ComponentFactory.register("test-logging", () => ({
+			className: () => "TestLogging",
+			log: logSpy
+		}));
+
+		try {
+			await new SchemaVersionService({ config: { enabled: false } }).start("test-logging");
+
+			expect(logSpy).not.toHaveBeenCalled();
+		} finally {
+			ComponentFactory.unregister("test-logging");
+		}
+	});
 });

@@ -7,6 +7,11 @@
 			"connectorNotMigrationCapable": "Schema \"{schemaName}\" needs migration from version {stored} to {current} but its connector does not support automatic migration. Please migrate the schema manually before starting the node."
 		}
 	},
+	"warn": {
+		"schemaVersionService": {
+			"migrationDisabled": "Schema migration is disabled. Schema \"{schemaName}\" requires migration from version {from} to {to}. Continuing without migration may cause errors."
+		}
+	},
 	"info": {
 		"schemaVersionService": {
 			"noMigrationRequired": "No migration required for schema \"{schemaName}\", version {version}.",
