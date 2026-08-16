@@ -674,13 +674,17 @@ export class MemoryEntityStorageConnector<T = unknown>
 
 	/**
 	 * Get a unique list of all the context ids from the storage.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		if (!Is.arrayValue(this._partitionContextIds)) {
 			return undefined;
 		}
-		return this.withLock(entities => {
+		const skipped = new Set<string>();
+		const result = await this.withLock(entities => {
 			const contextIds: { [id: string]: IContextIds } = {};
 			for (const entity of entities) {
 				const partitionId = ObjectHelper.propertyGet(
@@ -688,14 +692,33 @@ export class MemoryEntityStorageConnector<T = unknown>
 					MemoryEntityStorageConnector._PARTITION_KEY
 				);
 				if (Is.stringValue(partitionId)) {
-					contextIds[partitionId] = ContextIdHelper.shortSplit(
+					const split = EntityStorageHelper.tryShortSplit(
 						this._partitionContextIds ?? [],
 						partitionId
 					);
+					if (Is.undefined(split)) {
+						skipped.add(partitionId);
+					} else {
+						contextIds[partitionId] = split;
+					}
 				}
 			}
 			return { result: Object.values(contextIds) };
 		});
+		if (skipped.size > 0) {
+			const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+			await nodeLogging?.log({
+				level: "warn",
+				source: MemoryEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "partitionIdsSkipped",
+				data: {
+					expected: this._partitionContextIds?.length,
+					partitionIds: Array.from(skipped).join(", ")
+				}
+			});
+		}
+		return result;
 	}
 
 	/**

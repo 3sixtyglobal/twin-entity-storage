@@ -1044,9 +1044,12 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 	/**
 	 * Get all unique partition context ids present in the table.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns An array of context id objects, one per unique partition.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		if (!Is.arrayValue(this._partitionContextIds)) {
 			return undefined;
 		}
@@ -1056,10 +1059,36 @@ export class MySqlEntityStorageConnector<T = unknown>
 			const [rows] = await pool.query(
 				`SELECT DISTINCT \`${MySqlEntityStorageConnector._PARTITION_KEY}\` FROM \`${this._config.database}\`.\`${this._config.tableName}\``
 			);
-			return (rows as { [key: string]: string }[])
+			const partitionIds = (rows as { [key: string]: string }[])
 				.map(row => row[MySqlEntityStorageConnector._PARTITION_KEY])
-				.filter((id): id is string => Is.stringValue(id))
-				.map(id => ContextIdHelper.shortSplit(this._partitionContextIds ?? [], id));
+				.filter((id): id is string => Is.stringValue(id));
+			const contextIds: IContextIds[] = [];
+			const skipped: string[] = [];
+			for (const partitionId of partitionIds) {
+				const split = EntityStorageHelper.tryShortSplit(
+					this._partitionContextIds ?? [],
+					partitionId
+				);
+				if (Is.undefined(split)) {
+					skipped.push(partitionId);
+				} else {
+					contextIds.push(split);
+				}
+			}
+			if (Is.arrayValue(skipped)) {
+				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+				await nodeLogging?.log({
+					level: "warn",
+					source: MySqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "partitionIdsSkipped",
+					data: {
+						expected: this._partitionContextIds?.length,
+						partitionIds: skipped.join(", ")
+					}
+				});
+			}
+			return contextIds;
 		} catch (err) {
 			throw new GeneralError(
 				MySqlEntityStorageConnector.CLASS_NAME,

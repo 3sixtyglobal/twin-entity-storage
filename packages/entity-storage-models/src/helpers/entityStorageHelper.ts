@@ -1,6 +1,7 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { GeneralError, Is, ObjectHelper } from "@twin.org/core";
+import { ContextIdHelper, type IContextIds } from "@twin.org/context";
+import { GeneralError, Guards, Is, ObjectHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	type EntityCondition,
@@ -33,6 +34,32 @@ export class EntityStorageHelper {
 	 * @internal
 	 */
 	private static readonly _INVALID_PATH_SEGMENT: RegExp = /['";#\\]|--|\/\*|\*\/|[\x00-\x1F\x7F]/;
+
+	/**
+	 * Split a stored partition id into context ids when its depth matches the configured partition keys.
+	 * @param partitionContextIds The configured partition context id keys.
+	 * @param partitionId The stored partition id.
+	 * @param separator The separator used between the partition id parts.
+	 * @returns The context ids, or undefined when the partition id depth does not match.
+	 */
+	public static tryShortSplit(
+		partitionContextIds: string[],
+		partitionId: string,
+		separator: string = "/"
+	): IContextIds | undefined {
+		Guards.arrayValue<string>(
+			EntityStorageHelper.CLASS_NAME,
+			nameof(partitionContextIds),
+			partitionContextIds
+		);
+		Guards.stringValue(EntityStorageHelper.CLASS_NAME, nameof(partitionId), partitionId);
+
+		if (partitionId.split(separator).length !== partitionContextIds.length) {
+			return undefined;
+		}
+
+		return ContextIdHelper.shortSplit(partitionContextIds, partitionId, separator);
+	}
 
 	/**
 	 * Prepare the entity by handling undefined and null values and validating it against the schema.

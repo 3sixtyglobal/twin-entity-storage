@@ -756,9 +756,12 @@ export class ScyllaDBTableConnector<T = unknown>
 
 	/**
 	 * Get all the distinct partition context ids from the storage.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns An array of context id objects, one per unique partition.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		if (!Is.arrayValue(this._partitionContextIds)) {
 			return undefined;
 		}
@@ -772,13 +775,32 @@ export class ScyllaDBTableConnector<T = unknown>
 				0
 			);
 			const seen = new Set<string>();
+			const skipped = new Set<string>();
 			const contextIds: IContextIds[] = [];
 			for (const row of result.rows) {
 				const id = row[AbstractScyllaDBConnector.PARTITION_KEY] as string;
 				if (Is.stringValue(id) && !seen.has(id)) {
 					seen.add(id);
-					contextIds.push(ContextIdHelper.shortSplit(this._partitionContextIds ?? [], id));
+					const split = EntityStorageHelper.tryShortSplit(this._partitionContextIds ?? [], id);
+					if (Is.undefined(split)) {
+						skipped.add(id);
+					} else {
+						contextIds.push(split);
+					}
 				}
+			}
+			if (skipped.size > 0) {
+				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+				await nodeLogging?.log({
+					level: "warn",
+					source: ScyllaDBTableConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "partitionIdsSkipped",
+					data: {
+						expected: this._partitionContextIds?.length,
+						partitionIds: Array.from(skipped).join(", ")
+					}
+				});
 			}
 			return contextIds;
 		} catch (err) {
@@ -838,7 +860,7 @@ export class ScyllaDBTableConnector<T = unknown>
 
 		if (await finalConnector.bootstrap(loggingComponentType)) {
 			// Since there is no rename, we need to copy the data from the migration table to the new table
-			const partitions = await targetConnector.getPartitionContextIds();
+			const partitions = await targetConnector.getPartitionContextIds(loggingComponentType);
 			const batchSize = options?.batchSize ?? ScyllaDBTableConnector.DEFAULT_LIMIT;
 			await this.bulkCopy(targetConnector, finalConnector, partitions, batchSize);
 

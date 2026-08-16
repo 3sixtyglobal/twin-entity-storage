@@ -1,6 +1,7 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore, type IContextIds } from "@twin.org/context";
+import { ComponentFactory } from "@twin.org/core";
 import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
 import {
 	MigrationHelper,
@@ -185,11 +186,14 @@ const originalMigrateWithChain = MigrationHelper.migrateWithChain.bind(Migration
 let trackedConnectors: IEntityStorageConnector[] = [];
 
 // Swap this factory to run these tests against a different connector implementation.
-// It receives the entity schema name and optional partition context ids and must return
-// a fresh, bootstrapped IEntityStorageMigrationConnector configured for those settings.
+// It receives the entity schema name, optional partition context ids and an optional
+// storage id, and must return a fresh, bootstrapped IEntityStorageMigrationConnector
+// configured for those settings. Calls sharing a storageId must resolve to the same
+// underlying storage.
 let createConnector: (
 	entitySchema: string,
-	partitionContextIds?: string[]
+	partitionContextIds?: string[],
+	storageId?: string
 ) => Promise<IEntityStorageMigrationConnector>;
 
 describe("DynamoDbEntityStorageConnector - partitioning and migration", () => {
@@ -227,11 +231,14 @@ describe("DynamoDbEntityStorageConnector - partitioning and migration", () => {
 			EntitySchemaHelper.getSchema(MigMultiFieldB)
 		);
 
-		createConnector = async (entitySchema, partitionContextIds) => {
+		createConnector = async (entitySchema, partitionContextIds, storageId) => {
 			currentConnector = new DynamoDbEntityStorageConnector({
 				entitySchema,
 				partitionContextIds,
-				config: TEST_DYNAMODB_CONFIG
+				config: {
+					...TEST_DYNAMODB_CONFIG,
+					tableName: `${TEST_DYNAMODB_CONFIG.tableName}${storageId ?? ""}`
+				}
 			});
 			await currentConnector.bootstrap?.();
 			trackedConnectors.push(currentConnector);
@@ -335,6 +342,43 @@ describe("DynamoDbEntityStorageConnector - partitioning and migration", () => {
 			const result = await entityStorage.getPartitionContextIds();
 			expect(result).toHaveLength(2);
 		});
+
+		test("skips partition ids whose depth does not match the configured partition keys", async () => {
+			const storageId = `ms${Date.now().toString(36)}`;
+			const legacyStorage = (await createConnector(
+				nameof<MigV1>(),
+				["user"],
+				storageId
+			)) as IEntityStorageMigrationConnector<MigV1>;
+			await legacyStorage.set({ id: "1", legacyField: "a" });
+
+			const entityStorage = (await createConnector(
+				nameof<MigV1>(),
+				["tenant", "user"],
+				storageId
+			)) as IEntityStorageMigrationConnector<MigV1>;
+			currentUser = "user1";
+			await entityStorage.set({ id: "2", legacyField: "b" });
+
+			const logSpy = vi.fn();
+			ComponentFactory.register("test-logging", () => ({
+				className: () => "TestLogging",
+				log: logSpy
+			}));
+			try {
+				const result = await entityStorage.getPartitionContextIds("test-logging");
+				expect(result).toEqual([{ tenant: "tenant", user: "user1" }]);
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.objectContaining({
+						level: "warn",
+						message: "partitionIdsSkipped",
+						data: expect.objectContaining({ partitionIds: "user" })
+					})
+				);
+			} finally {
+				ComponentFactory.unregister("test-logging");
+			}
+		});
 	});
 
 	// -----------------------------------------------------------------------
@@ -388,11 +432,13 @@ describe("DynamoDbEntityStorageConnector - partitioning and migration", () => {
 		});
 
 		async function makeV1Connector(
-			partitionContextIds: string[] = ["user"]
+			partitionContextIds: string[] = ["user"],
+			storageId?: string
 		): Promise<IEntityStorageMigrationConnector<MigV1>> {
 			return (await createConnector(
 				nameof<MigV1>(),
-				partitionContextIds
+				partitionContextIds,
+				storageId
 			)) as IEntityStorageMigrationConnector<MigV1>;
 		}
 
@@ -432,6 +478,33 @@ describe("DynamoDbEntityStorageConnector - partitioning and migration", () => {
 
 			expect(migrated).toBe(3);
 			expect(await finalConnector.count()).toBe(3);
+		});
+
+		test("discards entities in partitions whose depth does not match during migration", async () => {
+			const storageId = `md${Date.now().toString(36)}`;
+			const legacySource = await makeV1Connector(["user"], storageId);
+			await legacySource.set({ id: "1", legacyField: "legacy" });
+
+			const source = await makeV1Connector(["tenant", "user"], storageId);
+			currentUser = "user1";
+			await source.set({ id: "2", legacyField: "a" });
+			currentUser = "user2";
+			await source.set({ id: "3", legacyField: "b" });
+
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
+				[makeStep(source, nameof<MigV2>())]
+			);
+
+			expect(migrated).toBe(2);
+			currentUser = "user1";
+			expect(await finalConnector.get("2")).toBeDefined();
+			currentUser = "user2";
+			expect(await finalConnector.get("3")).toBeDefined();
+			currentUser = "user";
+			expect(await finalConnector.get("1")).toBeUndefined();
 		});
 
 		test("migrates with coercible string-to-integer type change", async () => {

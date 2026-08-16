@@ -426,9 +426,17 @@ The total count of entities in the storage.
 
 ### getPartitionContextIds() {#getpartitioncontextids}
 
-> **getPartitionContextIds**(): `Promise`\<`IContextIds`[] \| `undefined`\>
+> **getPartitionContextIds**(`loggingComponentType?`): `Promise`\<`IContextIds`[] \| `undefined`\>
 
 Get a unique list of all the context ids from the storage.
+
+#### Parameters
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging skipped partition ids.
 
 #### Returns
 

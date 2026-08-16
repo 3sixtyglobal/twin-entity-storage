@@ -729,9 +729,12 @@ export class FirestoreEntityStorageConnector<T = unknown>
 
 	/**
 	 * Get a unique list of all the context ids from the storage.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		const partitionContextIds = this._partitionContextIds;
 		if (!Is.arrayValue(partitionContextIds)) {
 			return undefined;
@@ -741,19 +744,36 @@ export class FirestoreEntityStorageConnector<T = unknown>
 			const prefix = `${this._config.collectionName}_`;
 			const collections = await client.listCollections();
 			const result: IContextIds[] = [];
+			const skipped: string[] = [];
 			for (const col of collections) {
 				if (col.id.startsWith(prefix)) {
 					const partitionKey = col.id.slice(prefix.length);
 					if (Is.stringValue(partitionKey)) {
-						result.push(
-							ContextIdHelper.shortSplit(
-								partitionContextIds,
-								partitionKey,
-								FirestoreEntityStorageConnector._PARTITION_SEPARATOR
-							)
+						const split = EntityStorageHelper.tryShortSplit(
+							partitionContextIds,
+							partitionKey,
+							FirestoreEntityStorageConnector._PARTITION_SEPARATOR
 						);
+						if (Is.undefined(split)) {
+							skipped.push(partitionKey);
+						} else {
+							result.push(split);
+						}
 					}
 				}
+			}
+			if (Is.arrayValue(skipped)) {
+				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+				await nodeLogging?.log({
+					level: "warn",
+					source: FirestoreEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "partitionIdsSkipped",
+					data: {
+						expected: partitionContextIds.length,
+						partitionIds: skipped.join(", ")
+					}
+				});
 			}
 			return result;
 		} catch (err) {

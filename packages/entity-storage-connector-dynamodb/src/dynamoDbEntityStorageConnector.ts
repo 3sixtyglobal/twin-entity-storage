@@ -1115,14 +1115,18 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 
 	/**
 	 * Get a unique list of all the context ids from the storage.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		if (!Is.arrayValue(this._partitionContextIds)) {
 			return undefined;
 		}
 
 		const contextIdsMap: { [id: string]: IContextIds } = {};
+		const skipped = new Set<string>();
 
 		try {
 			const docClient = await this.getDocClient();
@@ -1143,10 +1147,15 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 				for (const item of scanResult.Items ?? []) {
 					const partitionId = item[DynamoDbEntityStorageConnector._PARTITION_KEY] as string;
 					if (Is.stringValue(partitionId) && !(partitionId in contextIdsMap)) {
-						contextIdsMap[partitionId] = ContextIdHelper.shortSplit(
+						const split = EntityStorageHelper.tryShortSplit(
 							this._partitionContextIds ?? [],
 							partitionId
 						);
+						if (Is.undefined(split)) {
+							skipped.add(partitionId);
+						} else {
+							contextIdsMap[partitionId] = split;
+						}
 					}
 				}
 
@@ -1159,6 +1168,20 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 				undefined,
 				err
 			);
+		}
+
+		if (skipped.size > 0) {
+			const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+			await nodeLogging?.log({
+				level: "warn",
+				source: DynamoDbEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "partitionIdsSkipped",
+				data: {
+					expected: this._partitionContextIds?.length,
+					partitionIds: Array.from(skipped).join(", ")
+				}
+			});
 		}
 
 		return Object.values(contextIdsMap);

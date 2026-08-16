@@ -309,12 +309,22 @@ The connector implementation version.
 
 ### getPartitionContextIds() {#getpartitioncontextids}
 
-> **getPartitionContextIds**(): `Promise`\<`IContextIds`[] \| `undefined`\>
+> **getPartitionContextIds**(`loggingComponentType?`): `Promise`\<`IContextIds`[] \| `undefined`\>
 
 Get a unique list of all the context ids from the storage.
 Returns undefined when the connector has no partition context ids configured
 (run migration once with an empty context), or an empty array when the connector
 is partitioned but the table contains no entities (skip migration entirely).
+Partition ids whose depth does not match the configured partition context ids are
+skipped and reported as a warning; entities in those partitions are ignored by migration.
+
+#### Parameters
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging skipped partition ids.
 
 #### Returns
 

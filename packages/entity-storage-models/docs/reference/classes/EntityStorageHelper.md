@@ -22,6 +22,40 @@ Runtime name for the class.
 
 ## Methods
 
+### tryShortSplit() {#tryshortsplit}
+
+> `static` **tryShortSplit**(`partitionContextIds`, `partitionId`, `separator?`): `IContextIds` \| `undefined`
+
+Split a stored partition id into context ids when its depth matches the configured partition keys.
+
+#### Parameters
+
+##### partitionContextIds
+
+`string`[]
+
+The configured partition context id keys.
+
+##### partitionId
+
+`string`
+
+The stored partition id.
+
+##### separator?
+
+`string` = `"/"`
+
+The separator used between the partition id parts.
+
+#### Returns
+
+`IContextIds` \| `undefined`
+
+The context ids, or undefined when the partition id depth does not match.
+
+***
+
 ### prepareEntity() {#prepareentity}
 
 > `static` **prepareEntity**\<`T`\>(`entity`, `schema`, `additionalProperties?`, `options?`): `T`

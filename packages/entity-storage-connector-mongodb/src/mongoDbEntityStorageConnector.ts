@@ -771,9 +771,12 @@ export class MongoDbEntityStorageConnector<T = unknown>
 
 	/**
 	 * Get all unique partition context ids present in the collection.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns An array of context id objects, one per unique partition.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		if (!Is.arrayValue(this._partitionContextIds)) {
 			return undefined;
 		}
@@ -784,16 +787,34 @@ export class MongoDbEntityStorageConnector<T = unknown>
 			const db = client.db(this._config.database);
 			const collections = await this.listPartitionCollections();
 			const result: IContextIds[] = [];
+			const skipped: string[] = [];
 			for (const col of collections) {
 				const count = await db.collection(col.name).estimatedDocumentCount();
 				if (count > 0) {
-					result.push(
-						ContextIdHelper.shortSplit(
-							this._partitionContextIds ?? [],
-							col.name.slice(prefix.length)
-						)
+					const partitionId = col.name.slice(prefix.length);
+					const split = EntityStorageHelper.tryShortSplit(
+						this._partitionContextIds ?? [],
+						partitionId
 					);
+					if (Is.undefined(split)) {
+						skipped.push(partitionId);
+					} else {
+						result.push(split);
+					}
 				}
+			}
+			if (Is.arrayValue(skipped)) {
+				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+				await nodeLogging?.log({
+					level: "warn",
+					source: MongoDbEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "partitionIdsSkipped",
+					data: {
+						expected: this._partitionContextIds?.length,
+						partitionIds: skipped.join(", ")
+					}
+				});
 			}
 			return result;
 		} catch (err) {

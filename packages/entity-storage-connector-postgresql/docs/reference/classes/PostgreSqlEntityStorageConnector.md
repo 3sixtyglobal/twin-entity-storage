@@ -363,9 +363,17 @@ The connector implementation version.
 
 ### getPartitionContextIds() {#getpartitioncontextids}
 
-> **getPartitionContextIds**(): `Promise`\<`IContextIds`[] \| `undefined`\>
+> **getPartitionContextIds**(`loggingComponentType?`): `Promise`\<`IContextIds`[] \| `undefined`\>
 
 Get all the distinct partition context ids from the storage.
+
+#### Parameters
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging skipped partition ids.
 
 #### Returns
 

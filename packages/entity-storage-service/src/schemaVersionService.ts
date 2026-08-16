@@ -290,7 +290,7 @@ export class SchemaVersionService implements IComponent {
 		const boundGetPartitionContextIds =
 			migrationConnector.getPartitionContextIds?.bind(migrationConnector);
 		if (Is.function(boundGetPartitionContextIds)) {
-			partitions = await boundGetPartitionContextIds();
+			partitions = await boundGetPartitionContextIds(loggingComponentType);
 		}
 
 		if (storedVersion === undefined) {

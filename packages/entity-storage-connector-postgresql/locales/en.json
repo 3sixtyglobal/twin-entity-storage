@@ -9,6 +9,11 @@
 			"tableDropped": "Table \"{tableName}\" dropped"
 		}
 	},
+	"warn": {
+		"postgreSqlEntityStorageConnector": {
+			"partitionIdsSkipped": "Skipping partition ids whose depth does not match the {expected} configured partition keys: {partitionIds}. Entities in these partitions are ignored by migration."
+		}
+	},
 	"error": {
 		"postgreSqlEntityStorageConnector": {
 			"optimisticLockFailed": "The entity \"{conflictId}\" could not be written because the optimistic lock check failed",

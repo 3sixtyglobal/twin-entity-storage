@@ -23,9 +23,12 @@ export interface IEntityStorageMigrationConnector<T = unknown> extends IEntitySt
 	 * Returns undefined when the connector has no partition context ids configured
 	 * (run migration once with an empty context), or an empty array when the connector
 	 * is partitioned but the table contains no entities (skip migration entirely).
+	 * Partition ids whose depth does not match the configured partition context ids are
+	 * skipped and reported as a warning; entities in those partitions are ignored by migration.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns The list of unique context ids, undefined if not partitioned, or [] if partitioned but empty.
 	 */
-	getPartitionContextIds(): Promise<IContextIds[] | undefined>;
+	getPartitionContextIds(loggingComponentType?: string): Promise<IContextIds[] | undefined>;
 
 	/**
 	 * Create the target connector for performing the migration it will use a temporary storage location.

@@ -19,6 +19,11 @@
 			"sql": "SQL: \"{sql}\""
 		}
 	},
+	"warn": {
+		"scyllaDBTableConnector": {
+			"partitionIdsSkipped": "Skipping partition ids whose depth does not match the {expected} configured partition keys: {partitionIds}. Entities in these partitions are ignored by migration."
+		}
+	},
 	"error": {
 		"scyllaDBTableConnector": {
 			"optimisticLockFailed": "The entity \"{conflictId}\" could not be written because the optimistic lock check failed",

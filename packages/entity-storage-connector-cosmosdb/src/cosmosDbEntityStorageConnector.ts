@@ -1012,9 +1012,12 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 
 	/**
 	 * Get a unique list of all the context ids from the storage.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[] | undefined> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		const partitionContextIds = this._partitionContextIds;
 		if (!Is.arrayValue(partitionContextIds)) {
 			return undefined;
@@ -1026,9 +1029,30 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 					query: `SELECT DISTINCT VALUE c.${CosmosDbEntityStorageConnector._PARTITION_KEY} FROM c`
 				})
 				.fetchAll();
-			return partitionIds
-				.filter(id => Is.stringValue(id))
-				.map(id => ContextIdHelper.shortSplit(partitionContextIds, id));
+			const contextIds: IContextIds[] = [];
+			const skipped: string[] = [];
+			for (const partitionId of partitionIds.filter(id => Is.stringValue(id))) {
+				const split = EntityStorageHelper.tryShortSplit(partitionContextIds, partitionId);
+				if (Is.undefined(split)) {
+					skipped.push(partitionId);
+				} else {
+					contextIds.push(split);
+				}
+			}
+			if (Is.arrayValue(skipped)) {
+				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+				await nodeLogging?.log({
+					level: "warn",
+					source: CosmosDbEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "partitionIdsSkipped",
+					data: {
+						expected: partitionContextIds.length,
+						partitionIds: skipped.join(", ")
+					}
+				});
+			}
+			return contextIds;
 		} catch (err) {
 			throw new GeneralError(
 				CosmosDbEntityStorageConnector.CLASS_NAME,
