@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.2-next.11](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-memory-v0.9.2-next.10...entity-storage-connector-memory-v0.9.2-next.11) (2026-08-16)
+
+
+### Bug Fixes
+
+* skip partition ids with mismatched depth during partition enumeration ([#218](https://github.com/iotaledger/twin-entity-storage/issues/218)) ([8fc2386](https://github.com/iotaledger/twin-entity-storage/commit/8fc238699e2891f0c982530c011fe4438004b0ae))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.10 to 0.9.2-next.11
+
 ## [0.9.2-next.10](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-memory-v0.9.2-next.9...entity-storage-connector-memory-v0.9.2-next.10) (2026-08-14)
 
 

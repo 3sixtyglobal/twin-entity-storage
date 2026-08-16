@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2-next.11](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.2-next.10...entity-storage-models-v0.9.2-next.11) (2026-08-16)
+
+
+### Bug Fixes
+
+* skip partition ids with mismatched depth during partition enumeration ([#218](https://github.com/iotaledger/twin-entity-storage/issues/218)) ([8fc2386](https://github.com/iotaledger/twin-entity-storage/commit/8fc238699e2891f0c982530c011fe4438004b0ae))
+
 ## [0.9.2-next.10](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.2-next.9...entity-storage-models-v0.9.2-next.10) (2026-08-14)
 
 
