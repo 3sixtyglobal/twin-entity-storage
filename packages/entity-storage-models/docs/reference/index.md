@@ -29,6 +29,7 @@
 
 ## Type Aliases
 
+- [EntityPropertyRemover](type-aliases/EntityPropertyRemover.md)
 - [EntityPropertyTransformer](type-aliases/EntityPropertyTransformer.md)
 
 ## Variables

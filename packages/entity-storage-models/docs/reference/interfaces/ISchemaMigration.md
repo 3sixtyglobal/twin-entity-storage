@@ -47,6 +47,12 @@ Optional transformation for properties, usually only called for object and array
 
 #### Param
 
+**entity**
+
+The original entity before transformation.
+
+#### Param
+
 **schema1Property**
 
 The property schema in the old schema.
@@ -66,3 +72,25 @@ The value of the property in the old schema.
 #### Returns
 
 The transformed value to match the new schema.
+
+***
+
+### removeEntityProperty? {#removeentityproperty}
+
+> `optional` **removeEntityProperty?**: [`EntityPropertyRemover`](../type-aliases/EntityPropertyRemover.md)\<`T`\>
+
+Optional hook called when properties are dropped during migration.
+Receives the original entity and the list of removed property schemas,
+allowing callers to observe or record values before they are discarded.
+
+#### Param
+
+**entity**
+
+The original entity before transformation.
+
+#### Param
+
+**removedProperties**
+
+The property schemas that were dropped.

@@ -154,7 +154,7 @@ The entity transformed to the shape described by steps[last].toProperties.
 
 ### applyEntityTransform() {#applyentitytransform}
 
-> `static` **applyEntityTransform**\<`T`, `U`\>(`entity`, `schemaDiff`, `transformEntityProperty?`): `U`
+> `static` **applyEntityTransform**\<`T`, `U`\>(`entity`, `schemaDiff`, `transformEntityProperty?`, `removeEntityProperty?`): `U`
 
 Applies the entity transformation for a single diff, handling added, removed, and
 modified properties according to the provided schema diff and optional transform hook.
@@ -188,6 +188,12 @@ The schema diff between the old and new schemas.
 [`EntityPropertyTransformer`](../type-aliases/EntityPropertyTransformer.md)\<`T`, `U`\>
 
 Optional per-property transform hook for object/array properties.
+
+##### removeEntityProperty?
+
+[`EntityPropertyRemover`](../type-aliases/EntityPropertyRemover.md)\<`T`\>
+
+Optional hook called with the original entity and dropped property schemas.
 
 #### Returns
 
