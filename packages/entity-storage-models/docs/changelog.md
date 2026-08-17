@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2-next.12](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.2-next.11...entity-storage-models-v0.9.2-next.12) (2026-08-17)
+
+
+### Features
+
+* migration property remover ([#221](https://github.com/iotaledger/twin-entity-storage/issues/221)) ([f7569ec](https://github.com/iotaledger/twin-entity-storage/commit/f7569ec44529b23d5c93789818440eb65d177570))
+
 ## [0.9.2-next.11](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.2-next.10...entity-storage-models-v0.9.2-next.11) (2026-08-16)
 
 

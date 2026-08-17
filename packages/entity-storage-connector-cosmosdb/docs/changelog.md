@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.2-next.12](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-cosmosdb-v0.9.2-next.11...entity-storage-connector-cosmosdb-v0.9.2-next.12) (2026-08-17)
+
+
+### Features
+
+* migration property remover ([#221](https://github.com/iotaledger/twin-entity-storage/issues/221)) ([f7569ec](https://github.com/iotaledger/twin-entity-storage/commit/f7569ec44529b23d5c93789818440eb65d177570))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.11 to 0.9.2-next.12
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.2-next.11 to 0.9.2-next.12
+
 ## [0.9.2-next.11](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-cosmosdb-v0.9.2-next.10...entity-storage-connector-cosmosdb-v0.9.2-next.11) (2026-08-16)
 
 
