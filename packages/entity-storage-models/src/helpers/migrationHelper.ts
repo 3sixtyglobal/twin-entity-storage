@@ -16,6 +16,7 @@ import {
 } from "@twin.org/entity";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
+import type { EntityPropertyRemover } from "../models/entityPropertyRemover.js";
 import type { EntityPropertyTransformer } from "../models/entityPropertyTransformer.js";
 import type { IEntityStorageConnector } from "../models/IEntityStorageConnector.js";
 import type { IEntityStorageMigrationConnector } from "../models/IEntityStorageMigrationConnector.js";
@@ -227,7 +228,8 @@ export class MigrationHelper {
 			current = MigrationHelper.applyEntityTransform(
 				current as Partial<unknown>,
 				diff,
-				step.transformEntityProperty
+				step.transformEntityProperty,
+				step.removeEntityProperty
 			);
 		}
 		return current;
@@ -239,6 +241,7 @@ export class MigrationHelper {
 	 * @param entity The entity to transform.
 	 * @param schemaDiff The schema diff between the old and new schemas.
 	 * @param transformEntityProperty Optional per-property transform hook for object/array properties.
+	 * @param removeEntityProperty Optional hook called with the original entity and dropped property schemas.
 	 * @returns The transformed entity ready to be written to the new schema.
 	 * @throws GeneralError if a transformation is required for an object or array property but no transformEntityProperty function is provided.
 	 * @throws GeneralError if coercion of a modified property results in undefined for a non-optional target property.
@@ -246,7 +249,8 @@ export class MigrationHelper {
 	public static applyEntityTransform<T = unknown, U = unknown>(
 		entity: Partial<T>,
 		schemaDiff: IEntitySchemaDiff<T, U>,
-		transformEntityProperty?: EntityPropertyTransformer<T, U>
+		transformEntityProperty?: EntityPropertyTransformer<T, U>,
+		removeEntityProperty?: EntityPropertyRemover<T>
 	): U {
 		const newEntity = {} as U;
 
@@ -259,10 +263,6 @@ export class MigrationHelper {
 		}
 
 		for (const change of schemaDiff.added) {
-			// Preserve any value the source entity already carries for this property.
-			// This handles rows written with a newer schema before version tracking was
-			// introduced: the property exists and must not be overwritten with a default
-			// (issue #185, Bug 2 - "destructive default for added required properties").
 			const existingValue = ObjectHelper.propertyGet(entity, change.property as string);
 			if (!Is.undefined(existingValue)) {
 				ObjectHelper.propertySet(newEntity, change.property as string, existingValue);
@@ -317,7 +317,7 @@ export class MigrationHelper {
 					});
 				}
 
-				newValue = transformEntityProperty(change.from, change.to, currentValue);
+				newValue = transformEntityProperty(entity as T, change.from, change.to, currentValue);
 			}
 
 			if (newValue === undefined && !(change.to.optional ?? false)) {
@@ -332,7 +332,9 @@ export class MigrationHelper {
 			}
 		}
 
-		// Removed properties are simply dropped.
+		if (Is.arrayValue(schemaDiff.removed) && Is.function(removeEntityProperty)) {
+			removeEntityProperty(entity as T, schemaDiff.removed);
+		}
 
 		return newEntity;
 	}

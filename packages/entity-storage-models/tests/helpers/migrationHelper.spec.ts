@@ -235,7 +235,7 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ tags: "a,b,c" },
 			d,
-			(f, t, v) => (v as string).split(",")
+			(entity, f, t, v) => (v as string).split(",")
 		);
 		expect(result.tags).toEqual(["a", "b", "c"]);
 	});
@@ -253,6 +253,37 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		expect(result.id).toBe("42");
 		expect(result.newField).toBe(0);
 		expect(result.old).toBeUndefined();
+	});
+
+	test("removed property: removeEntityProperty hook called with original entity and removed schemas", () => {
+		const removed = [prop("old", EntitySchemaPropertyType.String)];
+		const d = diff({ removed });
+		const calls: { entity: unknown; props: unknown[] }[] = [];
+		MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ old: "gone" },
+			d,
+			undefined,
+			(entity, removedProperties) => {
+				calls.push({ entity, props: removedProperties });
+			}
+		);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].entity).toEqual({ old: "gone" });
+		expect(calls[0].props).toEqual(removed);
+	});
+
+	test("removed property: removeEntityProperty hook not called when no properties are removed", () => {
+		const d = diff({ unchanged: [prop("id", EntitySchemaPropertyType.String)] });
+		const calls: unknown[] = [];
+		MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ id: "1" },
+			d,
+			undefined,
+			(entity, removedProperties) => {
+				calls.push({ entity, removedProperties });
+			}
+		);
+		expect(calls).toHaveLength(0);
 	});
 
 	test("modified property: property renamed - value moved to new property name", () => {

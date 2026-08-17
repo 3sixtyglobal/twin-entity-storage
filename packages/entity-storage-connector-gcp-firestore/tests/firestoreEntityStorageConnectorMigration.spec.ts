@@ -748,7 +748,11 @@ describe("FirestoreEntityStorageConnector - partitioning and migration", () => {
 				source,
 				nameof<MigV2WithObj>(),
 				await source.getPartitionContextIds(),
-				[makeStep(source, nameof<MigV2WithObj>(), undefined, (f, t, v) => ({ label: v as string }))]
+				[
+					makeStep(source, nameof<MigV2WithObj>(), undefined, (orig, f, t, v) => ({
+						label: v as string
+					}))
+				]
 			);
 
 			expect(migrated).toBe(2);
