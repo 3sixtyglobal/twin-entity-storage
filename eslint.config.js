@@ -254,6 +254,10 @@ const tsRestrictedSyntaxCommon = [
 			'new Error is disallowed as it is not specific enough, and bypasses the i18n formatting'
 	},
 	{
+		selector: "NewExpression[callee.name='RangeError']",
+		message: 'new RangeError is disallowed; use Guards and Validation from @twin.org/core instead'
+	},
+	{
 		selector: "MemberExpression[object.name='process'][property.name='env']",
 		message:
 			'Direct access to process.env is not allowed. Use environment variable helpers or configuration instead.'
