@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore, type IContextIds } from "@twin.org/context";
-import { ComponentFactory } from "@twin.org/core";
+import { ComponentFactory, Is } from "@twin.org/core";
 import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
 import {
 	MigrationHelper,
@@ -408,7 +408,7 @@ describe("CosmosDbEntityStorageConnector - partitioning and migration", () => {
 				async (contextIds: IContextIds, fn: () => unknown) => {
 					const prevUser = currentUser;
 					const ctxUser = (contextIds as { [key: string]: string }).user;
-					if (typeof ctxUser === "string") {
+					if (Is.string(ctxUser)) {
 						currentUser = ctxUser;
 					}
 					try {

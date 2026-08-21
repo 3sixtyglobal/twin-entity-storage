@@ -426,7 +426,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 						if (
 							(prop.type === EntitySchemaPropertyType.Object ||
 								prop.type === EntitySchemaPropertyType.Array) &&
-							typeof row[propColumn] === "string"
+							Is.string(row[propColumn])
 						) {
 							let value: unknown;
 							try {

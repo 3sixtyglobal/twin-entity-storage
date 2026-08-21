@@ -1274,10 +1274,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 		}
 		// Includes on a primitive (string/number) means substring search - not natively supported.
 		// Includes on an object means array-contains, which Firestore does support.
-		if (
-			comparison === ComparisonOperator.Includes &&
-			(value === null || typeof value !== "object")
-		) {
+		if (comparison === ComparisonOperator.Includes && (value === null || !Is.object(value))) {
 			return true;
 		}
 		return false;

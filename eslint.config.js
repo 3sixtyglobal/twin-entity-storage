@@ -304,6 +304,34 @@ const tsRestrictedSyntax = [
 	{
 		selector: 'MethodDefinition[static=true] ThisExpression',
 		message: 'Do not use "this" in static methods'
+	},
+	{
+		selector: 'VariableDeclarator[definite=true]',
+		message:
+			'Definite assignment assertions (let x!: T) are disallowed. Restructure the code so TypeScript can infer definite assignment, or initialise to a safe default.'
+	},
+	{
+		selector:
+			":matches(BinaryExpression[operator='==='], BinaryExpression[operator='!=='], BinaryExpression[operator='=='], BinaryExpression[operator='!=']) > UnaryExpression[operator='typeof']",
+		message: 'Avoid runtime typeof comparisons. Use the @twin.org/core Is.* methods instead.'
+	},
+	{
+		selector:
+			':matches(FunctionDeclaration, ArrowFunctionExpression, FunctionExpression, TSDeclareFunction, TSMethodSignature, TSCallSignatureDeclaration, TSConstructSignatureDeclaration) > Identifier.params > TSTypeAnnotation > TSObjectKeyword',
+		message:
+			'Do not use `object` as a parameter type. Use a specific interface, type alias, or generic constraint instead.'
+	},
+	{
+		selector:
+			'ObjectExpression > SpreadElement > ConditionalExpression[consequent.type="ObjectExpression"][consequent.properties.length=0]',
+		message:
+			'Avoid spreading a conditional where one branch is an empty object to omit properties. Use a property with a conditional value instead: { prop: condition ? value : undefined }.'
+	},
+	{
+		selector:
+			'ObjectExpression > SpreadElement > ConditionalExpression[alternate.type="ObjectExpression"][alternate.properties.length=0]',
+		message:
+			'Avoid spreading a conditional where one branch is an empty object to omit properties. Use a property with a conditional value instead: { prop: condition ? value : undefined }.'
 	}
 ];
 

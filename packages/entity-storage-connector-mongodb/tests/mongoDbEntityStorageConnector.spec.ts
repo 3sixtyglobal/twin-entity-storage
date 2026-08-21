@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
-import { RandomHelper } from "@twin.org/core";
+import { Is, RandomHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -1221,7 +1221,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			} while (cursor !== undefined);
 
 			expect(all.length).toBe(BATCH);
-			expect(all.every(e => typeof e.value1 === "string")).toBe(true);
+			expect(all.every(e => Is.string(e.value1))).toBe(true);
 			expect(all.every(e => e.id === undefined)).toBe(true);
 		}
 	);
