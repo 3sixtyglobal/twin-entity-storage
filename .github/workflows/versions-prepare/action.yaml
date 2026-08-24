@@ -13,6 +13,10 @@ inputs:
     description: 'Explicit version string, e.g. 1.2.3. Required when semver_type is custom.'
     required: false
     default: ''
+  hotfix:
+    description: 'Hotfix mode for branch=next: skip the content alignment (which would reset next to main and erase in-flight development) and instead sync the prod manifest from main so the version computation continues from the released hotfix version.'
+    required: false
+    default: 'false'
   gpg_private_key:
     description: 'Base64-encoded GPG private key for signing commits'
     required: true
@@ -94,13 +98,35 @@ runs:
     # Using diff | apply bypasses the merge algorithm entirely, so add/add
     # conflicts and other merge-time ambiguities do not block realignment.
     # Skipped for custom version resets — those only change version numbers and
-    # should not pull in main content changes.
+    # should not pull in main content changes. Also skipped in hotfix mode:
+    # main holds only the released hotfix content, so aligning would reset next
+    # and erase in-flight development.
     - name: Align Next to Main
-      if: ${{ inputs.branch == 'next' && inputs.semver_type != 'custom' }}
+      if: ${{ inputs.branch == 'next' && inputs.semver_type != 'custom' && inputs.hotfix != 'true' }}
       shell: bash
       run: |
         cd "$TARGET_DIR"
         git diff --binary origin/next origin/main | git apply --index
+
+    # Hotfix mode: instead of the content alignment, sync only the release
+    # artifacts from main: the prod manifest (so the version script continues
+    # next's line from the released hotfix version) and the changelogs (they
+    # only exist on main, and the next full release takes next's content
+    # wholesale, so without this the hotfix entries would later be erased from
+    # main). Records next's current version for the downgrade guard.
+    - name: Sync Prod Manifest And Changelogs For Hotfix
+      if: ${{ inputs.branch == 'next' && inputs.hotfix == 'true' }}
+      shell: bash
+      run: |
+        cd "$TARGET_DIR"
+        ORIGINAL_NEXT_VERSION=$(node -e "const m=require('./release/release-please-manifest.prerelease.json');console.log(Object.values(m)[0])")
+        echo "ORIGINAL_NEXT_VERSION=$ORIGINAL_NEXT_VERSION" >> "$GITHUB_ENV"
+        git show origin/main:release/release-please-manifest.prod.json > release/release-please-manifest.prod.json
+        git ls-tree -r --name-only origin/main | grep '/docs/changelog\.md$' | while IFS= read -r CHANGELOG; do
+          git checkout origin/main -- "$CHANGELOG"
+          echo "Synced changelog: $CHANGELOG"
+        done
+        echo "Synced prod manifest from main: $(node -e "const m=require('./release/release-please-manifest.prod.json');console.log(Object.values(m)[0])") (next currently $ORIGINAL_NEXT_VERSION)"
 
     # Set up Node.js environment for running npm commands
     - name: Setup Node.js
@@ -147,6 +173,21 @@ runs:
         fi
         VERSION=$(node -e "const m=JSON.parse(require('fs').readFileSync('$MANIFEST','utf8'));console.log(Object.values(m)[0])")
         echo "RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+
+    # Backstop for hotfix mode: never move next's version line downwards. A
+    # hotfix released with a version below next's current line (possible with a
+    # customVersion validated against stale data) must fail here rather than
+    # downgrade next.
+    - name: Guard against next version downgrade
+      if: ${{ inputs.branch == 'next' && inputs.hotfix == 'true' }}
+      shell: bash
+      run: |
+        HIGHEST=$(printf '%s\n%s\n' "$ORIGINAL_NEXT_VERSION" "$RELEASE_VERSION" | sort -V | tail -1)
+        if [ "$HIGHEST" != "$RELEASE_VERSION" ] || [ "$RELEASE_VERSION" = "$ORIGINAL_NEXT_VERSION" ]; then
+          echo "::error::Computed next version $RELEASE_VERSION does not advance the current next line $ORIGINAL_NEXT_VERSION. The released hotfix version is below next's line; next was NOT modified."
+          exit 1
+        fi
+        echo "Next line advances: $ORIGINAL_NEXT_VERSION -> $RELEASE_VERSION"
 
     - name: Check for changes
       id: check-changes

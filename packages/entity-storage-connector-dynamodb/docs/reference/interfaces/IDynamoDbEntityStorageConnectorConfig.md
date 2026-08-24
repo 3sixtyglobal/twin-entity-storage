@@ -74,3 +74,11 @@ The connection timeout in milliseconds.
 
 Maximum number of attempts for each SDK request (1 = no retries).
 Defaults to the AWS SDK default (3).
+
+***
+
+### mutexTimeoutMs? {#mutextimeoutms}
+
+> `optional` **mutexTimeoutMs?**: `number`
+
+Milliseconds to wait for connector mutex locks before throwing.

@@ -11,6 +11,7 @@ Thank you for your interest in contributing to this project! This guide will hel
 - [Commit Standards](#commit-standards)
 - [Pull Request Process](#pull-request-process)
 - [Release Process](#release-process)
+- [Hotfix Releases](#hotfix-releases)
 - [Documentation](#documentation)
 
 ## Getting Started
@@ -307,6 +308,48 @@ If an open release PR still has the `autorelease: pending` label after a cancell
 | ------ | ------------------- | -------- | -------------- |
 | `next` | Development/Testing | `next`   | Prerelease     |
 | `main` | Production          | `latest` | Stable         |
+
+## Hotfix Releases
+
+A hotfix releases `main` plus selected cherry-picked fixes, without promoting everything currently on `next`.
+
+### When to use a hotfix
+
+Use a hotfix when all three of these conditions apply:
+
+- The defect affects consumers of the stable (`latest`) line.
+- The fix is small, isolated, and already merged and validated on `next`.
+- Waiting for the next full platform release is not acceptable for those consumers.
+
+If one or more of these conditions is not met, include the fix in the next full release.
+
+### Hotfix workflow
+
+1. Ensure the fix is merged into `next` first.
+2. Run the **Create Hotfix Branch** workflow with:
+   - A branch name, for example `hotfix/0.9.1`
+   - The comma-separated commit SHAs from `next`, ordered oldest to newest
+     The workflow creates the branch from `main` and cherry-picks those commits. If a cherry-pick conflicts, the run fails and no branch is pushed. In that case, prepare the branch manually.
+3. Verify the branch builds. Cherry-pick any missing dependent commits manually.
+4. Run **Release Production** with `hotfixBranch` set to the branch and either:
+   - `semverBump` set to `patch`, `minor`, or `major`, or
+   - an explicit `customVersion`
+     Do not use `promote next` in hotfix mode. The workflow rejects it because it derives the version from the `next` line while releasing different content.
+5. Review and merge the generated PRs in order (merge PR, versions PR, release PR). Before merging the release PR, confirm it has the `hotfix` label.
+6. After the release PR is merged, the remaining steps run automatically: publish, GitHub releases, creation of a realignment PR for `next` (versions and changelogs only), and deletion of the hotfix branch.
+
+### Important rules
+
+- The fix must exist on `next`. A fix that exists only on `main` is overwritten by the next full release, because that promotion uses the complete content from `next`. Any commit added directly to the hotfix branch must also be applied to `next`.
+- Keep the `hotfix` label on the hotfix release PR. This label prevents post-publish realignment from resetting `next` to `main`.
+- Cut the hotfix branch from the current `main`. If the branch is behind `main`, the workflow rejects it to avoid releasing older content. Recreate the branch instead of rebasing around the rejection.
+- For multi-repo hotfixes, release repositories in dependency order. For example, release this repository first, then update the dependency in the consumer hotfix branch and release the consumer.
+
+### Recovery
+
+- If publish fails after the release PR is merged: the merged PR keeps the `autorelease: pending` label, and later release attempts are blocked. Change that label to `autorelease: tagged` on the merged PR, then re-run the failed jobs. If the workflow itself changed, start a new workflow dispatch because re-runs use the original workflow snapshot.
+- If you abort before the release PR is merged: close the generated PR. Since `main` is only changed by merged PRs, no revert is needed. Delete the stray `release/*` branch and the hotfix branch.
+- Version behaviour: hotfix `patch`, `minor`, and `major` bumps are calculated from the production manifest. After release, `next` is moved one patch above the released version automatically (for example, releasing `0.9.1` moves `next` to `0.9.2-next.0`). Divergence across repositories during hotfixes is expected and is resolved at the next platform release by using `customVersion`.
 
 ## Documentation
 

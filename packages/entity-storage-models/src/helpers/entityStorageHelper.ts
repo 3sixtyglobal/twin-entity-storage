@@ -1,6 +1,7 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { GeneralError, Is, ObjectHelper } from "@twin.org/core";
+import { ContextIdHelper, type IContextIds } from "@twin.org/context";
+import { GeneralError, Guards, Is, ObjectHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	type EntityCondition,
@@ -35,13 +36,39 @@ export class EntityStorageHelper {
 	private static readonly _INVALID_PATH_SEGMENT: RegExp = /['";#\\]|--|\/\*|\*\/|[\x00-\x1F\x7F]/;
 
 	/**
+	 * Split a stored partition id into context ids when its depth matches the configured partition keys.
+	 * @param partitionContextIds The configured partition context id keys.
+	 * @param partitionId The stored partition id.
+	 * @param separator The separator used between the partition id parts.
+	 * @returns The context ids, or undefined when the partition id depth does not match.
+	 */
+	public static tryShortSplit(
+		partitionContextIds: string[],
+		partitionId: string,
+		separator: string = "/"
+	): IContextIds | undefined {
+		Guards.arrayValue<string>(
+			EntityStorageHelper.CLASS_NAME,
+			nameof(partitionContextIds),
+			partitionContextIds
+		);
+		Guards.stringValue(EntityStorageHelper.CLASS_NAME, nameof(partitionId), partitionId);
+
+		if (partitionId.split(separator).length !== partitionContextIds.length) {
+			return undefined;
+		}
+
+		return ContextIdHelper.shortSplit(partitionContextIds, partitionId, separator);
+	}
+
+	/**
 	 * Prepare the entity by handling undefined and null values and validating it against the schema.
 	 * @param entity The entity to handle undefined and null values for.
 	 * @param schema The schema to validate the entity against.
 	 * @param additionalProperties Optional list of additional properties to set on the entity.
 	 * @param options Options controlling how null/undefined optional properties are stored.
 	 * @param options.nullBehavior "omit" strips null/undefined optional properties before writing
-	 * (NoSQL — avoids index-key type errors). "nullify" converts undefined to null (SQL — the default).
+	 * (NoSQL - avoids index-key type errors). "nullify" converts undefined to null (SQL - the default).
 	 * @returns The entity with undefined and null values handled.
 	 */
 	public static prepareEntity<T>(

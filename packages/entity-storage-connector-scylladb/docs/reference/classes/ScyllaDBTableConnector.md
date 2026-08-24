@@ -15,6 +15,7 @@ Store entities using ScyllaDB.
 ## Implements
 
 - `IEntityStorageMigrationConnector`\<`T`\>
+- `IHealthProviderComponent`
 
 ## Constructors
 
@@ -73,6 +74,36 @@ The schema for the entities.
 #### Inherited from
 
 `AbstractScyllaDBConnector.getSchema`
+
+***
+
+### stop() {#stop}
+
+> **stop**(`nodeLoggingComponentType?`): `Promise`\<`void`\>
+
+The component needs to be stopped when the node is closed.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+Nothing.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.stop`
+
+#### Inherited from
+
+`AbstractScyllaDBConnector.stop`
 
 ***
 
@@ -255,17 +286,17 @@ The class name of the component.
 
 > **health**(): `Promise`\<`IHealth`[]\>
 
-Get the health of the component.
+Returns the health status of the component.
 
 #### Returns
 
 `Promise`\<`IHealth`[]\>
 
-The health of the component.
+The health status of the component.
 
 #### Implementation of
 
-`IEntityStorageMigrationConnector.health`
+`IHealthProviderComponent.health`
 
 ***
 
@@ -318,6 +349,10 @@ The optional conditions to match for the entities.
 #### Returns
 
 `Promise`\<`void`\>
+
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 
 #### Implementation of
 
@@ -455,15 +490,41 @@ True if the teardown process was successful.
 
 ***
 
-### getPartitionContextIds() {#getpartitioncontextids}
+### connectorVersion() {#connectorversion}
 
-> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+> **connectorVersion**(): `number`
 
-Get all the distinct partition context ids from the storage.
+Get the connector implementation version.
 
 #### Returns
 
-`Promise`\<`IContextIds`[]\>
+`number`
+
+The connector implementation version.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.connectorVersion`
+
+***
+
+### getPartitionContextIds() {#getpartitioncontextids}
+
+> **getPartitionContextIds**(`loggingComponentType?`): `Promise`\<`IContextIds`[] \| `undefined`\>
+
+Get all the distinct partition context ids from the storage.
+
+#### Parameters
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging skipped partition ids.
+
+#### Returns
+
+`Promise`\<`IContextIds`[] \| `undefined`\>
 
 An array of context id objects, one per unique partition.
 

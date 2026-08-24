@@ -21,7 +21,7 @@ class TestType {
 	public value1!: string;
 }
 
-describe("FirestoreEntityStorageConnector — injection-style input handling", () => {
+describe("FirestoreEntityStorageConnector - injection-style input handling", () => {
 	let connector: FirestoreEntityStorageConnector<TestType>;
 
 	beforeAll(() => {
@@ -42,7 +42,7 @@ describe("FirestoreEntityStorageConnector — injection-style input handling", (
 		// Firestore uses a type-safe SDK query builder with no string interpolation.
 		// Values such as "foo' OR '1'='1" are always treated as literal field values.
 		// With a live service the query resolves safely; without one it rejects with a
-		// connection error — in both cases the error must not be an injection-related one.
+		// connection error - in both cases the error must not be an injection-related one.
 		const injectionValue = "foo' OR '1'='1";
 		try {
 			await connector.query({

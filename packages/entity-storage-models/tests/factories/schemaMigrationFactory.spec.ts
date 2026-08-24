@@ -1,12 +1,12 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { SchemaMigrationFactory } from "../src/factories/schemaMigrationFactory.js";
-import type { ISchemaMigration } from "../src/models/ISchemaMigration.js";
+import { SchemaMigrationFactory } from "../../src/factories/schemaMigrationFactory.js";
+import type { ISchemaMigration } from "../../src/models/ISchemaMigration.js";
 
 describe("SchemaMigrationFactory", () => {
 	const stepKey = "SchemaMigrationFactoryTestEntity_0_1";
 
-	const step: ISchemaMigration<{ [key: string]: unknown }> = {
+	const step: ISchemaMigration = {
 		renames: [{ from: "oldField", to: "newField" }]
 	};
 
@@ -14,7 +14,7 @@ describe("SchemaMigrationFactory", () => {
 		try {
 			SchemaMigrationFactory.unregister(stepKey);
 		} catch {
-			// Already absent — ignore.
+			// Already absent - ignore.
 		}
 	});
 
@@ -34,7 +34,7 @@ describe("SchemaMigrationFactory", () => {
 	});
 
 	test("overwrites a step when the same key is registered again", () => {
-		const updated: ISchemaMigration<{ [key: string]: unknown }> = {};
+		const updated: ISchemaMigration = {};
 		SchemaMigrationFactory.register(stepKey, () => step);
 		SchemaMigrationFactory.register(stepKey, () => updated);
 		const result = SchemaMigrationFactory.get(stepKey);
@@ -43,7 +43,7 @@ describe("SchemaMigrationFactory", () => {
 
 	test("can register separate step overrides for different version increments", () => {
 		const key2 = "SchemaMigrationFactoryTestEntity_1_2";
-		const step2: ISchemaMigration<{ [key: string]: unknown }> = {};
+		const step2: ISchemaMigration = {};
 		try {
 			SchemaMigrationFactory.register(stepKey, () => step);
 			SchemaMigrationFactory.register(key2, () => step2);

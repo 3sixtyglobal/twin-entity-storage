@@ -1,12 +1,17 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	Coerce,
 	ComponentFactory,
+	ConflictError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
 	type IValidationFailure,
 	Mutex,
@@ -49,7 +54,10 @@ import type { IMemoryEntityStorageConnectorConstructorOptions } from "./models/I
  * buffer handlers.
  */
 export class MemoryEntityStorageConnector<T = unknown>
-	implements IEntityStorageConnector<T>, IEntityStorageMigrationConnector<T>
+	implements
+		IEntityStorageConnector<T>,
+		IEntityStorageMigrationConnector<T>,
+		IHealthProviderComponent
 {
 	/**
 	 * Runtime name for the class.
@@ -87,6 +95,12 @@ export class MemoryEntityStorageConnector<T = unknown>
 	private readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
 	 * The resolved storage key used as the shared buffer and lock key.
 	 * @internal
 	 */
@@ -105,7 +119,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 	private readonly _maxCapacityBytes?: number;
 
 	/**
-	 * Milliseconds to wait for the directory lock before throwing.
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
 	 * @internal
 	 */
 	private readonly _mutexTimeoutMs?: number;
@@ -140,6 +154,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 		this._storageKey = options.config.storageKey;
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
 		this._initialCapacityBytes = options.config?.initialCapacityBytes;
 		this._maxCapacityBytes = options.config?.maxCapacityBytes;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
@@ -161,6 +176,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 		return [
 			{
 				source: MemoryEntityStorageConnector.CLASS_NAME,
+				category: HealthCategory.Connectivity,
 				status: HealthStatus.Ok,
 				description: "healthDescription",
 				data: { entityType: this._storageKey }
@@ -208,7 +224,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const finalConditions = conditions ?? [];
+		const finalConditions = conditions ? [...conditions] : [];
 		if (Is.stringValue(partitionKey)) {
 			finalConditions.push({
 				property: MemoryEntityStorageConnector._PARTITION_KEY as keyof T,
@@ -236,6 +252,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns Resolves when the entity has been stored.
+	 * @throws ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(MemoryEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
@@ -244,7 +261,11 @@ export class MemoryEntityStorageConnector<T = unknown>
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const finalConditions = conditions ?? [];
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
 
 		const prepared = EntityStorageHelper.prepareEntity(
 			entity,
@@ -255,23 +276,55 @@ export class MemoryEntityStorageConnector<T = unknown>
 			{ nullBehavior: "omit" }
 		);
 
+		const baseConditions: { property: keyof T; value: unknown }[] = [];
 		if (Is.stringValue(partitionKey)) {
-			finalConditions.push({
+			baseConditions.push({
 				property: MemoryEntityStorageConnector._PARTITION_KEY as keyof T,
 				value: partitionKey
 			});
 		}
 
+		const fullConditions: { property: keyof T; value: unknown }[] = [
+			...baseConditions,
+			...(conditions ?? [])
+		];
+		if (hasVersionCheck) {
+			fullConditions.push({ property: this._versionKey as keyof T, value: submittedVersion });
+		}
+
 		return this.withLock(entities => {
-			const existingIndex = this.findItem(
-				entities,
-				prepared[this._primaryKey.property] as string,
-				undefined,
-				finalConditions
-			);
+			const entityId = prepared[this._primaryKey.property] as string;
+			const existingIndex = this.findItem(entities, entityId, undefined, fullConditions);
+
 			if (existingIndex >= 0) {
+				if (Is.stringValue(this._versionKey)) {
+					const storedVersion =
+						ObjectHelper.propertyGet<number>(entities[existingIndex], this._versionKey) ?? 0;
+					ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
+				}
 				entities[existingIndex] = prepared;
 			} else {
+				const existsIndex = this.findItem(entities, entityId, undefined, baseConditions);
+				if (existsIndex >= 0) {
+					if (Is.stringValue(this._versionKey)) {
+						throw new ConflictError(
+							MemoryEntityStorageConnector.CLASS_NAME,
+							hasVersionCheck ? "optimisticLockFailed" : "conditionFailed",
+							entityId
+						);
+					}
+					return { updated: undefined, result: undefined };
+				}
+				if (hasVersionCheck) {
+					throw new ConflictError(
+						MemoryEntityStorageConnector.CLASS_NAME,
+						"optimisticLockFailed",
+						entityId
+					);
+				}
+				if (Is.stringValue(this._versionKey)) {
+					ObjectHelper.propertySet(prepared, this._versionKey, 1);
+				}
 				entities.push(prepared);
 			}
 			return { updated: entities, result: undefined };
@@ -333,6 +386,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 	 * @param id The id of the entity to remove.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns Nothing.
+	 * @throws ConflictError when the entity exists but the supplied conditions do not match the stored state.
 	 */
 	public async remove(
 		id: string,
@@ -344,18 +398,28 @@ export class MemoryEntityStorageConnector<T = unknown>
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		const finalConditions = conditions ?? [];
+		const baseConditions: { property: keyof T; value: unknown }[] = [];
 		if (Is.stringValue(partitionKey)) {
-			finalConditions.push({
+			baseConditions.push({
 				property: MemoryEntityStorageConnector._PARTITION_KEY as keyof T,
 				value: partitionKey
 			});
 		}
 
+		const fullConditions: { property: keyof T; value: unknown }[] = [
+			...baseConditions,
+			...(conditions ?? [])
+		];
+
 		return this.withLock(entities => {
-			const index = this.findItem(entities, id, undefined, finalConditions);
+			const index = this.findItem(entities, id, undefined, fullConditions);
 			if (index >= 0) {
 				entities.splice(index, 1);
+			} else if (Is.arrayValue(conditions)) {
+				const existsIndex = this.findItem(entities, id, undefined, baseConditions);
+				if (existsIndex >= 0 && Is.stringValue(this._versionKey)) {
+					throw new ConflictError(MemoryEntityStorageConnector.CLASS_NAME, "conditionFailed", id);
+				}
 			}
 			return { updated: entities, result: undefined };
 		});
@@ -601,11 +665,26 @@ export class MemoryEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
+	}
+
+	/**
 	 * Get a unique list of all the context ids from the storage.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
-		return this.withLock(entities => {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
+		if (!Is.arrayValue(this._partitionContextIds)) {
+			return undefined;
+		}
+		const skipped = new Set<string>();
+		const result = await this.withLock(entities => {
 			const contextIds: { [id: string]: IContextIds } = {};
 			for (const entity of entities) {
 				const partitionId = ObjectHelper.propertyGet(
@@ -613,14 +692,33 @@ export class MemoryEntityStorageConnector<T = unknown>
 					MemoryEntityStorageConnector._PARTITION_KEY
 				);
 				if (Is.stringValue(partitionId)) {
-					contextIds[partitionId] = ContextIdHelper.shortSplit(
+					const split = EntityStorageHelper.tryShortSplit(
 						this._partitionContextIds ?? [],
 						partitionId
 					);
+					if (Is.undefined(split)) {
+						skipped.add(partitionId);
+					} else {
+						contextIds[partitionId] = split;
+					}
 				}
 			}
 			return { result: Object.values(contextIds) };
 		});
+		if (skipped.size > 0) {
+			const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+			await nodeLogging?.log({
+				level: "warn",
+				source: MemoryEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "partitionIdsSkipped",
+				data: {
+					expected: this._partitionContextIds?.length,
+					partitionIds: Array.from(skipped).join(", ")
+				}
+			});
+		}
+		return result;
 	}
 
 	/**

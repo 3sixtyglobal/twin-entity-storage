@@ -3,7 +3,7 @@
 Optional per-step override for a single version-to-version migration.
 Only register an entry in SchemaMigrationFactory when a step requires property
 renames or a custom object/array transform. For purely structural changes
-(add/remove/type-change fields) no entry is needed — the runner diffs the two
+(add/remove/type-change fields) no entry is needed - the runner diffs the two
 versioned schema classes (e.g. MyEntityV0 vs MyEntityV1) from EntitySchemaFactory
 automatically.
 
@@ -47,6 +47,12 @@ Optional transformation for properties, usually only called for object and array
 
 #### Param
 
+**entity**
+
+The original entity before transformation.
+
+#### Param
+
 **schema1Property**
 
 The property schema in the old schema.
@@ -66,3 +72,25 @@ The value of the property in the old schema.
 #### Returns
 
 The transformed value to match the new schema.
+
+***
+
+### removeEntityProperty? {#removeentityproperty}
+
+> `optional` **removeEntityProperty?**: [`EntityPropertyRemover`](../type-aliases/EntityPropertyRemover.md)\<`T`\>
+
+Optional hook called when properties are dropped during migration.
+Receives the original entity and the list of removed property schemas,
+allowing callers to observe or record values before they are discarded.
+
+#### Param
+
+**entity**
+
+The original entity before transformation.
+
+#### Param
+
+**removedProperties**
+
+The property schemas that were dropped.

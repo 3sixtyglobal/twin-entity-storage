@@ -48,4 +48,9 @@ export interface IDynamoDbEntityStorageConnectorConfig {
 	 * Defaults to the AWS SDK default (3).
 	 */
 	maxAttempts?: number;
+
+	/**
+	 * Milliseconds to wait for connector mutex locks before throwing.
+	 */
+	mutexTimeoutMs?: number;
 }

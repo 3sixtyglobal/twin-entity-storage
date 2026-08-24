@@ -62,6 +62,54 @@ The port to connect to.
 
 ***
 
+### pool? {#pool}
+
+> `optional` **pool?**: `object`
+
+Optional connection pool configuration.
+
+#### coreConnectionsPerHost?
+
+> `optional` **coreConnectionsPerHost?**: `number`
+
+Number of connections per local host.
+
+##### Default
+
+```ts
+1
+```
+
+#### maxRequestsPerConnection?
+
+> `optional` **maxRequestsPerConnection?**: `number`
+
+Maximum number of requests per connection.
+
+##### Default
+
+```ts
+1024
+```
+
+#### Inherited from
+
+[`IScyllaDBTableConfig`](IScyllaDBTableConfig.md).[`pool`](IScyllaDBTableConfig.md#pool)
+
+***
+
+### mutexTimeoutMs? {#mutextimeoutms}
+
+> `optional` **mutexTimeoutMs?**: `number`
+
+Milliseconds to wait for connector mutex locks before throwing.
+
+#### Inherited from
+
+[`IScyllaDBTableConfig`](IScyllaDBTableConfig.md).[`mutexTimeoutMs`](IScyllaDBTableConfig.md#mutextimeoutms)
+
+***
+
 ### tableName {#tablename}
 
 > **tableName**: `string`

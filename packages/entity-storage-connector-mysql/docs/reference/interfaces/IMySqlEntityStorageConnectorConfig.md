@@ -67,7 +67,7 @@ Maximum number of connections in pool.
 ##### Default
 
 ```ts
-10
+20
 ```
 
 #### maxIdle?
@@ -136,4 +136,4 @@ Maximum queued requests (0 = unlimited).
 
 > `optional` **mutexTimeoutMs?**: `number`
 
-Maximum milliseconds to wait for the per-directory write lock before throwing.
+Maximum milliseconds to wait for optimistic-lock mutexes before throwing.

@@ -21,7 +21,7 @@ class TestType {
 	public value1!: string;
 }
 
-describe("CosmosDbEntityStorageConnector — injection-style input handling", () => {
+describe("CosmosDbEntityStorageConnector - injection-style input handling", () => {
 	let connector: CosmosDbEntityStorageConnector<TestType>;
 
 	beforeAll(() => {
@@ -53,7 +53,7 @@ describe("CosmosDbEntityStorageConnector — injection-style input handling", ()
 		// must carry a GeneralError wrapping a network / service error, not an injection error.
 		await expect(result).rejects.toMatchObject({ name: "GeneralError" });
 		await result.catch(err => {
-			// The message must NOT be "unknownProperty" — injection is not the cause of failure.
+			// The message must NOT be "unknownProperty" - injection is not the cause of failure.
 			expect(err.message).not.toEqual("unknownProperty");
 		});
 	});

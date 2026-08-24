@@ -58,6 +58,10 @@ The optional conditions to match for the entities.
 
 The id of the entity.
 
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
+
 #### Inherited from
 
 [`IEntityStorageConnector`](IEntityStorageConnector.md).[`set`](IEntityStorageConnector.md#set)
@@ -153,6 +157,10 @@ The optional conditions to match for the entities.
 `Promise`\<`void`\>
 
 Nothing.
+
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 
 #### Inherited from
 
@@ -281,17 +289,48 @@ The total count of entities in the storage.
 
 ***
 
-### getPartitionContextIds() {#getpartitioncontextids}
+### connectorVersion() {#connectorversion}
 
-> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+> **connectorVersion**(): `number`
 
-Get a unique list of all the context ids from the storage.
+Get the current version of this connector's implementation.
+Increment this when the connector's bootstrap logic changes in a way that
+requires re-running bootstrap on existing tables (e.g. new index definitions).
+SchemaVersionService detects a mismatch and calls bootstrap() again on start-up,
+so the method must be idempotent (CREATE INDEX IF NOT EXISTS, ensureIndex, etc.).
 
 #### Returns
 
-`Promise`\<`IContextIds`[]\>
+`number`
 
-The list of unique context ids.
+The connector implementation version.
+
+***
+
+### getPartitionContextIds() {#getpartitioncontextids}
+
+> **getPartitionContextIds**(`loggingComponentType?`): `Promise`\<`IContextIds`[] \| `undefined`\>
+
+Get a unique list of all the context ids from the storage.
+Returns undefined when the connector has no partition context ids configured
+(run migration once with an empty context), or an empty array when the connector
+is partitioned but the table contains no entities (skip migration entirely).
+Partition ids whose depth does not match the configured partition context ids are
+skipped and reported as a warning; entities in those partitions are ignored by migration.
+
+#### Parameters
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging skipped partition ids.
+
+#### Returns
+
+`Promise`\<`IContextIds`[] \| `undefined`\>
+
+The list of unique context ids, undefined if not partitioned, or [] if partitioned but empty.
 
 ***
 

@@ -2,7 +2,9 @@
 
 ## Classes
 
+- [ConnectionHelper](classes/ConnectionHelper.md)
 - [EntityStorageHelper](classes/EntityStorageHelper.md)
+- [IndexHelper](classes/IndexHelper.md)
 - [MigrationHelper](classes/MigrationHelper.md)
 
 ## Interfaces
@@ -27,6 +29,7 @@
 
 ## Type Aliases
 
+- [EntityPropertyRemover](type-aliases/EntityPropertyRemover.md)
 - [EntityPropertyTransformer](type-aliases/EntityPropertyTransformer.md)
 
 ## Variables

@@ -9,10 +9,26 @@ import type { IMigrationOptions } from "./IMigrationOptions.js";
  */
 export interface IEntityStorageMigrationConnector<T = unknown> extends IEntityStorageConnector<T> {
 	/**
-	 * Get a unique list of all the context ids from the storage.
-	 * @returns The list of unique context ids.
+	 * Get the current version of this connector's implementation.
+	 * Increment this when the connector's bootstrap logic changes in a way that
+	 * requires re-running bootstrap on existing tables (e.g. new index definitions).
+	 * SchemaVersionService detects a mismatch and calls bootstrap() again on start-up,
+	 * so the method must be idempotent (CREATE INDEX IF NOT EXISTS, ensureIndex, etc.).
+	 * @returns The connector implementation version.
 	 */
-	getPartitionContextIds(): Promise<IContextIds[]>;
+	connectorVersion(): number;
+
+	/**
+	 * Get a unique list of all the context ids from the storage.
+	 * Returns undefined when the connector has no partition context ids configured
+	 * (run migration once with an empty context), or an empty array when the connector
+	 * is partitioned but the table contains no entities (skip migration entirely).
+	 * Partition ids whose depth does not match the configured partition context ids are
+	 * skipped and reported as a warning; entities in those partitions are ignored by migration.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
+	 * @returns The list of unique context ids, undefined if not partitioned, or [] if partitioned but empty.
+	 */
+	getPartitionContextIds(loggingComponentType?: string): Promise<IContextIds[] | undefined>;
 
 	/**
 	 * Create the target connector for performing the migration it will use a temporary storage location.

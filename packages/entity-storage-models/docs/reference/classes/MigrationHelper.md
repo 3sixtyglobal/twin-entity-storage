@@ -26,7 +26,7 @@ Runtime name for the class.
 
 ### migrateWithChain() {#migratewithchain}
 
-> `static` **migrateWithChain**(`sourceConnector`, `targetSchemaName`, `steps`, `options?`, `loggingComponentType?`): `Promise`\<\{ `finalConnector`: [`IEntityStorageConnector`](../interfaces/IEntityStorageConnector.md); `migrated`: `number`; \}\>
+> `static` **migrateWithChain**(`sourceConnector`, `targetSchemaName`, `partitions`, `steps`, `options?`, `loggingComponentType?`): `Promise`\<\{ `finalConnector`: [`IEntityStorageConnector`](../interfaces/IEntityStorageConnector.md); `migrated`: `number`; \}\>
 
 Performs a chain migration in a single connector swap, regardless of how many version
 steps the chain spans. Creates one target connector, reads all source entities, applies
@@ -46,6 +46,12 @@ The connector holding data at the stored schema version.
 `string`
 
 The schema name for the current version (used to create the target connector).
+
+##### partitions
+
+`IContextIds`[] \| `undefined`
+
+The partitions to migrate.
 
 ##### steps
 
@@ -148,7 +154,7 @@ The entity transformed to the shape described by steps[last].toProperties.
 
 ### applyEntityTransform() {#applyentitytransform}
 
-> `static` **applyEntityTransform**\<`T`, `U`\>(`entity`, `schemaDiff`, `transformEntityProperty?`): `U`
+> `static` **applyEntityTransform**\<`T`, `U`\>(`entity`, `schemaDiff`, `transformEntityProperty?`, `removeEntityProperty?`): `U`
 
 Applies the entity transformation for a single diff, handling added, removed, and
 modified properties according to the provided schema diff and optional transform hook.
@@ -182,6 +188,12 @@ The schema diff between the old and new schemas.
 [`EntityPropertyTransformer`](../type-aliases/EntityPropertyTransformer.md)\<`T`, `U`\>
 
 Optional per-property transform hook for object/array properties.
+
+##### removeEntityProperty?
+
+[`EntityPropertyRemover`](../type-aliases/EntityPropertyRemover.md)\<`T`\>
+
+Optional hook called with the original entity and dropped property schemas.
 
 #### Returns
 

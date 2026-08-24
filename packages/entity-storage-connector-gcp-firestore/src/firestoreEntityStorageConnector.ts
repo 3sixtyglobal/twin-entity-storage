@@ -7,18 +7,26 @@ import {
 	type Query,
 	type Settings
 } from "@google-cloud/firestore";
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
+	Coerce,
 	ComponentFactory,
+	ConflictError,
 	Converter,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
+	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
+	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
@@ -33,6 +41,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
+	ConnectionHelper,
 	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
@@ -47,9 +56,9 @@ import type { IFirestoreEntityStorageConnectorConstructorOptions } from "./model
 /**
  * Class for performing entity storage operations using Firestore.
  */
-export class FirestoreEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class FirestoreEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -60,6 +69,12 @@ export class FirestoreEntityStorageConnector<
 	 * @internal
 	 */
 	private static readonly _DEFAULT_LIMIT: number = 40;
+
+	/**
+	 * Batch chunk size for bulk write operations.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 500;
 
 	/**
 	 * Separator used between context ID parts in Firestore collection names.
@@ -93,16 +108,34 @@ export class FirestoreEntityStorageConnector<
 	private readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
 	 * The configuration for the connector.
 	 * @internal
 	 */
 	private readonly _config: IFirestoreEntityStorageConnectorConfig;
 
 	/**
-	 * The Firestore client.
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
 	 * @internal
 	 */
-	private readonly _firestoreClient: Firestore;
+	private readonly _mutexTimeoutMs?: number;
+
+	/**
+	 * The instance id for this connector.
+	 * @internal
+	 */
+	private readonly _instanceId: string;
+
+	/**
+	 * The parsed credentials for constructing the Firestore client.
+	 * @internal
+	 */
+	private readonly _credentials?: JWTInput;
 
 	/**
 	 * Create a new instance of FirestoreEntityStorageConnector.
@@ -148,22 +181,10 @@ export class FirestoreEntityStorageConnector<
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
-
-		const firestoreOptions: Settings = {
-			projectId: this._config.projectId,
-			databaseId: this._config.databaseId,
-			collectionName: this._config.collectionName,
-			maxIdleChannels: this._config.settings?.maxIdleChannels,
-			timeout: this._config.settings?.timeout,
-			credentials
-		};
-
-		if (Is.stringValue(this._config.endpoint)) {
-			firestoreOptions.host = this._config.endpoint;
-			firestoreOptions.ssl = false;
-		}
-
-		this._firestoreClient = new Firestore(firestoreOptions);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
+		this._credentials = credentials;
+		this._instanceId = RandomHelper.generateUuidV7("compact");
 	}
 
 	/**
@@ -175,15 +196,31 @@ export class FirestoreEntityStorageConnector<
 	}
 
 	/**
+	 * Stop the component.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 */
+	public async stop(nodeLoggingComponentType?: string): Promise<void> {
+		await ConnectionHelper.closeClient<Firestore>(
+			"firestoreClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async client => client.terminate()
+		);
+	}
+
+	/**
 	 * Returns the health status of the component.
 	 * @returns The health status of the component.
 	 */
 	public async health(): Promise<IHealth[]> {
 		try {
-			await this._firestoreClient.listCollections();
+			const client = await this.getClient();
+			await client.listCollections();
 			return [
 				{
 					source: FirestoreEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { projectId: this._config.projectId, collectionName: this._config.collectionName }
@@ -193,6 +230,7 @@ export class FirestoreEntityStorageConnector<
 			return [
 				{
 					source: FirestoreEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",
@@ -219,6 +257,7 @@ export class FirestoreEntityStorageConnector<
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
+			const client = await this.getClient();
 			await nodeLogging?.log({
 				level: "info",
 				source: FirestoreEntityStorageConnector.CLASS_NAME,
@@ -232,7 +271,7 @@ export class FirestoreEntityStorageConnector<
 
 			// Firestore doesn't require explicit collection creation
 			// Perform a small write operation to ensure connectivity
-			const testDoc = this._firestoreClient.collection(this._config.collectionName).doc("test");
+			const testDoc = client.collection(this._config.collectionName).doc("test");
 			await testDoc.set({ test: true });
 			await testDoc.delete();
 
@@ -287,7 +326,8 @@ export class FirestoreEntityStorageConnector<
 		);
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 
 			if (!Is.arrayValue(conditions)) {
 				const docRef = collection.doc(id);
@@ -345,30 +385,65 @@ export class FirestoreEntityStorageConnector<
 			FirestoreEntityStorageConnector._PARTITION_SEPARATOR
 		);
 
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
+
 		const prepared = EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
 			nullBehavior: "nullify"
 		});
+		const id = prepared[this._primaryKey.property] as string;
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		let conflictError: ConflictError | undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			const id = prepared[this._primaryKey.property] as string;
-
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 
 			const docRef = collection.doc(id);
 
-			if (!Is.arrayValue(conditions)) {
+			if (!Is.arrayValue(conditions) && !Is.stringValue(this._versionKey)) {
 				await docRef.set(prepared);
 			} else {
-				await this._firestoreClient.runTransaction(async transaction => {
+				await client.runTransaction(async transaction => {
+					conflictError = undefined;
 					const docSnapshot = await transaction.get(docRef);
 
 					if (!docSnapshot.exists) {
+						if (Is.stringValue(this._versionKey)) {
+							ObjectHelper.propertySet(prepared, this._versionKey, 1);
+						}
 						transaction.set(docRef, prepared as object);
 					} else {
 						const data = docSnapshot.data() as T;
 
+						if (hasVersionCheck) {
+							const storedVersion = ObjectHelper.propertyGet<number>(data, this._versionKey) ?? 0;
+							if (storedVersion !== submittedVersion) {
+								conflictError = new ConflictError(
+									FirestoreEntityStorageConnector.CLASS_NAME,
+									"optimisticLockFailed",
+									id
+								);
+								return;
+							}
+						}
+
 						if (
-							EntityConditions.check(data, {
+							Is.arrayValue(conditions) &&
+							!EntityConditions.check(data, {
 								conditions: conditions.map(c => ({
 									property: c.property as string,
 									comparison: ComparisonOperator.Equals,
@@ -376,8 +451,21 @@ export class FirestoreEntityStorageConnector<
 								}))
 							})
 						) {
-							transaction.set(docRef, prepared as object);
+							if (Is.stringValue(this._versionKey)) {
+								conflictError = new ConflictError(
+									FirestoreEntityStorageConnector.CLASS_NAME,
+									"conditionFailed",
+									id
+								);
+							}
+							return;
 						}
+
+						if (Is.stringValue(this._versionKey)) {
+							const storedVersion = ObjectHelper.propertyGet<number>(data, this._versionKey) ?? 0;
+							ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
+						}
+						transaction.set(docRef, prepared as object);
 					}
 				});
 			}
@@ -385,9 +473,17 @@ export class FirestoreEntityStorageConnector<
 			throw new GeneralError(
 				FirestoreEntityStorageConnector.CLASS_NAME,
 				"setEntityFailed",
-				{ id: entity.id },
+				{ id: ObjectHelper.propertyGet<string>(entity, "id") },
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
+		}
+
+		if (conflictError) {
+			throw conflictError;
 		}
 	}
 
@@ -413,11 +509,12 @@ export class FirestoreEntityStorageConnector<
 		);
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
-			const chunkSize = FirestoreEntityStorageConnector._DEFAULT_LIMIT;
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
+			const chunkSize = FirestoreEntityStorageConnector._BATCH_CHUNK_SIZE;
 			for (let i = 0; i < preparedEntities.length; i += chunkSize) {
 				const chunk = preparedEntities.slice(i, i + chunkSize);
-				const batch = this._firestoreClient.batch();
+				const batch = client.batch();
 				for (const entity of chunk) {
 					const id = entity[this._primaryKey.property] as string;
 					const docRef = collection.doc(id);
@@ -448,12 +545,13 @@ export class FirestoreEntityStorageConnector<
 		);
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 			const snapshot = await collection.get();
 			const chunkSize = 500;
 			for (let i = 0; i < snapshot.docs.length; i += chunkSize) {
 				const chunk = snapshot.docs.slice(i, i + chunkSize);
-				const batch = this._firestoreClient.batch();
+				const batch = client.batch();
 				for (const doc of chunk) {
 					batch.delete(doc.ref);
 				}
@@ -488,15 +586,29 @@ export class FirestoreEntityStorageConnector<
 			this._partitionContextIds,
 			FirestoreEntityStorageConnector._PARTITION_SEPARATOR
 		);
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		let conflictError: ConflictError | undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 			const docRef = collection.doc(id);
 
 			if (!Is.arrayValue(conditions)) {
 				await docRef.delete();
 			} else {
-				await this._firestoreClient.runTransaction(async transaction => {
+				await client.runTransaction(async transaction => {
+					conflictError = undefined;
 					const docSnapshot = await transaction.get(docRef);
 
 					if (docSnapshot.exists) {
@@ -511,6 +623,12 @@ export class FirestoreEntityStorageConnector<
 							})
 						) {
 							transaction.delete(docRef);
+						} else if (Is.stringValue(this._versionKey)) {
+							conflictError = new ConflictError(
+								FirestoreEntityStorageConnector.CLASS_NAME,
+								"conditionFailed",
+								id
+							);
 						}
 					}
 				});
@@ -522,6 +640,14 @@ export class FirestoreEntityStorageConnector<
 				{ id },
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
+		}
+
+		if (conflictError) {
+			throw conflictError;
 		}
 	}
 
@@ -541,11 +667,12 @@ export class FirestoreEntityStorageConnector<
 		);
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 			const chunkSize = 500;
 			for (let i = 0; i < ids.length; i += chunkSize) {
 				const chunk = ids.slice(i, i + chunkSize);
-				const batch = this._firestoreClient.batch();
+				const batch = client.batch();
 				for (const id of chunk) {
 					const docRef = collection.doc(id);
 					batch.delete(docRef);
@@ -602,30 +729,51 @@ export class FirestoreEntityStorageConnector<
 
 	/**
 	 * Get a unique list of all the context ids from the storage.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		const partitionContextIds = this._partitionContextIds;
 		if (!Is.arrayValue(partitionContextIds)) {
-			return [];
+			return undefined;
 		}
 		try {
+			const client = await this.getClient();
 			const prefix = `${this._config.collectionName}_`;
-			const collections = await this._firestoreClient.listCollections();
+			const collections = await client.listCollections();
 			const result: IContextIds[] = [];
+			const skipped: string[] = [];
 			for (const col of collections) {
 				if (col.id.startsWith(prefix)) {
 					const partitionKey = col.id.slice(prefix.length);
 					if (Is.stringValue(partitionKey)) {
-						result.push(
-							ContextIdHelper.shortSplit(
-								partitionContextIds,
-								partitionKey,
-								FirestoreEntityStorageConnector._PARTITION_SEPARATOR
-							)
+						const split = EntityStorageHelper.tryShortSplit(
+							partitionContextIds,
+							partitionKey,
+							FirestoreEntityStorageConnector._PARTITION_SEPARATOR
 						);
+						if (Is.undefined(split)) {
+							skipped.push(partitionKey);
+						} else {
+							result.push(split);
+						}
 					}
 				}
+			}
+			if (Is.arrayValue(skipped)) {
+				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+				await nodeLogging?.log({
+					level: "warn",
+					source: FirestoreEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "partitionIdsSkipped",
+					data: {
+						expected: partitionContextIds.length,
+						partitionIds: skipped.join(", ")
+					}
+				});
 			}
 			return result;
 		} catch (err) {
@@ -636,6 +784,14 @@ export class FirestoreEntityStorageConnector<
 				err
 			);
 		}
+	}
+
+	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
 	}
 
 	/**
@@ -764,7 +920,8 @@ export class FirestoreEntityStorageConnector<
 		}
 
 		try {
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const client = await this.getClient();
+			const collection = client.collection(this.collectionName(partitionKey));
 
 			// Firestore has no native substring search. When any condition needs in-memory
 			// filtering (string Includes / NotIncludes), fetch all matching docs and filter
@@ -820,7 +977,7 @@ export class FirestoreEntityStorageConnector<
 			// Prune empty-In leaves from OR branches: the Firestore SDK throws on
 			// Filter.where(prop, "in", []) even inside an OR where other branches still match.
 			// hasEmptyInCondition above already handles the all-false case, so pruning here
-			// is safe — any removed leaf was a no-op branch.
+			// is safe - any removed leaf was a no-op branch.
 			const effectiveConditions = !Is.empty(conditions)
 				? (this.pruneEmptyInConditions(conditions) ?? undefined)
 				: conditions;
@@ -843,11 +1000,11 @@ export class FirestoreEntityStorageConnector<
 			}
 
 			if (Is.stringValue(cursor)) {
-				// Discard cursors from a different partition — startAfter() throws if the
+				// Discard cursors from a different partition - startAfter() throws if the
 				// snapshot belongs to a different collection than the current query.
 				const cursorCollection = cursor.slice(0, cursor.lastIndexOf("/"));
 				if (cursorCollection === this.collectionName(partitionKey)) {
-					const cursorDoc = await this._firestoreClient.doc(cursor).get();
+					const cursorDoc = await client.doc(cursor).get();
 					if (cursorDoc?.exists) {
 						query = query.startAfter(cursorDoc);
 					}
@@ -898,6 +1055,7 @@ export class FirestoreEntityStorageConnector<
 		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 
 		try {
+			const client = await this.getClient();
 			const contextIds = await ContextIdStore.getContextIds();
 			const partitionKey = ContextIdHelper.combinedContextKey(
 				contextIds,
@@ -905,7 +1063,7 @@ export class FirestoreEntityStorageConnector<
 				FirestoreEntityStorageConnector._PARTITION_SEPARATOR
 			);
 
-			const collection = this._firestoreClient.collection(this.collectionName(partitionKey));
+			const collection = client.collection(this.collectionName(partitionKey));
 
 			if (this.hasEmptyInCondition(conditions)) {
 				return 0;
@@ -951,29 +1109,30 @@ export class FirestoreEntityStorageConnector<
 	private async bulkCopy<U>(
 		sourceConnector: FirestoreEntityStorageConnector<U>,
 		destConnector: FirestoreEntityStorageConnector<U>,
-		partitions: IContextIds[],
+		partitions: IContextIds[] | undefined,
 		batchSize: number
 	): Promise<void> {
-		let partitionList: IContextIds[];
-		if (Is.arrayValue(partitions)) {
-			partitionList = partitions;
-		} else if (Is.arrayValue(sourceConnector._partitionContextIds)) {
-			partitionList = [];
-		} else {
-			partitionList = [{}];
+		if (partitions?.length === 0) {
+			return;
 		}
+		// undefined → not partitioned: one pass with no partition key.
+		// [{…}, …]  → partitioned with data: iterate over each partition.
+		const partitionList = partitions ?? [{}];
 
 		for (let i = 0; i < partitionList.length; i++) {
-			const partitionKey = ContextIdHelper.combinedContextKey(
-				partitionList[i],
-				sourceConnector._partitionContextIds,
-				FirestoreEntityStorageConnector._PARTITION_SEPARATOR
-			);
+			// Values from getPartitionContextIds are already short-form, so we join them
+			// directly rather than using combinedContextKey, which expects long-form input
+			// and calls guardAll (throwing if a registered handler rejects short-form values).
+			const partitionKey = Is.arrayValue(sourceConnector._partitionContextIds)
+				? sourceConnector._partitionContextIds
+						.map(k => partitionList[i][k])
+						.join(FirestoreEntityStorageConnector._PARTITION_SEPARATOR)
+				: undefined;
 
-			const sourceCollection = sourceConnector._firestoreClient.collection(
+			const sourceCollection = (await sourceConnector.getClient()).collection(
 				sourceConnector.collectionName(partitionKey)
 			);
-			const destCollection = destConnector._firestoreClient.collection(
+			const destCollection = (await destConnector.getClient()).collection(
 				destConnector.collectionName(partitionKey)
 			);
 
@@ -990,7 +1149,7 @@ export class FirestoreEntityStorageConnector<
 
 				for (let j = 0; j < docs.length; j += batchSize) {
 					const chunk = docs.slice(j, j + batchSize);
-					const batch = destConnector._firestoreClient.batch();
+					const batch = (await destConnector.getClient()).batch();
 					for (const doc of chunk) {
 						batch.set(destCollection.doc(doc.id), doc.data());
 					}
@@ -1009,15 +1168,16 @@ export class FirestoreEntityStorageConnector<
 	 * @internal
 	 */
 	private async deleteAllPartitionCollections(collectionName: string): Promise<void> {
+		const client = await this.getClient();
 		const prefix = `${collectionName}_`;
-		const collections = await this._firestoreClient.listCollections();
+		const collections = await client.listCollections();
 		const chunkSize = 500;
 		for (const col of collections) {
 			if (col.id.startsWith(prefix)) {
 				const snapshot = await col.get();
 				for (let i = 0; i < snapshot.docs.length; i += chunkSize) {
 					const chunk = snapshot.docs.slice(i, i + chunkSize);
-					const batch = this._firestoreClient.batch();
+					const batch = client.batch();
 					for (const doc of chunk) {
 						batch.delete(doc.ref);
 					}
@@ -1075,7 +1235,7 @@ export class FirestoreEntityStorageConnector<
 			return condition;
 		}
 		// For AND groups: if any child has an empty In, the whole AND is dead.
-		// Do not recurse — promoting the surviving siblings would turn a dead
+		// Do not recurse - promoting the surviving siblings would turn a dead
 		// branch into a live one when this AND sits inside an OR (#141).
 		if (condition.logicalOperator !== LogicalOperator.Or && this.hasEmptyInCondition(condition)) {
 			return null;
@@ -1112,12 +1272,9 @@ export class FirestoreEntityStorageConnector<
 		if (comparison === ComparisonOperator.NotIncludes) {
 			return true;
 		}
-		// Includes on a primitive (string/number) means substring search — not natively supported.
+		// Includes on a primitive (string/number) means substring search - not natively supported.
 		// Includes on an object means array-contains, which Firestore does support.
-		if (
-			comparison === ComparisonOperator.Includes &&
-			(value === null || typeof value !== "object")
-		) {
+		if (comparison === ComparisonOperator.Includes && (value === null || !Is.object(value))) {
 			return true;
 		}
 		return false;
@@ -1151,7 +1308,7 @@ export class FirestoreEntityStorageConnector<
 				: Filter.and(...filters);
 		}
 		const { property, comparison } = condition;
-		// Firestore has no undefined type — null has the correct semantics:
+		// Firestore has no undefined type - null has the correct semantics:
 		//   == null  matches documents where the field is null OR missing
 		//   != null  matches documents where the field exists and is not null
 		const value = condition.value === undefined ? null : condition.value;
@@ -1191,5 +1348,54 @@ export class FirestoreEntityStorageConnector<
 	 */
 	private collectionName(partitionKey?: string): string {
 		return `${this._config.collectionName}_${partitionKey ?? "default"}`;
+	}
+
+	/**
+	 * Get the shared Firestore client, opening it if needed.
+	 * @returns The Firestore client.
+	 * @internal
+	 */
+	private async getClient(): Promise<Firestore> {
+		return ConnectionHelper.openClient<Firestore>(
+			"firestoreClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async () => {
+				const firestoreOptions: Settings = {
+					projectId: this._config.projectId,
+					databaseId: this._config.databaseId,
+					collectionName: this._config.collectionName,
+					maxIdleChannels: this._config.settings?.maxIdleChannels,
+					timeout: this._config.settings?.timeout,
+					credentials: this._credentials
+				};
+				if (Is.stringValue(this._config.endpoint)) {
+					firestoreOptions.host = this._config.endpoint;
+					firestoreOptions.ssl = false;
+				}
+				return new Firestore(firestoreOptions);
+			}
+		);
+	}
+
+	/**
+	 * Create the client id for the shared store key.
+	 * @returns The client id string.
+	 * @internal
+	 */
+	private createClientId(): string {
+		return `${this._config.projectId}|${this._config.databaseId ?? ""}|${this._config.endpoint ?? ""}`;
+	}
+
+	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param partitionKey The resolved partition key.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private buildOptimisticMutexKey(partitionKey: string | undefined, id: string): string {
+		return `${FirestoreEntityStorageConnector.CLASS_NAME}:optimistic:${this._config.collectionName}:${partitionKey ?? "default"}:${id}`;
 	}
 }

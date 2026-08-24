@@ -21,7 +21,7 @@ class TestType {
 	public value1!: string;
 }
 
-describe("DynamoDbEntityStorageConnector — injection-style input handling", () => {
+describe("DynamoDbEntityStorageConnector - injection-style input handling", () => {
 	let connector: DynamoDbEntityStorageConnector<TestType>;
 
 	beforeAll(() => {

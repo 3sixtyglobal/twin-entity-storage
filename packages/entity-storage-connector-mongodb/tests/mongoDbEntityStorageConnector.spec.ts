@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
-import { RandomHelper } from "@twin.org/core";
+import { Is, RandomHelper } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -34,6 +34,11 @@ const SUPPORT_NOT_INCLUDES = true;
 const SUPPORT_NULLABLE_SECONDARY_INDEX = true;
 // Does the connector support sorting by secondary index properties.
 const SUPPORT_SECONDARY_INDEX_SORT = true;
+// Does the connector honour trailing tiebreaker sort properties within ties of the
+// first sort property.
+const SUPPORT_MULTI_SORT_TIEBREAKER_ORDER = true;
+// Does the connector support sorting on more than one non primary-key property.
+const SUPPORT_MULTI_SORT_ARBITRARY = true;
 
 @entity()
 class SubType {
@@ -76,6 +81,9 @@ class TestType {
 
 	@property({ type: "string", optional: true })
 	public role?: string;
+
+	@property({ type: "string", isSecondary: SUPPORT_NULLABLE_SECONDARY_INDEX, optional: true })
+	public value4?: string;
 }
 
 @entity()
@@ -879,6 +887,216 @@ describe("MongoDbEntityStorageConnector", () => {
 		}
 	);
 
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"can paginate a multi-property sort with a primary-key tiebreaker across ties",
+		async () => {
+			const PAGE = 5;
+			const groups = ["ccc", "aaa", "ddd", "bbb"];
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			const seeded = [...new Array(12).keys()].map(i => ({
+				id: String(i + 1).padStart(3, "0"),
+				value1: groups[i % groups.length],
+				value2: i
+			}));
+			for (const item of seeded) {
+				await connector.set(item);
+			}
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending },
+				{ property: "id" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+
+			const all: Partial<TestType>[] = [];
+			const seen = new Set<string>();
+			let cursor: string | undefined;
+			let pages = 0;
+			do {
+				const page = await connector.query(undefined, sort, undefined, cursor, PAGE);
+				for (const e of page.entities) {
+					expect(seen.has(e.id as string), `duplicate id ${e.id}`).toBe(false);
+					seen.add(e.id as string);
+				}
+				all.push(...page.entities);
+				cursor = page.cursor;
+				expect(++pages).toBeLessThan(100);
+			} while (cursor !== undefined);
+
+			expect(all.length).toBe(seeded.length);
+			for (let i = 1; i < all.length; i++) {
+				expect((all[i].value1 as string) >= (all[i - 1].value1 as string)).toBe(true);
+			}
+
+			if (SUPPORT_MULTI_SORT_TIEBREAKER_ORDER) {
+				const expectedIds = seeded
+					.slice()
+					.sort((a, b) => {
+						if (a.value1 === b.value1) {
+							return a.id.localeCompare(b.id);
+						}
+						return a.value1.localeCompare(b.value1);
+					})
+					.map(e => e.id);
+				expect(all.map(e => e.id)).toEqual(expectedIds);
+			}
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"multi-property sort with descending first property honours the requested direction",
+		async () => {
+			const PAGE = 5;
+			const groups = ["ccc", "aaa", "ddd", "bbb"];
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			const seeded = [...new Array(12).keys()].map(i => ({
+				id: String(i + 1).padStart(3, "0"),
+				value1: groups[i % groups.length],
+				value2: i
+			}));
+			for (const item of seeded) {
+				await connector.set(item);
+			}
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Descending },
+				{ property: "id" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+
+			const all: Partial<TestType>[] = [];
+			let cursor: string | undefined;
+			let pages = 0;
+			do {
+				const page = await connector.query(undefined, sort, undefined, cursor, PAGE);
+				all.push(...page.entities);
+				cursor = page.cursor;
+				expect(++pages).toBeLessThan(100);
+			} while (cursor !== undefined);
+
+			expect(all.length).toBe(seeded.length);
+			for (let i = 1; i < all.length; i++) {
+				expect((all[i].value1 as string) <= (all[i - 1].value1 as string)).toBe(true);
+			}
+
+			if (SUPPORT_MULTI_SORT_TIEBREAKER_ORDER) {
+				const expectedIds = seeded
+					.slice()
+					.sort((a, b) => {
+						if (a.value1 === b.value1) {
+							return a.id.localeCompare(b.id);
+						}
+						return b.value1.localeCompare(a.value1);
+					})
+					.map(e => e.id);
+				expect(all.map(e => e.id)).toEqual(expectedIds);
+			}
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"sort led by the primary key returns primary-key order and ignores the trailing property",
+		async () => {
+			const groups = ["bbb", "aaa"];
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			const seeded = [...new Array(8).keys()].map(i => ({
+				id: String(8 - i).padStart(3, "0"),
+				value1: groups[i % groups.length],
+				value2: i
+			}));
+			for (const item of seeded) {
+				await connector.set(item);
+			}
+
+			const sort = [
+				{ property: "id" as keyof TestType, sortDirection: SortDirection.Ascending },
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+
+			const result = await connector.query(undefined, sort);
+			const expectedIds = seeded.map(e => e.id).sort((a, b) => a.localeCompare(b));
+			expect(result.entities.map(e => e.id)).toEqual(expectedIds);
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"sort with multiple non primary-key properties is honoured or clearly rejected",
+		async () => {
+			const groups = ["bbb", "aaa"];
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			const seeded = [...new Array(8).keys()].map(i => ({
+				id: String(i + 1).padStart(3, "0"),
+				value1: groups[i % groups.length],
+				value2: i,
+				value4: String(8 - i)
+			}));
+			for (const item of seeded) {
+				await connector.set(item);
+			}
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending },
+				{ property: "value4" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+
+			if (SUPPORT_MULTI_SORT_ARBITRARY) {
+				const result = await connector.query(undefined, sort);
+				const expectedIds = seeded
+					.slice()
+					.sort((a, b) => {
+						if (a.value1 === b.value1) {
+							return a.value4.localeCompare(b.value4);
+						}
+						return a.value1.localeCompare(b.value1);
+					})
+					.map(e => e.id);
+				expect(result.entities.map(e => e.id)).toEqual(expectedIds);
+			} else {
+				await expect(connector.query(undefined, sort)).rejects.toMatchObject({
+					name: "GeneralError",
+					message: expect.stringContaining("sortUnsupported")
+				});
+			}
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"multi-property sort keeps working after re-bootstrapping an existing store",
+		async () => {
+			const PAGE = 5;
+			const groups = ["ccc", "aaa", "ddd", "bbb"];
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			for (let i = 0; i < 12; i++) {
+				await connector.set({
+					id: String(i + 1).padStart(3, "0"),
+					value1: groups[i % groups.length],
+					value2: i
+				});
+			}
+
+			const bootstrapped = await connector.bootstrap?.();
+			expect(bootstrapped).toBe(true);
+
+			const sort = [
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending },
+				{ property: "id" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+
+			const all: Partial<TestType>[] = [];
+			let cursor: string | undefined;
+			let pages = 0;
+			do {
+				const page = await connector.query(undefined, sort, undefined, cursor, PAGE);
+				all.push(...page.entities);
+				cursor = page.cursor;
+				expect(++pages).toBeLessThan(100);
+			} while (cursor !== undefined);
+
+			expect(all.length).toBe(12);
+			for (let i = 1; i < all.length; i++) {
+				expect((all[i].value1 as string) >= (all[i - 1].value1 as string)).toBe(true);
+			}
+		}
+	);
+
 	test("returns no cursor at exact page boundary for descending primary-key sort", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());
 		for (let i = 0; i < 10; i++) {
@@ -1003,7 +1221,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			} while (cursor !== undefined);
 
 			expect(all.length).toBe(BATCH);
-			expect(all.every(e => typeof e.value1 === "string")).toBe(true);
+			expect(all.every(e => Is.string(e.value1))).toBe(true);
 			expect(all.every(e => e.id === undefined)).toBe(true);
 		}
 	);
@@ -1372,7 +1590,7 @@ describe("MongoDbEntityStorageConnector", () => {
 				await connector.set({ id: (i + 1).toString(), value1: "aaa", value2: i });
 			}
 			// (id IN [] AND value1=="aaa") OR id=="999"
-			// The AND branch is dead — In [] is always false.
+			// The AND branch is dead - In [] is always false.
 			// No entity has id=="999", so the result must be empty.
 			// Without the fix, the dead AND branch incorrectly promotes value1=="aaa"
 			// into the OR and returns 5 rows (#141).
@@ -1440,7 +1658,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			await connector.set({ id: "1", value1: "alpha", value2: 1 });
 			await connector.set({ id: "2", value1: "beta", value2: 2 });
 			await connector.set({ id: "3", value1: "gamma", value2: 3 });
-			// AND[ OR[value1==alpha, value1==beta] ] — single-child AND wrapping a multi-child OR.
+			// AND[ OR[value1==alpha, value1==beta] ] - single-child AND wrapping a multi-child OR.
 			// Without the fix DynamoDB rejects the generated ( (expr) ) as redundant parens.
 			const result = await connector.query({
 				logicalOperator: LogicalOperator.And,
@@ -1534,7 +1752,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			await connector.set({ id: "1", value1: "alpha", value2: 1 });
 			await connector.set({ id: "2", value1: "beta", value2: 2 });
 			await connector.set({ id: "3", value1: "gamma", value2: 3 });
-			// OR[ AND[ OR[value1==alpha, value1==beta] ] ] — three levels of nesting
+			// OR[ AND[ OR[value1==alpha, value1==beta] ] ] - three levels of nesting
 			// with alternating OR → AND → OR logical operators.
 			const result = await connector.query({
 				logicalOperator: LogicalOperator.Or,
@@ -1571,7 +1789,7 @@ describe("MongoDbEntityStorageConnector", () => {
 		await connector.set({ id: "1", value1: "alpha", value2: 1 });
 		await connector.set({ id: "2", value1: "beta", value2: 2 });
 		await connector.set({ id: "3", value1: "gamma", value2: 3 });
-		// AND[ AND[] ] — empty AND child inside outer AND applies no constraint.
+		// AND[ AND[] ] - empty AND child inside outer AND applies no constraint.
 		const result = await connector.query({
 			logicalOperator: LogicalOperator.And,
 			conditions: [
@@ -1589,7 +1807,7 @@ describe("MongoDbEntityStorageConnector", () => {
 		await connector.set({ id: "1", value1: "alpha", value2: 1 });
 		await connector.set({ id: "2", value1: "beta", value2: 2 });
 		await connector.set({ id: "3", value1: "gamma", value2: 3 });
-		// AND[ AND[], value1==alpha ] — empty AND sibling is a no-op; only value1==alpha filters.
+		// AND[ AND[], value1==alpha ] - empty AND sibling is a no-op; only value1==alpha filters.
 		const result = await connector.query({
 			logicalOperator: LogicalOperator.And,
 			conditions: [
@@ -1611,7 +1829,7 @@ describe("MongoDbEntityStorageConnector", () => {
 			await connector.set({ id: "1", value1: "alpha", value2: 1 });
 			await connector.set({ id: "2", value1: "beta", value2: 2 });
 			await connector.set({ id: "3", value1: "gamma", value2: 3 });
-			// OR[ OR[], value1==alpha ] — empty OR child contributes nothing; only value1==alpha matches.
+			// OR[ OR[], value1==alpha ] - empty OR child contributes nothing; only value1==alpha matches.
 			const result = await connector.query({
 				logicalOperator: LogicalOperator.Or,
 				conditions: [

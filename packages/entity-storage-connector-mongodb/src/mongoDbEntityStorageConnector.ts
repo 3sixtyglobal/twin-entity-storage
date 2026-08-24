@@ -1,16 +1,24 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
+	Coerce,
 	ComponentFactory,
+	ConflictError,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
+	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
+	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
@@ -24,6 +32,7 @@ import {
 	type SortDirection
 } from "@twin.org/entity";
 import {
+	ConnectionHelper,
 	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
@@ -38,9 +47,9 @@ import type { IMongoDbEntityStorageConnectorConstructorOptions } from "./models/
 /**
  * Class for performing entity storage operations using MongoDb.
  */
-export class MongoDbEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class MongoDbEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -51,6 +60,12 @@ export class MongoDbEntityStorageConnector<
 	 * @internal
 	 */
 	private static readonly _DEFAULT_LIMIT: number = 40;
+
+	/**
+	 * Maximum number of documents per bulkWrite call.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
 
 	/**
 	 * The name for the schema.
@@ -77,10 +92,22 @@ export class MongoDbEntityStorageConnector<
 	private readonly _config: IMongoDbEntityStorageConnectorConfig;
 
 	/**
-	 * The MongoDb client.
+	 * Unique identifier for this connector instance, used to track references in SharedStore.
 	 * @internal
 	 */
-	private readonly _client: MongoClient;
+	private readonly _instanceId: string;
+
+	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
+	 * @internal
+	 */
+	private readonly _mutexTimeoutMs?: number;
 
 	/**
 	 * Create a new instance of MongoDbEntityStorageConnector.
@@ -114,13 +141,46 @@ export class MongoDbEntityStorageConnector<
 			options.config.collection
 		);
 
+		if (!Is.empty(options.config.pool?.maxIdleTimeMs)) {
+			Guards.integer(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.maxIdleTimeMs),
+				options.config.pool?.maxIdleTimeMs
+			);
+		}
+
+		if (!Is.empty(options.config.pool?.maxPoolSize)) {
+			Guards.integer(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.maxPoolSize),
+				options.config.pool?.maxPoolSize
+			);
+		}
+
+		if (!Is.empty(options.config.pool?.minPoolSize)) {
+			Guards.integer(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.minPoolSize),
+				options.config.pool?.minPoolSize
+			);
+		}
+
+		if (!Is.empty(options.config.pool?.waitQueueTimeoutMs)) {
+			Guards.integer(
+				MongoDbEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.waitQueueTimeoutMs),
+				options.config.pool?.waitQueueTimeoutMs
+			);
+		}
+
 		this._entitySchemaName = options.entitySchema;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
 
 		this._config = options.config;
-
-		this._client = new MongoClient(this.createConnectionConfig());
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
+		this._instanceId = RandomHelper.generateUuidV7("compact");
 	}
 
 	/**
@@ -132,7 +192,7 @@ export class MongoDbEntityStorageConnector<
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
-			await this._client.connect();
+			const client = await this.getClient();
 
 			await nodeLogging?.log({
 				level: "info",
@@ -145,7 +205,7 @@ export class MongoDbEntityStorageConnector<
 			});
 
 			// Create the database if it does not exist
-			this._client.db(this._config.database);
+			client.db(this._config.database);
 
 			await nodeLogging?.log({
 				level: "info",
@@ -157,7 +217,7 @@ export class MongoDbEntityStorageConnector<
 				}
 			});
 
-			await this.getCollection();
+			const collection = await this.getCollection();
 
 			await nodeLogging?.log({
 				level: "info",
@@ -168,6 +228,14 @@ export class MongoDbEntityStorageConnector<
 					collectionName: this._config.collection
 				}
 			});
+
+			for (const prop of this._entitySchema.properties ?? []) {
+				if (prop.isPrimary === true) {
+					await collection.createIndex({ [String(prop.property)]: 1 }, { unique: true });
+				} else if (prop.isSecondary === true || !Is.empty(prop.sortDirection)) {
+					await collection.createIndex({ [String(prop.property)]: 1 });
+				}
+			}
 		} catch (error) {
 			await nodeLogging?.log({
 				level: "error",
@@ -190,8 +258,14 @@ export class MongoDbEntityStorageConnector<
 	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns Nothing.
 	 */
-	public async stop?(nodeLoggingComponentType?: string): Promise<void> {
-		await this._client.close();
+	public async stop(nodeLoggingComponentType?: string): Promise<void> {
+		await ConnectionHelper.closeClient<MongoClient>(
+			"mongoDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async client => client.close()
+		);
 	}
 
 	/**
@@ -208,13 +282,15 @@ export class MongoDbEntityStorageConnector<
 	 */
 	public async health(): Promise<IHealth[]> {
 		try {
-			await this._client
+			const client = await this.getClient();
+			await client
 				.db(this._config.database)
 				.collection(this._config.collection)
 				.estimatedDocumentCount();
 			return [
 				{
 					source: MongoDbEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { database: this._config.database, collection: this._config.collection }
@@ -224,6 +300,7 @@ export class MongoDbEntityStorageConnector<
 			return [
 				{
 					source: MongoDbEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",
@@ -270,10 +347,10 @@ export class MongoDbEntityStorageConnector<
 
 			const collection = await this.getCollection();
 			const result = await collection.findOne(query);
-			ObjectHelper.propertyDelete(result, "_id");
-			return Is.objectValue(result)
-				? EntityStorageHelper.unPrepareEntity<T>(result as T, [])
-				: undefined;
+			if (!Is.objectValue(result)) {
+				return undefined;
+			}
+			return EntityStorageHelper.unPrepareEntity<T>(result as T, ["_id"]);
 		} catch (err) {
 			throw new GeneralError(
 				MongoDbEntityStorageConnector.CLASS_NAME,
@@ -291,34 +368,94 @@ export class MongoDbEntityStorageConnector<
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The id of the entity.
+	 * @throws ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(MongoDbEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
 		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
+
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
 
 		const prepared = EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
 			nullBehavior: "omit"
 		});
 
 		const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
-		const id = prepared[primaryKey.property];
+		const id = prepared[primaryKey.property] as string;
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? await this.buildOptimisticMutexKey(id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			const filter: { [key in keyof T]?: unknown } = { [primaryKey.property]: id };
-
-			if (Is.arrayValue(conditions)) {
-				for (const condition of conditions) {
-					filter[condition.property] = condition.value;
-				}
-			}
-
 			const collection = await this.getCollection();
-			await collection.findOneAndUpdate(
-				filter,
-				{ $set: prepared as Partial<Document> },
-				{ upsert: true }
-			);
+
+			if (hasVersionCheck) {
+				ObjectHelper.propertySet(prepared, this._versionKey, submittedVersion + 1);
+
+				const updateFilter: { [key in keyof T]?: unknown } = {
+					[primaryKey.property]: id,
+					[this._versionKey as keyof T]: submittedVersion
+				};
+				if (Is.arrayValue(conditions)) {
+					for (const c of conditions) {
+						updateFilter[c.property] = c.value;
+					}
+				}
+
+				const result = await collection.updateOne(updateFilter, {
+					$set: prepared as Partial<Document>
+				});
+				if (result.matchedCount === 0) {
+					throw new ConflictError(
+						MongoDbEntityStorageConnector.CLASS_NAME,
+						"optimisticLockFailed",
+						id
+					);
+				}
+			} else {
+				if (Is.arrayValue(conditions)) {
+					const currentEntity = await this.get(id);
+					if (!Is.empty(currentEntity) && !this.verifyConditions(conditions, currentEntity)) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(
+								MongoDbEntityStorageConnector.CLASS_NAME,
+								"conditionFailed",
+								id
+							);
+						}
+						return;
+					}
+				}
+				if (Is.stringValue(this._versionKey)) {
+					const currentEntity = await this.get(id);
+					const storedVersion = !Is.empty(currentEntity)
+						? (ObjectHelper.propertyGet<number>(currentEntity, this._versionKey) ?? 0)
+						: 0;
+					ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
+				}
+
+				const filter: { [key in keyof T]?: unknown } = { [primaryKey.property]: id };
+				await collection.findOneAndUpdate(
+					filter,
+					{ $set: prepared as Partial<Document> },
+					{ upsert: true }
+				);
+			}
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
 			throw new GeneralError(
 				MongoDbEntityStorageConnector.CLASS_NAME,
 				"setFailed",
@@ -327,6 +464,10 @@ export class MongoDbEntityStorageConnector<
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -348,22 +489,27 @@ export class MongoDbEntityStorageConnector<
 
 		try {
 			const collection = await this.getCollection();
-			await collection.bulkWrite(
-				preparedEntities.map(prepared => {
-					const filter: { [key: string]: unknown } = {
-						[primaryKey.property]: prepared[primaryKey.property]
-					};
-					return {
-						updateOne: {
-							filter,
-							update: {
-								$set: prepared as Partial<Document>
-							},
-							upsert: true
-						}
-					};
-				})
-			);
+			const chunkSize = MongoDbEntityStorageConnector._BATCH_CHUNK_SIZE;
+			for (let offset = 0; offset < preparedEntities.length; offset += chunkSize) {
+				const chunk = preparedEntities.slice(offset, offset + chunkSize);
+				await collection.bulkWrite(
+					chunk.map(prepared => {
+						const filter: { [key: string]: unknown } = {
+							[primaryKey.property]: prepared[primaryKey.property]
+						};
+						return {
+							updateOne: {
+								filter,
+								update: {
+									$set: prepared as Partial<Document>
+								},
+								upsert: true
+							}
+						};
+					}),
+					{ ordered: false }
+				);
+			}
 		} catch (err) {
 			throw new GeneralError(
 				MongoDbEntityStorageConnector.CLASS_NAME,
@@ -404,21 +550,47 @@ export class MongoDbEntityStorageConnector<
 	): Promise<void> {
 		Guards.stringValue(MongoDbEntityStorageConnector.CLASS_NAME, nameof(id), id);
 		EntityStorageHelper.validateConditions(this._entitySchema, conditions);
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? await this.buildOptimisticMutexKey(id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
 			const primaryKey = EntitySchemaHelper.getPrimaryKey(this.getSchema());
-			const query: { [key in keyof T]?: unknown } = { [primaryKey.property]: id };
+			const collection = await this.getCollection();
 
-			if (conditions) {
-				for (const condition of conditions) {
-					query[condition.property] = condition.value;
+			const query: { [key in keyof T]?: unknown } = { [primaryKey.property]: id };
+			if (Is.arrayValue(conditions)) {
+				for (const c of conditions) {
+					query[c.property] = c.value;
 				}
 			}
-
-			const collection = await this.getCollection();
-			await collection.deleteOne(query);
+			const deleteResult = await collection.deleteOne(query);
+			if (
+				Is.stringValue(this._versionKey) &&
+				deleteResult.deletedCount === 0 &&
+				Is.arrayValue(conditions)
+			) {
+				const exists = await collection.findOne({ [primaryKey.property]: id });
+				if (!Is.empty(exists)) {
+					throw new ConflictError(MongoDbEntityStorageConnector.CLASS_NAME, "conditionFailed", id);
+				}
+			}
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
 			throw new GeneralError(MongoDbEntityStorageConnector.CLASS_NAME, "removeFailed", { id }, err);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -466,7 +638,8 @@ export class MongoDbEntityStorageConnector<
 
 		try {
 			if (Is.arrayValue(this._partitionContextIds)) {
-				const db = this._client.db(this._config.database);
+				const client = await this.getClient();
+				const db = client.db(this._config.database);
 				const collections = await this.listPartitionCollections();
 				for (const col of collections) {
 					await db
@@ -565,8 +738,7 @@ export class MongoDbEntityStorageConnector<
 
 		for (let i = 0; i < entities.length; i++) {
 			const entity = entities[i];
-			ObjectHelper.propertyDelete(entity, "_id");
-			entities[i] = EntityStorageHelper.unPrepareEntity(entity, []);
+			entities[i] = EntityStorageHelper.unPrepareEntity(entity, ["_id"]);
 		}
 
 		return {
@@ -599,20 +771,52 @@ export class MongoDbEntityStorageConnector<
 
 	/**
 	 * Get all unique partition context ids present in the collection.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns An array of context id objects, one per unique partition.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		if (!Is.arrayValue(this._partitionContextIds)) {
-			return [];
+			return undefined;
 		}
 
 		try {
 			const prefix = `${this._config.collection}_`;
+			const client = await this.getClient();
+			const db = client.db(this._config.database);
 			const collections = await this.listPartitionCollections();
-
-			return collections.map(col =>
-				ContextIdHelper.shortSplit(this._partitionContextIds ?? [], col.name.slice(prefix.length))
-			);
+			const result: IContextIds[] = [];
+			const skipped: string[] = [];
+			for (const col of collections) {
+				const count = await db.collection(col.name).estimatedDocumentCount();
+				if (count > 0) {
+					const partitionId = col.name.slice(prefix.length);
+					const split = EntityStorageHelper.tryShortSplit(
+						this._partitionContextIds ?? [],
+						partitionId
+					);
+					if (Is.undefined(split)) {
+						skipped.push(partitionId);
+					} else {
+						result.push(split);
+					}
+				}
+			}
+			if (Is.arrayValue(skipped)) {
+				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+				await nodeLogging?.log({
+					level: "warn",
+					source: MongoDbEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "partitionIdsSkipped",
+					data: {
+						expected: this._partitionContextIds?.length,
+						partitionIds: skipped.join(", ")
+					}
+				});
+			}
+			return result;
 		} catch (err) {
 			throw new GeneralError(
 				MongoDbEntityStorageConnector.CLASS_NAME,
@@ -621,6 +825,14 @@ export class MongoDbEntityStorageConnector<
 				err
 			);
 		}
+	}
+
+	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
 	}
 
 	/**
@@ -659,8 +871,10 @@ export class MongoDbEntityStorageConnector<
 		// without relying on context so that all partitions are handled in a single call.
 		const targetBase = targetConnector._config.collection;
 		const sourceBase = this._config.collection;
-		const targetDb = targetConnector._client.db(targetConnector._config.database);
-		const sourceDb = this._client.db(this._config.database);
+		const targetClient = await targetConnector.getClient();
+		const targetDb = targetClient.db(targetConnector._config.database);
+		const sourceClient = await this.getClient();
+		const sourceDb = sourceClient.db(this._config.database);
 
 		// Find all collections the target connector wrote to (exact base name or with a _suffix).
 		const allCollections = await targetDb.listCollections().toArray();
@@ -719,13 +933,46 @@ export class MongoDbEntityStorageConnector<
 	 * @returns The MongoDb connection configuration.
 	 * @internal
 	 */
-	private createConnectionConfig(): string {
+	private createClientId(): string {
+		return `${this._config.host}|${this._config.port ?? 27017}|${this._config.user ?? ""}|${this._config.database}`;
+	}
+
+	/**
+	 * Build the MongoDB connection URL from config.
+	 * @returns The connection URL string.
+	 * @internal
+	 */
+	private createConnectionUrl(): string {
 		const { host, port, user, password, database } = this._config;
 		const portPart = port ? `:${port}` : "";
-		if (user && password) {
+		if (Is.stringValue(user) && Is.stringValue(password)) {
 			return `mongodb://${user}:${password}@${host}${portPart}/${database}`;
 		}
 		return `mongodb://${host}${portPart}/${database}`;
+	}
+
+	/**
+	 * Retrieve (or lazily create) the shared MongoClient for this endpoint.
+	 * @returns The shared client.
+	 * @internal
+	 */
+	private async getClient(): Promise<MongoClient> {
+		return ConnectionHelper.openClient<MongoClient>(
+			"mongoDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async () => {
+				const client = new MongoClient(this.createConnectionUrl(), {
+					maxPoolSize: this._config.pool?.maxPoolSize,
+					minPoolSize: this._config.pool?.minPoolSize,
+					maxIdleTimeMS: this._config.pool?.maxIdleTimeMs,
+					waitQueueTimeoutMS: this._config.pool?.waitQueueTimeoutMs
+				});
+				await client.connect();
+				return client;
+			}
+		);
 	}
 
 	/**
@@ -735,7 +982,8 @@ export class MongoDbEntityStorageConnector<
 	 */
 	private async getCollection(): Promise<Collection> {
 		const collectionName = await this.resolveCollectionName(this._config.collection);
-		return this._client.db(this._config.database).collection(collectionName);
+		const client = await this.getClient();
+		return client.db(this._config.database).collection(collectionName);
 	}
 
 	/**
@@ -751,6 +999,33 @@ export class MongoDbEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 		return Is.stringValue(partitionKey) ? `${base}_${partitionKey.replace(/[\0$]/g, "_")}` : base;
+	}
+
+	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private async buildOptimisticMutexKey(id: string): Promise<string> {
+		const collectionName = await this.resolveCollectionName(this._config.collection);
+		return `${MongoDbEntityStorageConnector.CLASS_NAME}:optimistic:${this._config.database}:${collectionName}:${id}`;
+	}
+
+	/**
+	 * Check whether every condition holds against the given object.
+	 * @param conditions The conditions to verify.
+	 * @param obj The object to check against.
+	 * @returns True when all conditions match.
+	 * @internal
+	 */
+	private verifyConditions(
+		conditions: { property: keyof T; value: unknown }[],
+		obj: { [key in keyof T]: unknown }
+	): boolean {
+		return conditions.every(
+			condition => ObjectHelper.propertyGet(obj, condition.property as string) === condition.value
+		);
 	}
 
 	/**
@@ -770,7 +1045,8 @@ export class MongoDbEntityStorageConnector<
 	 */
 	private async listPartitionCollections(): Promise<{ name: string }[]> {
 		const prefix = `${this._config.collection}_`;
-		const db = this._client.db(this._config.database);
+		const client = await this.getClient();
+		const db = client.db(this._config.database);
 		return db.listCollections({ name: { $regex: `^${this.escapeRegex(prefix)}` } }).toArray();
 	}
 
@@ -904,7 +1180,7 @@ export class MongoDbEntityStorageConnector<
 				}
 				// For array/object fields: $ne on an array field matches documents where
 				// none of the array elements equal the value (MongoDB element-wise semantics).
-				// $elemMatch: { $ne: value } is wrong — it matches if *any* element ≠ value.
+				// $elemMatch: { $ne: value } is wrong - it matches if *any* element ≠ value.
 				return { $ne: value };
 			default:
 				throw new GeneralError(

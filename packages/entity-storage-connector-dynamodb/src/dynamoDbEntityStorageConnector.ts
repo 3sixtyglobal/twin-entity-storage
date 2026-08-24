@@ -21,19 +21,26 @@ import {
 	ScanCommand
 } from "@aws-sdk/lib-dynamodb";
 import { type NativeAttributeValue, unmarshall } from "@aws-sdk/util-dynamodb";
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	ConflictError,
 	Converter,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
+	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
+	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
@@ -49,6 +56,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
+	ConnectionHelper,
 	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
@@ -62,9 +70,9 @@ import type { IDynamoDbEntityStorageConnectorConstructorOptions } from "./models
 /**
  * Class for performing entity storage operations using Dynamo DB.
  */
-export class DynamoDbEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class DynamoDbEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -75,6 +83,18 @@ export class DynamoDbEntityStorageConnector<
 	 * @internal
 	 */
 	private static readonly _DEFAULT_LIMIT: number = 40;
+
+	/**
+	 * Batch chunk size for bulk write operations.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 25;
+
+	/**
+	 * Number of BatchWriteCommand calls to dispatch concurrently in setBatch.
+	 * @internal
+	 */
+	private static readonly _WRITE_CONCURRENCY: number = 25;
 
 	/**
 	 * Partition id field name.
@@ -113,10 +133,28 @@ export class DynamoDbEntityStorageConnector<
 	private readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
 	 * The configuration for the connector.
 	 * @internal
 	 */
 	private readonly _config: IDynamoDbEntityStorageConnectorConfig;
+
+	/**
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
+	 * @internal
+	 */
+	private readonly _mutexTimeoutMs?: number;
+
+	/**
+	 * The instance id for this connector.
+	 * @internal
+	 */
+	private readonly _instanceId: string;
 
 	/**
 	 * Create a new instance of DynamoDbEntityStorageConnector.
@@ -165,11 +203,14 @@ export class DynamoDbEntityStorageConnector<
 		this._entitySchemaName = options.entitySchema;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
 
 		this._config = options.config;
 		this._config.endpoint = Is.stringValue(this._config.endpoint)
 			? this._config.endpoint
 			: undefined;
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
+		this._instanceId = RandomHelper.generateUuidV7("compact");
 	}
 
 	/**
@@ -181,16 +222,31 @@ export class DynamoDbEntityStorageConnector<
 	}
 
 	/**
+	 * Stop the component.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 */
+	public async stop(nodeLoggingComponentType?: string): Promise<void> {
+		await ConnectionHelper.closeClient<DynamoDB>(
+			"dynamoDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async client => client.destroy()
+		);
+	}
+
+	/**
 	 * Returns the health status of the component.
 	 * @returns The health status of the component.
 	 */
 	public async health(): Promise<IHealth[]> {
 		try {
-			const dbConnection = this.createConnection();
+			const dbConnection = await this.getClient();
 			await dbConnection.describeTable({ TableName: this._config.tableName });
 			return [
 				{
 					source: DynamoDbEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { tableName: this._config.tableName }
@@ -200,6 +256,7 @@ export class DynamoDbEntityStorageConnector<
 			return [
 				{
 					source: DynamoDbEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",
@@ -237,7 +294,7 @@ export class DynamoDbEntityStorageConnector<
 			});
 
 			try {
-				const dbConnection = this.createConnection();
+				const dbConnection = await this.getClient();
 
 				const tableParams: CreateTableCommandInput = {
 					AttributeDefinitions: [],
@@ -390,7 +447,7 @@ export class DynamoDbEntityStorageConnector<
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const docClient = this.createDocClient();
+			const docClient = await this.getDocClient();
 
 			if (Is.empty(secondaryIndex) && Is.empty(conditions)) {
 				const getCommand = new GetCommand({
@@ -485,6 +542,12 @@ export class DynamoDbEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
+
 		const prepared = EntityStorageHelper.prepareEntity(
 			entity,
 			this._entitySchema,
@@ -500,21 +563,61 @@ export class DynamoDbEntityStorageConnector<
 		);
 
 		const id = (prepared as { [id: string]: unknown })[this._primaryKey.property as string];
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, String(id))
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			const docClient = this.createDocClient();
+			const pk = this._primaryKey.property as string;
+			let useExistsOnly = false;
+
+			// Build the set of conditions for the DB-level check (user conditions + version)
+			const allConditions: { property: keyof T; value: unknown }[] = [...(conditions ?? [])];
+
+			if (Is.stringValue(this._versionKey) && hasVersionCheck) {
+				// Update path: entity must already exist with the submitted version
+				ObjectHelper.propertySet(prepared, this._versionKey, (submittedVersion ?? 0) + 1);
+				allConditions.push({ property: this._versionKey as keyof T, value: submittedVersion });
+				useExistsOnly = true;
+			} else if (Is.stringValue(this._versionKey)) {
+				// Unversioned write: read current version, then write with that version as condition
+				const currentEntity = await this.get(String(id));
+				if (!Is.empty(currentEntity)) {
+					const storedVersion =
+						ObjectHelper.propertyGet<number>(currentEntity, this._versionKey) ?? 0;
+					ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
+					allConditions.push({ property: this._versionKey as keyof T, value: storedVersion });
+					useExistsOnly = true;
+				} else {
+					ObjectHelper.propertySet(prepared, this._versionKey, 1);
+				}
+			}
+
+			const docClient = await this.getDocClient();
 
 			const { conditionExpression, attributeNames, attributeValues } =
-				this.buildConditionExpression(conditions);
+				this.buildConditionExpression(allConditions);
+
+			let finalConditionExpression: string | undefined;
+			if (useExistsOnly) {
+				finalConditionExpression = Is.stringValue(conditionExpression)
+					? `attribute_exists(${pk}) AND ${conditionExpression}`
+					: `attribute_exists(${pk})`;
+			} else if (Is.stringValue(conditionExpression)) {
+				finalConditionExpression = `(attribute_exists(${pk}) AND ${conditionExpression}) OR attribute_not_exists(${pk})`;
+			}
 
 			const putCommand = new PutCommand({
 				TableName: this._config.tableName,
 				Item: prepared as { [id: string]: unknown },
-				// Only set the condition expression if we have conditions to match
-				// and the primary key exists, otherwise we are creating a new object
-				ConditionExpression: Is.stringValue(conditionExpression)
-					? `(attribute_exists(${this._primaryKey.property as string}) AND ${conditionExpression}) OR attribute_not_exists(${this._primaryKey.property as string})`
-					: undefined,
+				ConditionExpression: finalConditionExpression,
 				ExpressionAttributeNames: attributeNames,
 				ExpressionAttributeValues: attributeValues
 			});
@@ -522,6 +625,13 @@ export class DynamoDbEntityStorageConnector<
 			await docClient.send(putCommand);
 		} catch (err) {
 			if (BaseError.isErrorName(err, "ConditionalCheckFailedException")) {
+				if (Is.stringValue(this._versionKey)) {
+					throw new ConflictError(
+						DynamoDbEntityStorageConnector.CLASS_NAME,
+						hasVersionCheck ? "optimisticLockFailed" : "conditionFailed",
+						String(id)
+					);
+				}
 				return;
 			}
 
@@ -544,6 +654,10 @@ export class DynamoDbEntityStorageConnector<
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -575,22 +689,33 @@ export class DynamoDbEntityStorageConnector<
 		);
 
 		try {
-			const docClient = this.createDocClient();
-			const chunkSize = 25;
+			const docClient = await this.getDocClient();
+			const chunkSize = DynamoDbEntityStorageConnector._BATCH_CHUNK_SIZE;
+			const concurrency = DynamoDbEntityStorageConnector._WRITE_CONCURRENCY;
+			const windowSize = chunkSize * concurrency;
 
-			for (let i = 0; i < preparedEntities.length; i += chunkSize) {
-				const chunk = preparedEntities.slice(i, i + chunkSize);
-				await docClient.send(
-					new BatchWriteCommand({
-						RequestItems: {
-							[this._config.tableName]: chunk.map(entity => ({
-								PutRequest: {
-									Item: entity as { [id: string]: unknown }
-								}
-							}))
-						}
-					})
-				);
+			for (let i = 0; i < preparedEntities.length; i += windowSize) {
+				const window = preparedEntities.slice(i, i + windowSize);
+				const sends: Promise<void>[] = [];
+				for (let j = 0; j < window.length; j += chunkSize) {
+					const chunk = window.slice(j, j + chunkSize);
+					sends.push(
+						(async () => {
+							await docClient.send(
+								new BatchWriteCommand({
+									RequestItems: {
+										[this._config.tableName]: chunk.map(entity => ({
+											PutRequest: {
+												Item: entity as { [id: string]: unknown }
+											}
+										}))
+									}
+								})
+							);
+						})()
+					);
+				}
+				await Promise.all(sends);
 			}
 		} catch (err) {
 			if (BaseError.isErrorCode(err, "ResourceNotFoundException")) {
@@ -624,7 +749,7 @@ export class DynamoDbEntityStorageConnector<
 
 			const pKey = partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE;
 
-			const docClient = this.createDocClient();
+			const docClient = await this.getDocClient();
 			const chunkSize = 25;
 
 			let exclusiveStartKey: { [key: string]: NativeAttributeValue } | undefined;
@@ -695,9 +820,19 @@ export class DynamoDbEntityStorageConnector<
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			const docClient = this.createDocClient();
+			const docClient = await this.getDocClient();
 
 			const { conditionExpression, attributeNames, attributeValues } =
 				this.buildConditionExpression(conditions);
@@ -709,7 +844,9 @@ export class DynamoDbEntityStorageConnector<
 						partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE,
 					[this._primaryKey.property as string]: id
 				},
-				ConditionExpression: conditionExpression,
+				ConditionExpression: Is.stringValue(conditionExpression)
+					? `attribute_not_exists(${this._primaryKey.property as string}) OR (attribute_exists(${this._primaryKey.property as string}) AND ${conditionExpression})`
+					: undefined,
 				ExpressionAttributeNames: attributeNames,
 				ExpressionAttributeValues: attributeValues
 			});
@@ -717,6 +854,9 @@ export class DynamoDbEntityStorageConnector<
 			await docClient.send(deleteCommand);
 		} catch (err) {
 			if (BaseError.isErrorName(err, "ConditionalCheckFailedException")) {
+				if (Is.stringValue(this._versionKey)) {
+					throw new ConflictError(DynamoDbEntityStorageConnector.CLASS_NAME, "conditionFailed", id);
+				}
 				return;
 			}
 			if (BaseError.isErrorCode(err, "ResourceNotFoundException")) {
@@ -738,6 +878,10 @@ export class DynamoDbEntityStorageConnector<
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -753,7 +897,7 @@ export class DynamoDbEntityStorageConnector<
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
-			const docClient = this.createDocClient();
+			const docClient = await this.getDocClient();
 			const chunkSize = 25;
 			const primaryKeyProperty = this._primaryKey.property as string;
 
@@ -802,7 +946,7 @@ export class DynamoDbEntityStorageConnector<
 		});
 
 		try {
-			const dbConnection = this.createConnection();
+			const dbConnection = await this.getClient();
 
 			await dbConnection.deleteTable({ TableName: this._config.tableName });
 
@@ -878,6 +1022,18 @@ export class DynamoDbEntityStorageConnector<
 		EntityStorageHelper.validateProperties(this._entitySchema, properties);
 		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 
+		if (Is.arrayValue(sortProperties)) {
+			const nonPrimarySorts = sortProperties.filter(
+				sortProperty => sortProperty.property !== this._primaryKey.property
+			);
+			if (nonPrimarySorts.length > 1) {
+				throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "sortUnsupported", {
+					properties: sortProperties.map(sortProperty => sortProperty.property),
+					primaryKey: this._primaryKey.property
+				});
+			}
+		}
+
 		return this.internalQuery(
 			conditions,
 			sortProperties,
@@ -924,7 +1080,7 @@ export class DynamoDbEntityStorageConnector<
 				return 0;
 			}
 
-			const dbConnection = this.createConnection();
+			const dbConnection = await this.getClient();
 			let total = 0;
 			let exclusiveStartKey: { [key: string]: AttributeValue } | undefined;
 
@@ -959,17 +1115,21 @@ export class DynamoDbEntityStorageConnector<
 
 	/**
 	 * Get a unique list of all the context ids from the storage.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		if (!Is.arrayValue(this._partitionContextIds)) {
-			return [];
+			return undefined;
 		}
 
 		const contextIdsMap: { [id: string]: IContextIds } = {};
+		const skipped = new Set<string>();
 
 		try {
-			const docClient = this.createDocClient();
+			const docClient = await this.getDocClient();
 			let exclusiveStartKey: { [key: string]: NativeAttributeValue } | undefined;
 
 			do {
@@ -987,10 +1147,15 @@ export class DynamoDbEntityStorageConnector<
 				for (const item of scanResult.Items ?? []) {
 					const partitionId = item[DynamoDbEntityStorageConnector._PARTITION_KEY] as string;
 					if (Is.stringValue(partitionId) && !(partitionId in contextIdsMap)) {
-						contextIdsMap[partitionId] = ContextIdHelper.shortSplit(
+						const split = EntityStorageHelper.tryShortSplit(
 							this._partitionContextIds ?? [],
 							partitionId
 						);
+						if (Is.undefined(split)) {
+							skipped.add(partitionId);
+						} else {
+							contextIdsMap[partitionId] = split;
+						}
 					}
 				}
 
@@ -1005,7 +1170,29 @@ export class DynamoDbEntityStorageConnector<
 			);
 		}
 
+		if (skipped.size > 0) {
+			const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+			await nodeLogging?.log({
+				level: "warn",
+				source: DynamoDbEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "partitionIdsSkipped",
+				data: {
+					expected: this._partitionContextIds?.length,
+					partitionIds: Array.from(skipped).join(", ")
+				}
+			});
+		}
+
 		return Object.values(contextIdsMap);
+	}
+
+	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
 	}
 
 	/**
@@ -1099,27 +1286,27 @@ export class DynamoDbEntityStorageConnector<
 	private async bulkCopy<U>(
 		sourceConnector: DynamoDbEntityStorageConnector<U>,
 		destConnector: DynamoDbEntityStorageConnector<U>,
-		partitions: IContextIds[],
+		partitions: IContextIds[] | undefined,
 		batchSize: number
 	): Promise<void> {
-		let partitionList: IContextIds[];
-		if (Is.arrayValue(partitions)) {
-			partitionList = partitions;
-		} else if (Is.arrayValue(sourceConnector._partitionContextIds)) {
-			partitionList = [];
-		} else {
-			partitionList = [{}];
+		// undefined → not partitioned: one pass with no partition key.
+		// []        → partitioned but empty: nothing to copy, return early.
+		// [{…}, …]  → partitioned with data: iterate over each partition.
+		if (partitions?.length === 0) {
+			return;
 		}
+		const partitionList = partitions ?? [{}];
 
-		const dbConnection = sourceConnector.createConnection();
+		const dbConnection = await sourceConnector.getClient();
 		const chunkSize = 25;
 
 		for (let i = 0; i < partitionList.length; i++) {
-			const partitionKey =
-				ContextIdHelper.combinedContextKey(
-					partitionList[i],
-					sourceConnector._partitionContextIds
-				) ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE;
+			// Values from getPartitionContextIds are already short-form, so we join them
+			// directly rather than using combinedContextKey, which expects long-form input
+			// and calls guardAll (throwing if a registered handler rejects short-form values).
+			const partitionKey = Is.arrayValue(sourceConnector._partitionContextIds)
+				? sourceConnector._partitionContextIds.map(k => partitionList[i][k]).join("/")
+				: DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE;
 
 			let exclusiveStartKey: { [key: string]: AttributeValue } | undefined;
 			do {
@@ -1212,7 +1399,7 @@ export class DynamoDbEntityStorageConnector<
 			}[] = condition.conditions.map(c => {
 				// Snapshot before each branch. When a branch is dead (noResults),
 				// undo its attribute registrations so the final expressions stay
-				// consistent — DynamoDB rejects unused ExpressionAttributeNames (#141).
+				// consistent - DynamoDB rejects unused ExpressionAttributeNames (#141).
 				const preBranchNames = new Set(Object.keys(attributeNames));
 				const preBranchValues = new Set(Object.keys(attributeValues));
 				const result = this.buildQueryParameters(
@@ -1244,7 +1431,7 @@ export class DynamoDbEntityStorageConnector<
 			if (condition.logicalOperator === LogicalOperator.Or) {
 				// OR: only empty if ALL branches are guaranteed empty (e.g. all empty IN lists).
 				// If only some are empty they are naturally filtered out of `parts` below,
-				// which is correct — false OR x = x (#141).
+				// which is correct - false OR x = x (#141).
 				if (joinConditions.every(j => j.noResults)) {
 					return { keyCondition: "", filterCondition: "", requiresScan: false, noResults: true };
 				}
@@ -1252,7 +1439,7 @@ export class DynamoDbEntityStorageConnector<
 				const parts = joinConditions
 					.map(j => {
 						// A branch marked noResults (e.g. a dead AND group containing In [])
-						// must contribute nothing to the OR — false OR x = x (#141).
+						// must contribute nothing to the OR - false OR x = x (#141).
 						if (j.noResults) {
 							return "";
 						}
@@ -1283,7 +1470,7 @@ export class DynamoDbEntityStorageConnector<
 
 			// AND: if any sub-condition is a guaranteed empty result (e.g. empty IN list),
 			// the whole AND group is also empty (#141). Restore the attribute maps to the
-			// pre-group snapshot so surviving siblings' registrations are also undone —
+			// pre-group snapshot so surviving siblings' registrations are also undone -
 			// per-branch cleanup above only undoes dead branches, not live ones whose AND
 			// partner was dead.
 			const noResults = joinConditions.some(j => j.noResults);
@@ -1310,7 +1497,7 @@ export class DynamoDbEntityStorageConnector<
 
 		const schemaProp = this._entitySchema.properties?.find(p => p.property === condition.property);
 
-		// Empty IN list: DynamoDB has no `IN ()` syntax — short-circuit to empty result (#141).
+		// Empty IN list: DynamoDB has no `IN ()` syntax - short-circuit to empty result (#141).
 		if (
 			"comparison" in condition &&
 			condition.comparison === ComparisonOperator.In &&
@@ -1511,31 +1698,44 @@ export class DynamoDbEntityStorageConnector<
 	}
 
 	/**
-	 * Create a doc client connection.
-	 * @returns The dynamo db document client.
+	 * Get the shared DynamoDB base client, opening it if needed.
+	 * @returns The DynamoDB client.
 	 * @internal
 	 */
-	private createDocClient(): DynamoDBDocumentClient {
-		return DynamoDBDocumentClient.from(
-			new DynamoDB({
-				apiVersion: "2012-10-08",
-				...this.createConnectionConfig()
-			}),
-			{
-				marshallOptions: {
-					removeUndefinedValues: true
-				}
-			}
+	private async getClient(): Promise<DynamoDB> {
+		return ConnectionHelper.openClient<DynamoDB>(
+			"dynamoDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async () =>
+				new DynamoDB({
+					apiVersion: "2012-10-08",
+					...this.createConnectionConfig()
+				})
 		);
 	}
 
 	/**
-	 * Create a new DB connection.
-	 * @returns The Dynamo DB connection.
+	 * Get a DynamoDB document client wrapping the shared base client.
+	 * @returns The DynamoDB document client.
 	 * @internal
 	 */
-	private createConnection(): DynamoDB {
-		return new DynamoDB(this.createConnectionConfig());
+	private async getDocClient(): Promise<DynamoDBDocumentClient> {
+		return DynamoDBDocumentClient.from(await this.getClient(), {
+			marshallOptions: {
+				removeUndefinedValues: true
+			}
+		});
+	}
+
+	/**
+	 * Create the client id for the shared store key.
+	 * @returns The client id string.
+	 * @internal
+	 */
+	private createClientId(): string {
+		return `${this._config.region}|${this._config.endpoint ?? ""}|${this._config.authMode ?? "credentials"}|${this._config.accessKeyId ?? ""}`;
 	}
 
 	/**
@@ -1581,7 +1781,7 @@ export class DynamoDbEntityStorageConnector<
 	 */
 	private async tableExists(tableName: string): Promise<boolean> {
 		try {
-			const dbConnection = this.createConnection();
+			const dbConnection = await this.getClient();
 
 			const result = await dbConnection.describeTable({ TableName: tableName });
 
@@ -1706,10 +1906,11 @@ export class DynamoDbEntityStorageConnector<
 
 	/**
 	 * Resolve index configuration from sort options and optional explicit secondary index.
+	 * Only the first sort property selects the GSI and scan direction, trailing tiebreakers
+	 * are ignored as the key-based cursor already paginates stably across ties.
 	 * @param sortProperties The optional sort order.
 	 * @param secondaryIndex The optional explicit secondary index.
 	 * @returns The resolved index name, GSI attribute and sort direction.
-	 * @throws GeneralError if more than one sort property is specified.
 	 * @internal
 	 */
 	private resolveQueryIndexConfig(
@@ -1730,23 +1931,18 @@ export class DynamoDbEntityStorageConnector<
 		let scanAscending = true;
 
 		if (Is.arrayValue(sortProperties)) {
-			if (sortProperties.length > 1) {
-				throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "sortSingle");
+			const primarySort = sortProperties[0];
+			const propertySchema = this._entitySchema.properties?.find(
+				e => e.property === primarySort.property
+			);
+			if (propertySchema?.isPrimary) {
+				indexName = undefined;
+				gsiAttribute = undefined;
+			} else {
+				indexName = `${primarySort.property as string}Index`;
+				gsiAttribute = primarySort.property as string;
 			}
-
-			for (const sortProperty of sortProperties) {
-				const propertySchema = this._entitySchema.properties?.find(
-					e => e.property === sortProperty.property
-				);
-				if (propertySchema?.isPrimary) {
-					indexName = undefined;
-					gsiAttribute = undefined;
-				} else {
-					indexName = `${sortProperty.property as string}Index`;
-					gsiAttribute = sortProperty.property as string;
-				}
-				scanAscending = sortProperty.sortDirection === SortDirection.Ascending;
-			}
+			scanAscending = primarySort.sortDirection === SortDirection.Ascending;
 		}
 
 		return {
@@ -1861,7 +2057,7 @@ export class DynamoDbEntityStorageConnector<
 			scanFilter += ` AND ${filterCondition.trim()}`;
 		}
 
-		const dbConnection = this.createConnection();
+		const dbConnection = await this.getClient();
 		const matchingItems: { [id: string]: AttributeValue }[] = [];
 		let scanStartKey = this.decodeCursor(cursor);
 		let lastEvaluatedKey: { [id: string]: AttributeValue } | undefined;
@@ -1955,7 +2151,7 @@ export class DynamoDbEntityStorageConnector<
 		rawItems: { [id: string]: AttributeValue }[];
 		cursor?: string;
 	}> {
-		const connection = this.createDocClient();
+		const connection = await this.getDocClient();
 		const results = await connection.send(
 			new QueryCommand({
 				TableName: this._config.tableName,
@@ -2024,7 +2220,7 @@ export class DynamoDbEntityStorageConnector<
 		rawItems: { [id: string]: AttributeValue }[];
 		cursor?: string;
 	}> {
-		const connection = this.createDocClient();
+		const connection = await this.getDocClient();
 		const returnedRawItems: { [id: string]: AttributeValue }[] = [];
 		let lastEvaluatedKey: { [id: string]: AttributeValue } | undefined = this.decodeCursor(cursor);
 
@@ -2134,5 +2330,16 @@ export class DynamoDbEntityStorageConnector<
 				return alias;
 			})
 			.join(", ");
+	}
+
+	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param partitionKey The resolved partition key.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private buildOptimisticMutexKey(partitionKey: string | undefined, id: string): string {
+		return `${DynamoDbEntityStorageConnector.CLASS_NAME}:optimistic:${this._config.tableName}:${partitionKey ?? DynamoDbEntityStorageConnector._PARTITION_KEY_VALUE}:${id}`;
 	}
 }

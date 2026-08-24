@@ -41,7 +41,7 @@ export interface IMySqlEntityStorageConnectorConfig {
 	pool?: {
 		/**
 		 * Maximum number of connections in pool.
-		 * @default 10
+		 * @default 20
 		 */
 		connectionLimit?: number;
 
@@ -77,7 +77,7 @@ export interface IMySqlEntityStorageConnectorConfig {
 	};
 
 	/**
-	 * Maximum milliseconds to wait for the per-directory write lock before throwing.
+	 * Maximum milliseconds to wait for optimistic-lock mutexes before throwing.
 	 */
 	mutexTimeoutMs?: number;
 }

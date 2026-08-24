@@ -3,14 +3,14 @@
 Service that checks and applies entity schema migrations at every node start-up.
 
 This service must be the first entry in coreTypeInitialisers.json. The engine iterates that
-array in order to determine start sequence — there is no engine-level priority mechanism, so
+array in order to determine start sequence - there is no engine-level priority mechanism, so
 registration position is the only guarantee that start() runs before any other service.
 By the time start() is called, all component bootstraps have completed (every table already
 exists) and EntitySchemaFactory / EntityStorageConnectorFactory are fully populated with every
 registered schema and connector.
 
 Migration mechanics: old schema versions are registered in EntitySchemaFactory by naming
-convention — current schema = "MyEntity", first history = "MyEntityV0", second = "MyEntityV1".
+convention - current schema = "MyEntity", first history = "MyEntityV0", second = "MyEntityV1".
 The service groups schemas by base name (strips the trailing V number suffix) and resolves the
 migration chain automatically by diffing consecutive versioned schemas. For steps that require
 property renames or a custom transform hook, register an optional ISchemaMigration entry in
@@ -83,6 +83,9 @@ full schemaVersion table in one pass, then orchestrates chain migrations for any
 whose stored version is behind the current version declared in EntitySchemaFactory.
 SchemaVersion itself is processed first so the version store is migrated before any
 version records are written for other schemas.
+
+When config.enabled is false the service runs in detect-only mode: it identifies schemas
+that need migration and logs a warning for each one, but applies no changes.
 
 Runs after all component bootstraps, so every managed table already exists.
 

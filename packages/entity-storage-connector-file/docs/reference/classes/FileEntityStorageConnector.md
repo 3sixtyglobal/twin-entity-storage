@@ -11,6 +11,7 @@ Class for performing entity storage operations in file.
 ## Implements
 
 - `IEntityStorageMigrationConnector`\<`T`\>
+- `IHealthProviderComponent`
 
 ## Constructors
 
@@ -96,11 +97,11 @@ Returns the health status of the component.
 
 `Promise`\<`IHealth`[]\>
 
-The health status of the component, can return multiple entries for elements within the component.
+The health status of the component.
 
 #### Implementation of
 
-`IEntityStorageMigrationConnector.health`
+`IHealthProviderComponent.health`
 
 ***
 
@@ -185,6 +186,10 @@ The optional conditions to match for the entities.
 `Promise`\<`void`\>
 
 The id of the entity.
+
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 
 #### Implementation of
 
@@ -314,6 +319,10 @@ The optional conditions to match for the entities.
 
 Nothing.
 
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions do not match the stored state.
+
 #### Implementation of
 
 `IEntityStorageMigrationConnector.remove`
@@ -397,15 +406,41 @@ The total count of entities in the storage.
 
 ***
 
-### getPartitionContextIds() {#getpartitioncontextids}
+### connectorVersion() {#connectorversion}
 
-> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+> **connectorVersion**(): `number`
 
-Get a unique list of all the context ids from the storage.
+Get the connector implementation version.
 
 #### Returns
 
-`Promise`\<`IContextIds`[]\>
+`number`
+
+The connector implementation version.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.connectorVersion`
+
+***
+
+### getPartitionContextIds() {#getpartitioncontextids}
+
+> **getPartitionContextIds**(`loggingComponentType?`): `Promise`\<`IContextIds`[] \| `undefined`\>
+
+Get a unique list of all the context ids from the storage.
+
+#### Parameters
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging skipped partition ids.
+
+#### Returns
+
+`Promise`\<`IContextIds`[] \| `undefined`\>
 
 The list of unique context ids.
 

@@ -2,15 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0.
 import { access, mkdir, readFile, rename, rm, statfs, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	ConflictError,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
 	type IValidationFailure,
 	Mutex,
@@ -42,9 +47,9 @@ import type { IFileEntityStorageConnectorConstructorOptions } from "./models/IFi
 /**
  * Class for performing entity storage operations in file.
  */
-export class FileEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class FileEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -99,6 +104,12 @@ export class FileEntityStorageConnector<
 	private readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
 	 * The directory to use for storage.
 	 * @internal
 	 */
@@ -143,6 +154,7 @@ export class FileEntityStorageConnector<
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
 		this._directory = path.resolve(options.config.directory);
 		this._diskErrorThresholdBytes =
 			options.config.diskErrorThresholdBytes ??
@@ -217,7 +229,7 @@ export class FileEntityStorageConnector<
 
 	/**
 	 * Returns the health status of the component.
-	 * @returns The health status of the component, can return multiple entries for elements within the component.
+	 * @returns The health status of the component.
 	 */
 	public async health(): Promise<IHealth[]> {
 		try {
@@ -228,6 +240,7 @@ export class FileEntityStorageConnector<
 				return [
 					{
 						source: FileEntityStorageConnector.CLASS_NAME,
+						category: HealthCategory.Connectivity,
 						status: HealthStatus.Error,
 						description: "healthDescription",
 						message: "diskSpaceError",
@@ -242,6 +255,7 @@ export class FileEntityStorageConnector<
 				return [
 					{
 						source: FileEntityStorageConnector.CLASS_NAME,
+						category: HealthCategory.Connectivity,
 						status: HealthStatus.Warning,
 						description: "healthDescription",
 						message: "diskSpaceWarning",
@@ -256,6 +270,7 @@ export class FileEntityStorageConnector<
 			return [
 				{
 					source: FileEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { directory: this._directory, freeBytes }
@@ -265,6 +280,7 @@ export class FileEntityStorageConnector<
 			return [
 				{
 					source: FileEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "diskSpaceCheckFailed",
@@ -302,7 +318,7 @@ export class FileEntityStorageConnector<
 
 		const store = await this.readStoreWithLock();
 
-		const finalConditions = conditions ?? [];
+		const finalConditions = conditions ? [...conditions] : [];
 		if (Is.stringValue(partitionKey)) {
 			finalConditions.push({
 				property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
@@ -327,6 +343,7 @@ export class FileEntityStorageConnector<
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The id of the entity.
+	 * @throws ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(FileEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
@@ -334,6 +351,12 @@ export class FileEntityStorageConnector<
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
 
 		const prepared = EntityStorageHelper.prepareEntity(
 			entity,
@@ -347,23 +370,54 @@ export class FileEntityStorageConnector<
 		await this.withLock(async () => {
 			const store = await this.readStore();
 
-			const finalConditions = conditions ?? [];
+			const baseConditions: { property: keyof T; value: unknown }[] = [];
 			if (Is.stringValue(partitionKey)) {
-				finalConditions.push({
+				baseConditions.push({
 					property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
 					value: partitionKey
 				});
 			}
 
-			const existingIndex = this.findItem(
-				store,
-				prepared[this._primaryKey.property] as string,
-				undefined,
-				finalConditions
-			);
+			const fullConditions: { property: keyof T; value: unknown }[] = [
+				...baseConditions,
+				...(conditions ?? [])
+			];
+			if (hasVersionCheck) {
+				fullConditions.push({ property: this._versionKey as keyof T, value: submittedVersion });
+			}
+
+			const entityId = prepared[this._primaryKey.property] as string;
+			const existingIndex = this.findItem(store, entityId, undefined, fullConditions);
+
 			if (existingIndex >= 0) {
+				if (Is.stringValue(this._versionKey)) {
+					const storedVersion =
+						ObjectHelper.propertyGet<number>(store[existingIndex], this._versionKey) ?? 0;
+					ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
+				}
 				store[existingIndex] = prepared;
 			} else {
+				const existsIndex = this.findItem(store, entityId, undefined, baseConditions);
+				if (existsIndex >= 0) {
+					if (Is.stringValue(this._versionKey)) {
+						if (hasVersionCheck) {
+							throw new ConflictError(
+								FileEntityStorageConnector.CLASS_NAME,
+								"optimisticLockFailed",
+								entityId
+							);
+						}
+						throw new ConflictError(
+							FileEntityStorageConnector.CLASS_NAME,
+							"conditionFailed",
+							entityId
+						);
+					}
+					return;
+				}
+				if (Is.stringValue(this._versionKey)) {
+					ObjectHelper.propertySet(prepared, this._versionKey, 1);
+				}
 				store.push(prepared);
 			}
 
@@ -528,6 +582,7 @@ export class FileEntityStorageConnector<
 	 * @param id The id of the entity to remove.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns Nothing.
+	 * @throws ConflictError when the entity exists but the supplied conditions do not match the stored state.
 	 */
 	public async remove(
 		id: string,
@@ -542,19 +597,28 @@ export class FileEntityStorageConnector<
 		await this.withLock(async () => {
 			const store = await this.readStore();
 
-			const finalConditions = conditions ?? [];
+			const baseConditions: { property: keyof T; value: unknown }[] = [];
 			if (Is.stringValue(partitionKey)) {
-				finalConditions.push({
+				baseConditions.push({
 					property: FileEntityStorageConnector._PARTITION_KEY as keyof T,
 					value: partitionKey
 				});
 			}
 
-			const index = this.findItem(store, id, undefined, finalConditions);
+			const fullConditions: { property: keyof T; value: unknown }[] = [
+				...baseConditions,
+				...(conditions ?? [])
+			];
+			const index = this.findItem(store, id, undefined, fullConditions);
 
 			if (index >= 0) {
 				store.splice(index, 1);
 				await this.writeStore(store);
+			} else if (Is.arrayValue(conditions)) {
+				const existsIndex = this.findItem(store, id, undefined, baseConditions);
+				if (existsIndex >= 0 && this._versionKey) {
+					throw new ConflictError(FileEntityStorageConnector.CLASS_NAME, "conditionFailed", id);
+				}
 			}
 		});
 	}
@@ -704,11 +768,26 @@ export class FileEntityStorageConnector<
 	}
 
 	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
+	}
+
+	/**
 	 * Get a unique list of all the context ids from the storage.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
+		if (!Is.arrayValue(this._partitionContextIds)) {
+			return undefined;
+		}
 		const contextIds: { [id: string]: IContextIds } = {};
+		const skipped = new Set<string>();
 
 		const store = await this.readStoreWithLock();
 
@@ -718,11 +797,30 @@ export class FileEntityStorageConnector<
 				FileEntityStorageConnector._PARTITION_KEY
 			);
 			if (Is.stringValue(partitionId)) {
-				contextIds[partitionId] = ContextIdHelper.shortSplit(
+				const split = EntityStorageHelper.tryShortSplit(
 					this._partitionContextIds ?? [],
 					partitionId
 				);
+				if (Is.undefined(split)) {
+					skipped.add(partitionId);
+				} else {
+					contextIds[partitionId] = split;
+				}
 			}
+		}
+
+		if (skipped.size > 0) {
+			const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+			await nodeLogging?.log({
+				level: "warn",
+				source: FileEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "partitionIdsSkipped",
+				data: {
+					expected: this._partitionContextIds?.length,
+					partitionIds: Array.from(skipped).join(", ")
+				}
+			});
 		}
 
 		return Object.values(contextIds);
@@ -801,7 +899,7 @@ export class FileEntityStorageConnector<
 	/**
 	 * Read the store from file while holding the directory mutex.
 	 * Use this for standalone reads (get, query, count, getPartitionContextIds) where
-	 * no outer lock is held. Do not call from inside a withLock callback —
+	 * no outer lock is held. Do not call from inside a withLock callback -
 	 * use readStore instead to avoid a re-entrant deadlock.
 	 * @returns The store.
 	 * @internal

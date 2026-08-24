@@ -11,6 +11,7 @@ Class for performing entity storage operations using Firestore.
 ## Implements
 
 - `IEntityStorageMigrationConnector`\<`T`\>
+- `IHealthProviderComponent`
 
 ## Constructors
 
@@ -60,6 +61,30 @@ The class name of the component.
 
 ***
 
+### stop() {#stop}
+
+> **stop**(`nodeLoggingComponentType?`): `Promise`\<`void`\>
+
+Stop the component.
+
+#### Parameters
+
+##### nodeLoggingComponentType?
+
+`string`
+
+The node logging component type.
+
+#### Returns
+
+`Promise`\<`void`\>
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.stop`
+
+***
+
 ### health() {#health}
 
 > **health**(): `Promise`\<`IHealth`[]\>
@@ -74,7 +99,7 @@ The health status of the component.
 
 #### Implementation of
 
-`IEntityStorageMigrationConnector.health`
+`IHealthProviderComponent.health`
 
 ***
 
@@ -322,19 +347,45 @@ True if the teardown process was successful.
 
 ### getPartitionContextIds() {#getpartitioncontextids}
 
-> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+> **getPartitionContextIds**(`loggingComponentType?`): `Promise`\<`IContextIds`[] \| `undefined`\>
 
 Get a unique list of all the context ids from the storage.
 
+#### Parameters
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging skipped partition ids.
+
 #### Returns
 
-`Promise`\<`IContextIds`[]\>
+`Promise`\<`IContextIds`[] \| `undefined`\>
 
 The list of unique context ids.
 
 #### Implementation of
 
 `IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### connectorVersion() {#connectorversion}
+
+> **connectorVersion**(): `number`
+
+Get the connector implementation version.
+
+#### Returns
+
+`number`
+
+The connector implementation version.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.connectorVersion`
 
 ***
 

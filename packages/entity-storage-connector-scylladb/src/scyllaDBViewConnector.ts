@@ -87,34 +87,37 @@ export class ScyllaDBViewConnector<T>
 		});
 
 		try {
-			const dbConnection = await this.openConnection(true);
+			const dbConnection = await this.openConnectionNoKeyspace();
+			try {
+				await this.createKeyspace(dbConnection, this._config.keyspace);
 
-			await this.createKeyspace(dbConnection, this._config.keyspace);
+				const fields: string[] = [];
+				const primaryKeys: string[] = [];
 
-			const fields: string[] = [];
-			const primaryKeys: string[] = [];
-
-			for (const field of this._viewSchema.properties ?? []) {
-				fields.push(`"${String(field.property)}" IS NOT NULL `);
-				if (field.isPrimary) {
-					primaryKeys.push(field.property as string);
+				for (const field of this._viewSchema.properties ?? []) {
+					fields.push(`"${String(field.property)}" IS NOT NULL `);
+					if (field.isPrimary) {
+						primaryKeys.push(field.property as string);
+					}
 				}
-			}
-			fields.push(`PRIMARY KEY (${primaryKeys.join(",")})`);
+				fields.push(`PRIMARY KEY (${primaryKeys.join(",")})`);
 
-			const sql = `CREATE MATERIALIZED VIEW IF NOT EXISTS ${this._config.keyspace}.${this._fullTableName}
+				const sql = `CREATE MATERIALIZED VIEW IF NOT EXISTS ${this._config.keyspace}.${this._fullTableName}
             AS SELECT * FROM ${this._config.keyspace}.${this._originalFullTableName} WHERE
             ${this._fullTableName} (${fields.join(" AND ")})`;
 
-			await this.execute(dbConnection, sql);
+				await this.execute(dbConnection, sql);
 
-			await nodeLogging?.log({
-				level: "info",
-				source: ScyllaDBViewConnector.CLASS_NAME,
-				ts: Date.now(),
-				message: "viewCreated",
-				data: { view: super.safeTableName(this._fullTableName) }
-			});
+				await nodeLogging?.log({
+					level: "info",
+					source: ScyllaDBViewConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "viewCreated",
+					data: { view: super.safeTableName(this._fullTableName) }
+				});
+			} finally {
+				await this.closeConnectionNoKeyspace(dbConnection);
+			}
 		} catch (err) {
 			if (BaseError.isErrorCode(err, "ResourceInUseException")) {
 				await nodeLogging?.log({

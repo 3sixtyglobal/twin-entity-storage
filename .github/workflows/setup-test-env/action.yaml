@@ -45,7 +45,7 @@ runs:
     - name: Start MongoDB Service
       if: inputs.package == 'packages/entity-storage-connector-mongodb' || inputs.package == 'all'
       shell: bash
-      run: docker pull mongo:latest && docker run -d --name twin-entity-storage-mongo -p 27017:27017 mongo:latest
+      run: docker pull mongo:latest && docker run -d --name twin-entity-storage-mongo --ulimit nofile=64000:64000 -p 27017:27017 mongo:latest
 
     # Start Firestore service only for Firestore package
     - name: Start Firestore Emulator

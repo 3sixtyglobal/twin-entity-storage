@@ -43,3 +43,43 @@ The port to connect to.
 ```ts
 9042
 ```
+
+***
+
+### pool? {#pool}
+
+> `optional` **pool?**: `object`
+
+Optional connection pool configuration.
+
+#### coreConnectionsPerHost?
+
+> `optional` **coreConnectionsPerHost?**: `number`
+
+Number of connections per local host.
+
+##### Default
+
+```ts
+1
+```
+
+#### maxRequestsPerConnection?
+
+> `optional` **maxRequestsPerConnection?**: `number`
+
+Maximum number of requests per connection.
+
+##### Default
+
+```ts
+1024
+```
+
+***
+
+### mutexTimeoutMs? {#mutextimeoutms}
+
+> `optional` **mutexTimeoutMs?**: `number`
+
+Milliseconds to wait for connector mutex locks before throwing.

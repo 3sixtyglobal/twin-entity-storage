@@ -7,8 +7,15 @@
 			"storeTornDown": "Entity storage torn down"
 		}
 	},
+	"warn": {
+		"firestoreEntityStorageConnector": {
+			"partitionIdsSkipped": "Skipping partition ids whose depth does not match the {expected} configured partition keys: {partitionIds}. Entities in these partitions are ignored by migration."
+		}
+	},
 	"error": {
 		"firestoreEntityStorageConnector": {
+			"optimisticLockFailed": "The entity \"{conflictId}\" could not be written because the optimistic lock check failed",
+			"conditionFailed": "The entity \"{conflictId}\" could not be updated because the supplied conditions did not match the stored state",
 			"firestoreCreationFailed": "Failed to connect to Firestore",
 			"getPartitionContextIdsFailed": "Unable to get partition context ids",
 			"setEntityFailed": "Failed to set entity \"{id}\"",

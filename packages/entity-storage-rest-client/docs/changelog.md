@@ -1,5 +1,189 @@
 # Changelog
 
+## [0.9.2-next.12](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.2-next.11...entity-storage-rest-client-v0.9.2-next.12) (2026-08-17)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-rest-client:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.11 to 0.9.2-next.12
+
+## [0.9.2-next.11](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.2-next.10...entity-storage-rest-client-v0.9.2-next.11) (2026-08-16)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-rest-client:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.10 to 0.9.2-next.11
+
+## [0.9.2-next.10](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.2-next.9...entity-storage-rest-client-v0.9.2-next.10) (2026-08-14)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-rest-client:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.9 to 0.9.2-next.10
+
+## [0.9.2-next.9](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.2-next.8...entity-storage-rest-client-v0.9.2-next.9) (2026-08-12)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-rest-client:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.8 to 0.9.2-next.9
+
+## [0.9.2-next.8](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.2-next.7...entity-storage-rest-client-v0.9.2-next.8) (2026-08-12)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-rest-client:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.7 to 0.9.2-next.8
+
+## [0.9.2-next.7](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.2-next.6...entity-storage-rest-client-v0.9.2-next.7) (2026-08-11)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-rest-client:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.6 to 0.9.2-next.7
+
+## [0.9.2-next.6](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.2-next.5...entity-storage-rest-client-v0.9.2-next.6) (2026-08-07)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-rest-client:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.5 to 0.9.2-next.6
+
+## [0.9.2-next.5](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.2-next.4...entity-storage-rest-client-v0.9.2-next.5) (2026-08-07)
+
+
+### Features
+
+* linting and dependency update ([c307b60](https://github.com/iotaledger/twin-entity-storage/commit/c307b606d03ea436b7c43d4e1764b5c08f415555))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.4 to 0.9.2-next.5
+
+## [0.9.2-next.4](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.2-next.3...entity-storage-rest-client-v0.9.2-next.4) (2026-08-04)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-rest-client:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.3 to 0.9.2-next.4
+
+## [0.9.2-next.3](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.2-next.2...entity-storage-rest-client-v0.9.2-next.3) (2026-08-03)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-rest-client:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.2 to 0.9.2-next.3
+
+## [0.9.2-next.2](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.2-next.1...entity-storage-rest-client-v0.9.2-next.2) (2026-07-29)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-rest-client:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.1 to 0.9.2-next.2
+
+## [0.9.2-next.1](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.2-next.0...entity-storage-rest-client-v0.9.2-next.1) (2026-07-29)
+
+
+### Features
+
+* add context id features ([#55](https://github.com/iotaledger/twin-entity-storage/issues/55)) ([99c15a2](https://github.com/iotaledger/twin-entity-storage/commit/99c15a257539b61d9da63649ce573ebf47699fc9))
+* add production release automation ([1eb4c8e](https://github.com/iotaledger/twin-entity-storage/commit/1eb4c8ee3eb099defdfc2d063ae44935276dcae8))
+* add validate-locales ([e66ef0d](https://github.com/iotaledger/twin-entity-storage/commit/e66ef0de26ca2f82b3fe89bb5c7a15a0978a9644))
+* adding schema migration functionality to all the connectors ([#85](https://github.com/iotaledger/twin-entity-storage/issues/85)) ([fd1555a](https://github.com/iotaledger/twin-entity-storage/commit/fd1555a34380158214a577586dafae821e72a578))
+* enhanced rest processing ([8c5bf89](https://github.com/iotaledger/twin-entity-storage/commit/8c5bf894ee6af5c22359c1e0c7de3cf95c14aeff))
+* enhanced rest testing ([#156](https://github.com/iotaledger/twin-entity-storage/issues/156)) ([f6d3e0c](https://github.com/iotaledger/twin-entity-storage/commit/f6d3e0c03c2e773aed58a26aa221d15ac702577a))
+* entity storage enhancements ([#86](https://github.com/iotaledger/twin-entity-storage/issues/86)) ([1279af4](https://github.com/iotaledger/twin-entity-storage/commit/1279af42615c6497bb06539842cee44842dd1f75))
+* eslint migration to flat config ([f033b64](https://github.com/iotaledger/twin-entity-storage/commit/f033b64984c0e6a8129d929c9dd816dcc1b8dab0))
+* typescript 6 update ([995a0c6](https://github.com/iotaledger/twin-entity-storage/commit/995a0c6fa9a6813bfdc7200779ce3664236e59e9))
+* update dependencies ([7ccc0c4](https://github.com/iotaledger/twin-entity-storage/commit/7ccc0c429125d073dc60b3de6cf101abc8cc6cba))
+* update framework core ([b59a380](https://github.com/iotaledger/twin-entity-storage/commit/b59a380bb7fba2b43610f69074dcdee24a4737da))
+* use shared store mechanism ([#34](https://github.com/iotaledger/twin-entity-storage/issues/34)) ([68b6b71](https://github.com/iotaledger/twin-entity-storage/commit/68b6b71e7a96d7d016cd57bfff36775b56bf3f93))
+
+
+### Bug Fixes
+
+* query params force coercion ([dd6aa87](https://github.com/iotaledger/twin-entity-storage/commit/dd6aa87efdfb60bab7d6756a86888863c45c51a7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.2-next.0 to 0.9.2-next.1
+
 ## [0.9.1](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-rest-client-v0.9.1...entity-storage-rest-client-v0.9.1) (2026-07-27)
 
 

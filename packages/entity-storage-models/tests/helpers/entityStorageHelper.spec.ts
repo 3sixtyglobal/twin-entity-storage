@@ -12,7 +12,7 @@ import {
 } from "@twin.org/entity";
 import type { EntityCondition, IComparator } from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
-import { EntityStorageHelper } from "../src/helpers/entityStorageHelper.js";
+import { EntityStorageHelper } from "../../src/helpers/entityStorageHelper.js";
 
 @entity()
 class ValidationTestType {
@@ -679,5 +679,28 @@ describe("EntityStorageHelper.validateConditions", () => {
 				{ property: "__injected" as keyof ValidationTestType, value: "x" }
 			])
 		).toThrow(GeneralError);
+	});
+});
+
+describe("EntityStorageHelper.tryShortSplit", () => {
+	test("splits a partition id whose depth matches the keys", () => {
+		expect(EntityStorageHelper.tryShortSplit(["node", "tenant"], "node1/tenant1")).toEqual({
+			node: "node1",
+			tenant: "tenant1"
+		});
+	});
+
+	test("returns undefined for a partition id shallower than the keys", () => {
+		expect(EntityStorageHelper.tryShortSplit(["node", "tenant"], "node1")).toBeUndefined();
+	});
+
+	test("returns undefined for a partition id deeper than the keys", () => {
+		expect(
+			EntityStorageHelper.tryShortSplit(["node", "tenant"], "node1/tenant1/user1")
+		).toBeUndefined();
+	});
+
+	test("splits a single part id with a single key", () => {
+		expect(EntityStorageHelper.tryShortSplit(["node"], "node1")).toEqual({ node: "node1" });
 	});
 });

@@ -1,15 +1,23 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
+	Coerce,
 	ComponentFactory,
+	ConflictError,
 	GeneralError,
 	Guards,
-	HealthStatus,
 	Is,
 	type IError,
-	type IHealth
+	Mutex,
+	ObjectHelper
 } from "@twin.org/core";
 import {
 	EntitySchemaFactory,
@@ -32,12 +40,18 @@ import type { IScyllaDBTableConnectorConstructorOptions } from "./models/IScylla
  */
 export class ScyllaDBTableConnector<T = unknown>
 	extends AbstractScyllaDBConnector<T>
-	implements IEntityStorageMigrationConnector<T>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
 {
 	/**
 	 * Runtime name for the class.
 	 */
 	public static readonly CLASS_NAME: string = nameof<ScyllaDBTableConnector>();
+
+	/**
+	 * Maximum number of queries per CQL BATCH statement in setBatch.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
 
 	/**
 	 * The name for the schema.
@@ -63,13 +77,12 @@ export class ScyllaDBTableConnector<T = unknown>
 	}
 
 	/**
-	 * Get the health of the component.
-	 * @returns The health of the component.
+	 * Returns the health status of the component.
+	 * @returns The health status of the component.
 	 */
 	public async health(): Promise<IHealth[]> {
-		let connection;
 		try {
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 			await this.queryDB(
 				connection,
 				`SELECT * FROM "${this.safeTableName(this._fullTableName)}" LIMIT 1`,
@@ -78,6 +91,7 @@ export class ScyllaDBTableConnector<T = unknown>
 			return [
 				{
 					source: ScyllaDBTableConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { table: this.safeTableName(this._fullTableName) }
@@ -87,14 +101,13 @@ export class ScyllaDBTableConnector<T = unknown>
 			return [
 				{
 					source: ScyllaDBTableConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",
 					data: { table: this.safeTableName(this._fullTableName) }
 				}
 			];
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -107,7 +120,7 @@ export class ScyllaDBTableConnector<T = unknown>
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
-			let dbConnection = await this.openConnection(true);
+			let dbConnection = await this.openConnectionNoKeyspace();
 
 			const exists = await this.checkKeyspaceExists(dbConnection, this._config.keyspace);
 
@@ -133,8 +146,8 @@ export class ScyllaDBTableConnector<T = unknown>
 			}
 
 			// Connection has to be closed and now open a new one with our keyspace
-			await this.closeConnection(dbConnection);
-			dbConnection = await this.openConnection();
+			await this.closeConnectionNoKeyspace(dbConnection);
+			dbConnection = await this.getClient();
 
 			// Need to find structured properties (declared as type: object)
 			const structuredProperties = this._entitySchema.properties?.filter(
@@ -228,6 +241,7 @@ export class ScyllaDBTableConnector<T = unknown>
 	 * Set an entity.
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.
+	 * @throws ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(ScyllaDBTableConnector.CLASS_NAME, nameof(entity), entity);
@@ -235,6 +249,13 @@ export class ScyllaDBTableConnector<T = unknown>
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? Coerce.integer(ObjectHelper.propertyGet(entity, this._versionKey))
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
+		let unversionedWriteStoredVersion: number | undefined;
 
 		const normalizedEntity = EntityStorageHelper.prepareEntity(
 			entity,
@@ -245,9 +266,66 @@ export class ScyllaDBTableConnector<T = unknown>
 			{ nullBehavior: "omit" }
 		);
 
-		let connection;
 		const id = normalizedEntity[this._primaryKey?.property] as string;
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
+
 		try {
+			if (hasVersionCheck) {
+				if (Is.arrayValue(conditions)) {
+					const currentEntity = await this.get(id);
+					const currentObj = (!Is.empty(currentEntity) ? currentEntity : {}) as {
+						[key: string]: unknown;
+					};
+					if (
+						!conditions.every(
+							c => ObjectHelper.propertyGet(currentObj, c.property as string) === c.value
+						)
+					) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(ScyllaDBTableConnector.CLASS_NAME, "conditionFailed", id);
+						}
+						return;
+					}
+				}
+				ObjectHelper.propertySet(normalizedEntity, this._versionKey, submittedVersion + 1);
+			} else if (this._versionKey || Is.arrayValue(conditions)) {
+				const currentEntity = await this.get(id);
+				if (!Is.empty(currentEntity)) {
+					if (
+						Is.arrayValue(conditions) &&
+						!conditions.every(
+							c => ObjectHelper.propertyGet(currentEntity, c.property as string) === c.value
+						)
+					) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(ScyllaDBTableConnector.CLASS_NAME, "conditionFailed", id);
+						}
+						return;
+					}
+				}
+				if (Is.stringValue(this._versionKey)) {
+					const storedVersion =
+						Coerce.integer(
+							!Is.empty(currentEntity)
+								? ObjectHelper.propertyGet(currentEntity, this._versionKey)
+								: 0
+						) ?? 0;
+					ObjectHelper.propertySet(normalizedEntity, this._versionKey, storedVersion + 1);
+					if (!Is.empty(currentEntity)) {
+						unversionedWriteStoredVersion = storedVersion;
+					}
+				}
+			}
+
 			const propValues: unknown[] = [];
 			const updateValues: string[] = [];
 
@@ -273,20 +351,26 @@ export class ScyllaDBTableConnector<T = unknown>
 				}
 			}
 
-			if (Is.arrayValue(conditions)) {
-				finalConditions.push(...conditions);
-			}
-
 			const { sqlCondition, conditionValues } = this.buildConditions(finalConditions);
 
 			let sql: string;
 			let execParams: unknown[];
-			if (updateValues.length > 0 || Is.arrayValue(conditions)) {
+			if (updateValues.length > 0) {
 				propValues.push(...conditionValues);
 				sql = `UPDATE "${this.safeTableName(this._fullTableName)}" SET ${updateValues.join(",")} WHERE ${sqlCondition}`;
 				execParams = propValues;
+				if (hasVersionCheck) {
+					sql += ` IF "${this._versionKey}" = ?`;
+					execParams = [...propValues, submittedVersion];
+				} else if (
+					Is.stringValue(this._versionKey) &&
+					unversionedWriteStoredVersion !== undefined
+				) {
+					sql += ` IF "${this._versionKey}" = ?`;
+					execParams = [...propValues, unversionedWriteStoredVersion];
+				}
 			} else {
-				// No non-null data columns and no extra conditions — INSERT writes a row marker
+				// No non-null data columns and no extra conditions - INSERT writes a row marker
 				// so the entity remains visible in SELECT even when all data fields are null.
 				const cols = finalConditions.map(c => `"${String(c.property)}"`).join(",");
 				const placeholders = finalConditions.map(() => "?").join(",");
@@ -302,10 +386,21 @@ export class ScyllaDBTableConnector<T = unknown>
 				data: { sql }
 			});
 
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 
-			await this.execute(connection, sql, execParams);
+			const resultSet = await this.execute(connection, sql, execParams);
+
+			if (
+				(hasVersionCheck || unversionedWriteStoredVersion !== undefined) &&
+				updateValues.length > 0 &&
+				resultSet.first()?.["[applied]"] === false
+			) {
+				throw new ConflictError(ScyllaDBTableConnector.CLASS_NAME, "optimisticLockFailed", id);
+			}
 		} catch (error) {
+			if (BaseError.isErrorName(error, ConflictError.CLASS_NAME)) {
+				throw error;
+			}
 			throw new GeneralError(
 				ScyllaDBTableConnector.CLASS_NAME,
 				"setFailed",
@@ -315,7 +410,9 @@ export class ScyllaDBTableConnector<T = unknown>
 				error
 			);
 		} finally {
-			await this.closeConnection(connection);
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -341,9 +438,8 @@ export class ScyllaDBTableConnector<T = unknown>
 			)
 		);
 
-		let connection;
 		try {
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 
 			// Delete existing rows first so that a change in the clustering key (secondary
 			// field) does not leave a stale row behind. Two separate batches are used to
@@ -393,7 +489,7 @@ export class ScyllaDBTableConnector<T = unknown>
 					sql = `UPDATE "${this.safeTableName(this._fullTableName)}" SET ${updateValues.join(",")} WHERE ${sqlCondition}`;
 					queryParams = propValues;
 				} else {
-					// No non-null data columns — INSERT writes a row marker so the entity
+					// No non-null data columns - INSERT writes a row marker so the entity
 					// remains visible in SELECT even when all data fields are null.
 					const cols = finalConditions.map(c => `"${String(c.property)}"`).join(",");
 					const placeholders = finalConditions.map(() => "?").join(",");
@@ -403,12 +499,15 @@ export class ScyllaDBTableConnector<T = unknown>
 				upsertQueries.push({ query: sql, params: queryParams });
 			}
 
-			await connection.batch(deleteQueries, { prepare: true });
-			await connection.batch(upsertQueries, { prepare: true });
+			const chunkSize = ScyllaDBTableConnector._BATCH_CHUNK_SIZE;
+			for (let i = 0; i < deleteQueries.length; i += chunkSize) {
+				await connection.batch(deleteQueries.slice(i, i + chunkSize), { prepare: true });
+			}
+			for (let i = 0; i < upsertQueries.length; i += chunkSize) {
+				await connection.batch(upsertQueries.slice(i, i + chunkSize), { prepare: true });
+			}
 		} catch (err) {
 			throw new GeneralError(ScyllaDBTableConnector.CLASS_NAME, "setBatchFailed", undefined, err);
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -423,9 +522,8 @@ export class ScyllaDBTableConnector<T = unknown>
 			ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds) ??
 			AbstractScyllaDBConnector.PARTITION_KEY_VALUE;
 
-		let connection;
 		try {
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 
 			const result = await this.queryDB(
 				connection,
@@ -463,8 +561,6 @@ export class ScyllaDBTableConnector<T = unknown>
 			await connection.batch(queries, { prepare: true });
 		} catch (err) {
 			throw new GeneralError(ScyllaDBTableConnector.CLASS_NAME, "emptyFailed", undefined, err);
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -482,18 +578,42 @@ export class ScyllaDBTableConnector<T = unknown>
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
 
-		let connection;
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			conditions ??= [];
-			conditions.unshift({
+			if (Is.arrayValue(conditions)) {
+				const currentEntity = await this.get(id);
+				if (!Is.empty(currentEntity)) {
+					if (
+						!conditions.every(
+							c => ObjectHelper.propertyGet(currentEntity, c.property as string) === c.value
+						)
+					) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(ScyllaDBTableConnector.CLASS_NAME, "conditionFailed", id);
+						}
+						return;
+					}
+				}
+			}
+
+			const deleteConditions: { property: keyof T; value: unknown }[] = [];
+			deleteConditions.unshift({
 				property: AbstractScyllaDBConnector.PARTITION_KEY as keyof T,
 				value: partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE
 			});
-			conditions.unshift({ property: this._primaryKey?.property, value: id });
+			deleteConditions.unshift({ property: this._primaryKey?.property, value: id });
 
-			const { sqlCondition, conditionValues } = this.buildConditions(conditions);
+			const { sqlCondition, conditionValues } = this.buildConditions(deleteConditions);
 
 			const sql = `DELETE FROM "${this.safeTableName(this._fullTableName)}" WHERE ${sqlCondition}`;
 
@@ -505,10 +625,13 @@ export class ScyllaDBTableConnector<T = unknown>
 				data: { sql }
 			});
 
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 
 			await this.execute(connection, sql, conditionValues);
 		} catch (error) {
+			if (BaseError.isErrorName(error, ConflictError.CLASS_NAME)) {
+				throw error;
+			}
 			throw new GeneralError(
 				ScyllaDBTableConnector.CLASS_NAME,
 				"removeFailed",
@@ -518,7 +641,9 @@ export class ScyllaDBTableConnector<T = unknown>
 				error
 			);
 		} finally {
-			await this.closeConnection(connection);
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -532,9 +657,8 @@ export class ScyllaDBTableConnector<T = unknown>
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
-		let connection;
 		try {
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 			const queries: { query: string; params: unknown[] }[] = [];
 
 			for (const id of ids) {
@@ -560,8 +684,6 @@ export class ScyllaDBTableConnector<T = unknown>
 				undefined,
 				err
 			);
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -581,10 +703,8 @@ export class ScyllaDBTableConnector<T = unknown>
 			data: { table: this.safeTableName(this._fullTableName) }
 		});
 
-		let connection;
-
 		try {
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 			await connection.execute(`DROP TABLE IF EXISTS "${this.safeTableName(this._fullTableName)}"`);
 
 			await nodeLogging?.log({
@@ -622,22 +742,31 @@ export class ScyllaDBTableConnector<T = unknown>
 			});
 			return false;
 		} finally {
-			await this.closeConnection(connection);
 			await this.closePersistentClient();
 		}
 	}
 
 	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
+	}
+
+	/**
 	 * Get all the distinct partition context ids from the storage.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns An array of context id objects, one per unique partition.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		if (!Is.arrayValue(this._partitionContextIds)) {
-			return [];
+			return undefined;
 		}
-		let connection;
 		try {
-			connection = await this.openConnection();
+			const connection = await this.getClient();
 			const result = await this.queryDB(
 				connection,
 				`SELECT "${AbstractScyllaDBConnector.PARTITION_KEY}" FROM "${this.safeTableName(this._fullTableName)}" ALLOW FILTERING`,
@@ -646,13 +775,32 @@ export class ScyllaDBTableConnector<T = unknown>
 				0
 			);
 			const seen = new Set<string>();
+			const skipped = new Set<string>();
 			const contextIds: IContextIds[] = [];
 			for (const row of result.rows) {
 				const id = row[AbstractScyllaDBConnector.PARTITION_KEY] as string;
 				if (Is.stringValue(id) && !seen.has(id)) {
 					seen.add(id);
-					contextIds.push(ContextIdHelper.shortSplit(this._partitionContextIds ?? [], id));
+					const split = EntityStorageHelper.tryShortSplit(this._partitionContextIds ?? [], id);
+					if (Is.undefined(split)) {
+						skipped.add(id);
+					} else {
+						contextIds.push(split);
+					}
 				}
+			}
+			if (skipped.size > 0) {
+				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+				await nodeLogging?.log({
+					level: "warn",
+					source: ScyllaDBTableConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "partitionIdsSkipped",
+					data: {
+						expected: this._partitionContextIds?.length,
+						partitionIds: Array.from(skipped).join(", ")
+					}
+				});
 			}
 			return contextIds;
 		} catch (err) {
@@ -662,8 +810,6 @@ export class ScyllaDBTableConnector<T = unknown>
 				undefined,
 				err
 			);
-		} finally {
-			await this.closeConnection(connection);
 		}
 	}
 
@@ -714,7 +860,7 @@ export class ScyllaDBTableConnector<T = unknown>
 
 		if (await finalConnector.bootstrap(loggingComponentType)) {
 			// Since there is no rename, we need to copy the data from the migration table to the new table
-			const partitions = await targetConnector.getPartitionContextIds();
+			const partitions = await targetConnector.getPartitionContextIds(loggingComponentType);
 			const batchSize = options?.batchSize ?? ScyllaDBTableConnector.DEFAULT_LIMIT;
 			await this.bulkCopy(targetConnector, finalConnector, partitions, batchSize);
 
@@ -755,17 +901,17 @@ export class ScyllaDBTableConnector<T = unknown>
 	private async bulkCopy<U>(
 		sourceConnector: ScyllaDBTableConnector<U>,
 		destConnector: ScyllaDBTableConnector<U>,
-		partitions: IContextIds[],
+		partitions: IContextIds[] | undefined,
 		batchSize: number
 	): Promise<void> {
-		let partitionList: IContextIds[];
-		if (Is.arrayValue(partitions)) {
-			partitionList = partitions;
-		} else if (Is.arrayValue(sourceConnector._partitionContextIds)) {
-			partitionList = [];
-		} else {
-			partitionList = [{}];
+		// undefined → not partitioned: one pass with no partition key.
+		// []        → partitioned but empty: nothing to copy, return early before opening
+		//             the connection.
+		// [{…}, …]  → partitioned with data: iterate over each partition.
+		if (partitions?.length === 0) {
+			return;
 		}
+		const partitionList = partitions ?? [{}];
 
 		const sourceColumns = [
 			AbstractScyllaDBConnector.PARTITION_KEY,
@@ -773,41 +919,37 @@ export class ScyllaDBTableConnector<T = unknown>
 		];
 		const insertSql = `INSERT INTO "${destConnector.safeTableName(destConnector._fullTableName)}" (${sourceColumns.map(c => `"${c}"`).join(", ")}) VALUES (${sourceColumns.map(() => "?").join(", ")})`;
 
-		let connection;
-		try {
-			connection = await sourceConnector.openConnection();
-			for (let i = 0; i < partitionList.length; i++) {
-				const partitionKey =
-					ContextIdHelper.combinedContextKey(
-						partitionList[i],
-						sourceConnector._partitionContextIds
-					) ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE;
+		const connection = await sourceConnector.getClient();
+		for (let i = 0; i < partitionList.length; i++) {
+			// Values from getPartitionContextIds are already short-form, so we join them
+			// directly rather than using combinedContextKey, which expects long-form input
+			// and calls guardAll (throwing if a registered handler rejects short-form values).
+			const partitionKey = Is.arrayValue(sourceConnector._partitionContextIds)
+				? sourceConnector._partitionContextIds.map(k => partitionList[i][k]).join("/")
+				: AbstractScyllaDBConnector.PARTITION_KEY_VALUE;
 
-				let pageState: string | undefined;
-				do {
-					const result = await sourceConnector.queryDB(
-						connection,
-						`SELECT * FROM "${sourceConnector.safeTableName(sourceConnector._fullTableName)}" WHERE "${AbstractScyllaDBConnector.PARTITION_KEY}" = ? ALLOW FILTERING`,
-						[partitionKey],
-						pageState,
-						batchSize
+			let pageState: string | undefined;
+			do {
+				const result = await sourceConnector.queryDB(
+					connection,
+					`SELECT * FROM "${sourceConnector.safeTableName(sourceConnector._fullTableName)}" WHERE "${AbstractScyllaDBConnector.PARTITION_KEY}" = ? ALLOW FILTERING`,
+					[partitionKey],
+					pageState,
+					batchSize
+				);
+
+				pageState = Is.stringValue(result.pageState) ? result.pageState : undefined;
+
+				if (Is.arrayValue(result.rows)) {
+					await connection.batch(
+						result.rows.map((row: { [key: string]: unknown }) => ({
+							query: insertSql,
+							params: sourceColumns.map(col => row[col])
+						})),
+						{ prepare: true }
 					);
-
-					pageState = Is.stringValue(result.pageState) ? result.pageState : undefined;
-
-					if (Is.arrayValue(result.rows)) {
-						await connection.batch(
-							result.rows.map((row: { [key: string]: unknown }) => ({
-								query: insertSql,
-								params: sourceColumns.map(col => row[col])
-							})),
-							{ prepare: true }
-						);
-					}
-				} while (Is.stringValue(pageState));
-			}
-		} finally {
-			await sourceConnector.closeConnection(connection);
+				}
+			} while (Is.stringValue(pageState));
 		}
 	}
 
@@ -929,5 +1071,16 @@ export class ScyllaDBTableConnector<T = unknown>
 		}
 
 		return fields.join(", ");
+	}
+
+	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param partitionKey The resolved partition key.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private buildOptimisticMutexKey(partitionKey: string | undefined, id: string): string {
+		return `${ScyllaDBTableConnector.CLASS_NAME}:optimistic:${this._config.keyspace}:${this._fullTableName}:${partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE}:${id}`;
 	}
 }

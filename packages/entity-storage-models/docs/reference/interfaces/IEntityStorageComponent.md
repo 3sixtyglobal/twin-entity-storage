@@ -40,6 +40,10 @@ The optional conditions to match for the entities.
 
 The id of the entity.
 
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
+
 ***
 
 ### setBatch() {#setbatch}
@@ -123,6 +127,10 @@ The optional conditions to match for the entities.
 `Promise`\<`void`\>
 
 Nothing.
+
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 
 ***
 

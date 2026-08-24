@@ -20,6 +20,7 @@ buffer handlers.
 
 - `IEntityStorageConnector`\<`T`\>
 - `IEntityStorageMigrationConnector`\<`T`\>
+- `IHealthProviderComponent`
 
 ## Constructors
 
@@ -83,7 +84,7 @@ The health status of the component.
 
 #### Implementation of
 
-`IEntityStorageConnector.health`
+`IHealthProviderComponent.health`
 
 ***
 
@@ -195,6 +196,10 @@ The optional conditions to match for the entities.
 
 Resolves when the entity has been stored.
 
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
+
 #### Implementation of
 
 `IEntityStorageConnector.set`
@@ -252,6 +257,10 @@ The optional conditions to match for the entities.
 `Promise`\<`void`\>
 
 Nothing.
+
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions do not match the stored state.
 
 #### Implementation of
 
@@ -420,15 +429,41 @@ All stored entities with partition keys removed.
 
 ***
 
-### getPartitionContextIds() {#getpartitioncontextids}
+### connectorVersion() {#connectorversion}
 
-> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+> **connectorVersion**(): `number`
 
-Get a unique list of all the context ids from the storage.
+Get the connector implementation version.
 
 #### Returns
 
-`Promise`\<`IContextIds`[]\>
+`number`
+
+The connector implementation version.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.connectorVersion`
+
+***
+
+### getPartitionContextIds() {#getpartitioncontextids}
+
+> **getPartitionContextIds**(`loggingComponentType?`): `Promise`\<`IContextIds`[] \| `undefined`\>
+
+Get a unique list of all the context ids from the storage.
+
+#### Parameters
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging skipped partition ids.
+
+#### Returns
+
+`Promise`\<`IContextIds`[] \| `undefined`\>
 
 The list of unique context ids.
 

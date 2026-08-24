@@ -1,17 +1,23 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import {
+	ContextIdHandlerFactory,
+	ContextIdHelper,
+	ContextIdKeys,
+	ContextIdStore,
+	type IContextIds
+} from "@twin.org/context";
 import { GeneralError } from "@twin.org/core";
 import {
 	EntitySchemaPropertyType,
 	type IEntitySchemaDiff,
 	type IEntitySchemaProperty
 } from "@twin.org/entity";
-import type {
-	IEntityStorageConnector,
-	IEntityStorageMigrationConnector
-} from "@twin.org/entity-storage-models";
-import { MigrationHelper } from "../src/helpers/migrationHelper.js";
-import type { IResolvedMigrationStep } from "../src/models/IResolvedMigrationStep.js";
+import { MigrationHelper } from "../../src/helpers/migrationHelper.js";
+import type { IEntityStorageConnector } from "../../src/models/IEntityStorageConnector.js";
+import type { IEntityStorageMigrationConnector } from "../../src/models/IEntityStorageMigrationConnector.js";
+import type { IResolvedMigrationStep } from "../../src/models/IResolvedMigrationStep.js";
+import { TestContextIdHandler } from "../testContextIdHandler.js";
 
 // ---------------------------------------------------------------------------
 // String-indexed entity type so keyof resolves to string
@@ -229,7 +235,7 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ tags: "a,b,c" },
 			d,
-			(f, t, v) => (v as string).split(",")
+			(entity, f, t, v) => (v as string).split(",")
 		);
 		expect(result.tags).toEqual(["a", "b", "c"]);
 	});
@@ -249,7 +255,38 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		expect(result.old).toBeUndefined();
 	});
 
-	test("modified property: property renamed — value moved to new property name", () => {
+	test("removed property: removeEntityProperty hook called with original entity and removed schemas", () => {
+		const removed = [prop("old", EntitySchemaPropertyType.String)];
+		const d = diff({ removed });
+		const calls: { entity: unknown; props: unknown[] }[] = [];
+		MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ old: "gone" },
+			d,
+			undefined,
+			(entity, removedProperties) => {
+				calls.push({ entity, props: removedProperties });
+			}
+		);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].entity).toEqual({ old: "gone" });
+		expect(calls[0].props).toEqual(removed);
+	});
+
+	test("removed property: removeEntityProperty hook not called when no properties are removed", () => {
+		const d = diff({ unchanged: [prop("id", EntitySchemaPropertyType.String)] });
+		const calls: unknown[] = [];
+		MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ id: "1" },
+			d,
+			undefined,
+			(entity, removedProperties) => {
+				calls.push({ entity, removedProperties });
+			}
+		);
+		expect(calls).toHaveLength(0);
+	});
+
+	test("modified property: property renamed - value moved to new property name", () => {
 		const d = diff({
 			modified: [
 				{
@@ -315,6 +352,48 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		expect(result.note).toBeUndefined();
 	});
 
+	// ---
+	// Issue #185 Bug 2 - "added" properties must preserve existing source values
+	// ---
+
+	test("added non-optional string property preserves existing source value over empty-string default", () => {
+		const d = diff({ added: [prop("organizationId", EntitySchemaPropertyType.String)] });
+		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ id: "1", organizationId: "org-abc" },
+			d
+		);
+		expect(result.organizationId).toBe("org-abc");
+	});
+
+	test("added non-optional string property preserves existing source value over provided defaultValue", () => {
+		const d = diff({
+			added: [prop("status", EntitySchemaPropertyType.String, { defaultValue: "active" })]
+		});
+		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ status: "custom" },
+			d
+		);
+		expect(result.status).toBe("custom");
+	});
+
+	test("added non-optional boolean property preserves existing source value over boolean default", () => {
+		const d = diff({ added: [prop("active", EntitySchemaPropertyType.Boolean)] });
+		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ active: true },
+			d
+		);
+		expect(result.active).toBe(true);
+	});
+
+	test("added non-optional number property preserves existing source value over zero default", () => {
+		const d = diff({ added: [prop("count", EntitySchemaPropertyType.Number)] });
+		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ count: 42 },
+			d
+		);
+		expect(result.count).toBe(42);
+	});
+
 	test("unchanged property absent from entity is copied as undefined", () => {
 		const d = diff({
 			unchanged: [
@@ -351,7 +430,7 @@ describe("MigrationHelper.applyEntityChain", () => {
 		expect(result).toEqual(entity);
 	});
 
-	test("applies a single step — adds a new optional field", () => {
+	test("applies a single step - adds a new optional field", () => {
 		const step: IResolvedMigrationStep = {
 			fromProperties: makeProps(
 				["id", EntitySchemaPropertyType.String],
@@ -371,7 +450,7 @@ describe("MigrationHelper.applyEntityChain", () => {
 		expect(result.extra).toBeUndefined();
 	});
 
-	test("applies a single step — adds a new required string field with default", () => {
+	test("applies a single step - adds a new required string field with default", () => {
 		const step: IResolvedMigrationStep = {
 			fromProperties: makeProps(["id", EntitySchemaPropertyType.String]),
 			toProperties: [
@@ -385,7 +464,7 @@ describe("MigrationHelper.applyEntityChain", () => {
 		expect(result.status).toBe("active");
 	});
 
-	test("applies multiple steps in sequence — each step's output feeds the next", () => {
+	test("applies multiple steps in sequence - each step's output feeds the next", () => {
 		const step1: IResolvedMigrationStep = {
 			fromProperties: makeProps(["id", EntitySchemaPropertyType.String]),
 			toProperties: makeProps(
@@ -480,6 +559,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 	): IEntityStorageMigrationConnector<{ [key: string]: unknown }> {
 		return {
 			className: () => "SourceStub",
+			connectorVersion: vi.fn().mockReturnValue(1),
 			getSchema: vi.fn().mockReturnValue({ type: "SourceSchema", properties: v0Props }),
 			bootstrap: vi.fn().mockResolvedValue(undefined),
 			start: vi.fn().mockResolvedValue(undefined),
@@ -491,7 +571,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 			remove: vi.fn(),
 			removeBatch: vi.fn(),
 			empty: vi.fn(),
-			getPartitionContextIds: vi.fn().mockResolvedValue([{}]),
+			getPartitionContextIds: vi.fn().mockResolvedValue(undefined),
 			createTargetConnector: vi.fn().mockResolvedValue(targetConnector),
 			finalizeMigration: vi.fn().mockResolvedValue(targetConnector),
 			cleanupMigration: vi.fn().mockResolvedValue(undefined)
@@ -505,6 +585,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 		const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 			source,
 			"TargetSchema",
+			await source.getPartitionContextIds(),
 			[singleStep]
 		);
 
@@ -516,9 +597,12 @@ describe("MigrationHelper.migrateWithChain", () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([], target);
 
-		const { migrated } = await MigrationHelper.migrateWithChain(source, "TargetSchema", [
-			singleStep
-		]);
+		const { migrated } = await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			await source.getPartitionContextIds(),
+			[singleStep]
+		);
 
 		expect(migrated).toBe(0);
 	});
@@ -527,7 +611,12 @@ describe("MigrationHelper.migrateWithChain", () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([], target);
 
-		await MigrationHelper.migrateWithChain(source, "TargetSchema", [singleStep]);
+		await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			await source.getPartitionContextIds(),
+			[singleStep]
+		);
 
 		expect(source.createTargetConnector).toHaveBeenCalledWith("TargetSchema");
 	});
@@ -536,7 +625,12 @@ describe("MigrationHelper.migrateWithChain", () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([{ id: "1", name: "Bob" }], target);
 
-		await MigrationHelper.migrateWithChain(source, "TargetSchema", [singleStep]);
+		await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			await source.getPartitionContextIds(),
+			[singleStep]
+		);
 
 		expect(source.finalizeMigration).toHaveBeenCalledOnce();
 	});
@@ -544,27 +638,144 @@ describe("MigrationHelper.migrateWithChain", () => {
 	test("wraps connector errors in a migrationFailed GeneralError", async () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([], target);
-		(source.getPartitionContextIds as ReturnType<typeof vi.fn>).mockRejectedValue(
-			new Error("store unavailable")
-		);
+		vi.mocked(source.finalizeMigration).mockRejectedValue(new Error("store unavailable"));
 
 		await expect(
-			MigrationHelper.migrateWithChain(source, "TargetSchema", [singleStep])
+			MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				await source.getPartitionContextIds(),
+				[singleStep]
+			)
 		).rejects.toThrow(GeneralError);
 	});
 
 	test("calls cleanupMigration when an error occurs after createTargetConnector", async () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([], target);
-		(source.getPartitionContextIds as ReturnType<typeof vi.fn>).mockRejectedValue(
-			new Error("boom")
-		);
+		vi.mocked(source.finalizeMigration).mockRejectedValue(new Error("boom"));
 
 		await expect(
-			MigrationHelper.migrateWithChain(source, "TargetSchema", [singleStep])
+			MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				await source.getPartitionContextIds(),
+				[singleStep]
+			)
 		).rejects.toThrow();
 
 		expect(source.cleanupMigration).toHaveBeenCalledWith(target, undefined, undefined);
+	});
+
+	describe("partition handling", () => {
+		beforeEach(() => {
+			ContextIdHandlerFactory.register(ContextIdKeys.Node, () => new TestContextIdHandler());
+		});
+
+		afterEach(() => {
+			ContextIdHandlerFactory.unregister(ContextIdKeys.Node);
+		});
+
+		test("expands short-form context ids in partitions to long form before passing to ContextIdStore.run", async () => {
+			const target = makeTargetConnector();
+			const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+
+			// Partitions carry short form - no "did:internal:" prefix - as real connectors
+			// do: they store the short value produced by ContextIdHelper.shortCombined.
+			let contextSeenByCount: IContextIds | undefined;
+			vi.mocked(source.count).mockImplementation(async () => {
+				contextSeenByCount = await ContextIdStore.getContextIds();
+				ContextIdHelper.combinedContextKey(contextSeenByCount, [ContextIdKeys.Node]);
+				return 1;
+			});
+
+			await MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				[{ [ContextIdKeys.Node]: "shortNodeId" }],
+				[singleStep]
+			);
+
+			expect(contextSeenByCount?.[ContextIdKeys.Node]).toBe(
+				`${TestContextIdHandler.INTERNAL_PREFIX}shortNodeId`
+			);
+		});
+
+		test("runs a single pass with empty context when partitions is undefined (non-partitioned table)", async () => {
+			const target = makeTargetConnector();
+			const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+
+			// undefined = not partitioned: MigrationHelper runs one pass with empty context {}
+			// so count() is called exactly once and no partition key is required.
+			let contextSeenByCount: IContextIds | undefined;
+			vi.mocked(source.count).mockImplementation(async () => {
+				contextSeenByCount = await ContextIdStore.getContextIds();
+				return 1;
+			});
+
+			const { migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				await source.getPartitionContextIds(),
+				[singleStep]
+			);
+
+			expect(migrated).toBe(1);
+			expect(source.count).toHaveBeenCalledOnce();
+			expect(contextSeenByCount).toEqual({});
+		});
+
+		test("skips all partition passes and migrates 0 entities when partitions is an empty array", async () => {
+			const target = makeTargetConnector();
+			const source = makeSourceConnector([], target);
+
+			// An empty partitions array means the table is partitioned but has no data.
+			// MigrationHelper skips the partition loop entirely so count() is never called -
+			// avoiding the "contextIdMissing" error that would occur if we fell back to [{}]
+			// and called count() without the required "node" key.
+			const { migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				[],
+				[singleStep]
+			);
+
+			expect(migrated).toBe(0);
+			expect(source.count).not.toHaveBeenCalled();
+		});
+	});
+
+	test("migrates 0 entities and never calls count when partitions is an empty array", async () => {
+		const target = makeTargetConnector();
+		const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+
+		const { migrated } = await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			[],
+			[singleStep]
+		);
+
+		expect(migrated).toBe(0);
+		expect(source.count).not.toHaveBeenCalled();
+	});
+
+	test("migrates entities across all partitions when partitions is a non-empty array", async () => {
+		const target = makeTargetConnector();
+		const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+
+		// Two partitions (empty context objects - no handler registration needed).
+		// source.count returns 1 and source.query returns 1 entity per partition pass,
+		// so the total migrated count should equal partitions.length.
+		const { migrated } = await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			[{}, {}],
+			[singleStep]
+		);
+
+		expect(migrated).toBe(2);
+		expect(source.count).toHaveBeenCalledTimes(2);
 	});
 
 	test("a chain of one step is equivalent to a single-step migration", async () => {
@@ -572,7 +783,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector(entities, target);
 
-		const { migrated } = await MigrationHelper.migrateWithChain(source, "TargetSchema", [
+		const { migrated } = await MigrationHelper.migrateWithChain(source, "TargetSchema", undefined, [
 			singleStep
 		]);
 

@@ -13,7 +13,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execAsync, loadJson, saveJson } from './common.mjs';
+import { execAsync, loadJson, loadNextPrereleaseManifest, saveJson } from './common.mjs';
 
 const MANIFEST_PRODUCTION_FILENAME = 'release/release-please-manifest.prod.json';
 const MANIFEST_PRERELEASE_FILENAME = 'release/release-please-manifest.prerelease.json';
@@ -63,8 +63,11 @@ async function run() {
 	const isProduction = command === 'production';
 
 	// Determine prodVersion and nextVersion based on the command:
-	// - production: read from the prerelease manifest, strip the pre-release suffix, then apply
-	//               the requested semver bump — e.g. "1.2.4-next.5" + minor → "1.3.0"
+	// - production promote: read from the prerelease manifest and strip the pre-release
+	//                       suffix — e.g. "1.2.4-next.5" → "1.2.4"
+	// - production patch/minor/major: bump the CURRENT PRODUCTION version — the prerelease
+	//                       manifest copy on main only refreshes when next is merged in,
+	//                       which a hotfix skips, so it cannot be the bump base
 	// - next: read from the production manifest and compute the next prerelease version
 	let prodVersion;
 	let nextVersion;
@@ -98,7 +101,10 @@ async function run() {
 			const currentProdVersion = Object.entries(releaseManifestProdCheck)[0][1];
 			const [pMaj, pMin, pPat] = currentProdVersion.split('.').map(Number);
 
-			const releaseManifestPreCheck = await loadJson(MANIFEST_PRERELEASE_FILENAME);
+			// Read next's REAL line from origin: the local copy is stale after hotfixes.
+			const releaseManifestPreCheck = await loadNextPrereleaseManifest(
+				MANIFEST_PRERELEASE_FILENAME
+			);
 			const currentDevVersion = Object.entries(releaseManifestPreCheck)[0][1].split('-')[0];
 			const [rMaj, rMin, rPat] = currentDevVersion.split('.').map(Number);
 
@@ -136,7 +142,7 @@ async function run() {
 			process.stdout.write(`Custom Version: ${prodVersion}\n`);
 			process.stdout.write(`Current Prod:   ${currentProdVersion}\n`);
 			process.stdout.write(`Current Dev:    ${currentDevVersion}\n\n`);
-		} else {
+		} else if (semverType === 'promote') {
 			process.stdout.write(`Loading release-please manifest: ${MANIFEST_PRERELEASE_FILENAME}\n\n`);
 			const releaseManifestPrerelease = await loadJson(MANIFEST_PRERELEASE_FILENAME);
 			const prereleaseVersion = Object.entries(releaseManifestPrerelease)[0][1];
@@ -146,6 +152,19 @@ async function run() {
 
 			process.stdout.write(`Prerelease Version: ${prereleaseVersion}\n`);
 			process.stdout.write(`Stripped Version:   ${strippedVersion}\n`);
+			process.stdout.write(`Semver Bump:        ${semverType}\n`);
+			process.stdout.write(`Production Version: ${prodVersion}\n\n`);
+		} else {
+			// patch/minor/major bump the CURRENT PRODUCTION version. Computing these
+			// from main's copy of the prerelease manifest breaks hotfixes: that copy
+			// only refreshes when next is merged in, which a hotfix skips, so a
+			// second consecutive hotfix would recompute an already-released version.
+			process.stdout.write(`Loading release-please manifest: ${MANIFEST_PRODUCTION_FILENAME}\n\n`);
+			const releaseManifestProdBase = await loadJson(MANIFEST_PRODUCTION_FILENAME);
+			const currentProdBase = Object.entries(releaseManifestProdBase)[0][1];
+			prodVersion = applyBump(currentProdBase, semverType);
+
+			process.stdout.write(`Production Base:    ${currentProdBase}\n`);
 			process.stdout.write(`Semver Bump:        ${semverType}\n`);
 			process.stdout.write(`Production Version: ${prodVersion}\n\n`);
 		}
@@ -192,6 +211,15 @@ async function run() {
 	// Load the root package.json to get the list of workspaces
 	const repoPackageJson = await loadJson('package.json');
 
+	// Collect all in-repo workspace package names up front so dependency processing
+	// can distinguish them from external @twin.org packages regardless of the order
+	// the workspaces are processed in.
+	const workspaceNames = new Set();
+	for (const workspace of repoPackageJson.workspaces) {
+		const workspacePackageJson = await loadJson(path.join(workspace, 'package.json'));
+		workspaceNames.add(workspacePackageJson.name);
+	}
+
 	const versionCache = {};
 
 	for (const workspace of repoPackageJson.workspaces) {
@@ -207,7 +235,8 @@ async function run() {
 			prodVersion,
 			nextVersion,
 			workspacePackageJson,
-			versionCache
+			versionCache,
+			workspaceNames
 		);
 
 		// Save the updated package.json
@@ -269,6 +298,7 @@ async function run() {
  * @param nextVersion The next version to use when processing the package.
  * @param workspacePackageJson The package.json of the workspace to process.
  * @param versionCache A cache for package versions to avoid redundant lookups.
+ * @param workspaceNames The names of all in-repo workspace packages.
  * @returns The updated package.json.
  */
 async function processPackage(
@@ -276,7 +306,8 @@ async function processPackage(
 	prodVersion,
 	nextVersion,
 	workspacePackageJson,
-	versionCache
+	versionCache,
+	workspaceNames
 ) {
 	// Update the package's own version based on the operation type
 	if (isProduction) {
@@ -297,6 +328,7 @@ async function processPackage(
 		prodVersion,
 		workspacePackageJson.dependencies,
 		versionCache,
+		workspaceNames,
 		false
 	);
 	await processDependencies(
@@ -304,6 +336,7 @@ async function processPackage(
 		prodVersion,
 		workspacePackageJson.devDependencies,
 		versionCache,
+		workspaceNames,
 		false
 	);
 	await processDependencies(
@@ -311,6 +344,7 @@ async function processPackage(
 		prodVersion,
 		workspacePackageJson.peerDependencies,
 		versionCache,
+		workspaceNames,
 		true
 	);
 
@@ -323,6 +357,7 @@ async function processPackage(
  * @param prodVersion The production version to use when processing the dependencies.
  * @param dependencies The dependencies to process.
  * @param versionCache A cache for package versions to avoid redundant lookups.
+ * @param workspaceNames The names of all in-repo workspace packages.
  * @param isPeerDependency Whether the dependencies are peer dependencies.
  */
 async function processDependencies(
@@ -330,6 +365,7 @@ async function processDependencies(
 	prodVersion,
 	dependencies,
 	versionCache,
+	workspaceNames,
 	isPeerDependency
 ) {
 	if (!dependencies) {
@@ -347,14 +383,20 @@ async function processDependencies(
 				dependencies[name] = `>=${latestMajor}.0.0-0 <${latestMajor + 1}.0.0`;
 			} else if (isProduction) {
 				// PRODUCTION MODE: Convert "next" references to actual published versions
-				// If the dependency is set to "next", we need to resolve it to the actual version
 				// Set the dependency to a caret range of the resolved or production version
 				// This allows compatible updates (e.g., ^1.2.3 allows 1.2.4 but not 1.3.0)
 				if (version === 'next') {
 					// If the package is set to "next", we resolve it to the latest stable
 					await getPackageVersion(name, 'latest', versionCache);
+					dependencies[name] = `^${versionCache[name] ?? prodVersion}`;
+				} else if (workspaceNames.has(name)) {
+					// In-repo linked-versions package: follows the repo version.
+					dependencies[name] = `^${versionCache[name] ?? prodVersion}`;
 				}
-				dependencies[name] = `^${versionCache[name] ?? prodVersion}`;
+				// Otherwise: an external dependency already pinned by a previous
+				// release. Keep the existing pin - on a hotfix the sibling repos have
+				// not released a matching version, so re-pinning to prodVersion would
+				// reference versions that do not exist on the registry.
 			} else if (!isProduction) {
 				// NEXT MODE: Use the cached version for local workspace packages
 				// (already processed in this run), or "next" for all external deps.

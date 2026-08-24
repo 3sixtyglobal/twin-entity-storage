@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import { HealthStatus } from "@twin.org/api-models";
 import { ContextIdStore } from "@twin.org/context";
-import { HealthStatus } from "@twin.org/core";
 import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
 import { TEST_DYNAMODB_CONFIG } from "./setupTestEnv.js";
@@ -17,7 +17,19 @@ class TestType {
 	public value1!: string;
 }
 
-describe("DynamoDbEntityStorageConnector — constructor and health", () => {
+@entity()
+class LongNameTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", isSecondary: true })
+	public dateCreatedWithLongerNameForIndex!: string;
+
+	@property({ type: "string", isSecondary: true })
+	public dateModifiedWithLongerNameForIndex!: string;
+}
+
+describe("DynamoDbEntityStorageConnector - constructor and health", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 
@@ -157,8 +169,8 @@ describe("DynamoDbEntityStorageConnector — constructor and health", () => {
 			entitySchema: nameof<TestType>(),
 			config: TEST_DYNAMODB_CONFIG
 		});
-		const connectorInternal = connector as unknown as { createConnection: () => unknown };
-		vi.spyOn(connectorInternal, "createConnection").mockReturnValue({
+		const connectorInternal = connector as unknown as { getClient: () => Promise<unknown> };
+		vi.spyOn(connectorInternal, "getClient").mockResolvedValue({
 			describeTable: vi.fn().mockRejectedValueOnce(new Error("Connection refused"))
 		});
 		const result = await connector.health();
@@ -206,6 +218,31 @@ describe("DynamoDbEntityStorageConnector — constructor and health", () => {
 			.fn()
 			.mockImplementation(() => ({ node: "node", tenant: "tenant", user: "user" }));
 
+		await connector.teardown();
+	});
+});
+
+describe("DynamoDbEntityStorageConnector - long identifier bootstrap", () => {
+	beforeAll(() => {
+		EntitySchemaFactory.register(nameof<LongNameTestType>(), () =>
+			EntitySchemaHelper.getSchema(LongNameTestType)
+		);
+
+		ContextIdStore.getContextIds = vi
+			.fn()
+			.mockImplementation(() => ({ node: "node", tenant: "tenant", user: "user" }));
+	});
+
+	test("can bootstrap with a long identifier name", async () => {
+		const connector = new DynamoDbEntityStorageConnector<LongNameTestType>({
+			entitySchema: nameof<LongNameTestType>(),
+			config: {
+				...TEST_DYNAMODB_CONFIG,
+				tableName: "long-org-prefix-entity-storage-record-type-with-long-name"
+			}
+		});
+		const bootstrapped = await connector.bootstrap();
+		expect(bootstrapped).toBe(true);
 		await connector.teardown();
 	});
 });

@@ -1,26 +1,32 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	ConflictError,
 	Converter,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
 	type IValidationFailure,
 	Mutex,
 	ObjectHelper,
-	SharedStore,
+	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	type EntityCondition,
 	EntitySchemaFactory,
+	EntitySchemaPropertyFormat,
 	EntitySchemaHelper,
 	EntitySchemaPropertyType,
 	type IComparator,
@@ -30,7 +36,9 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
+	ConnectionHelper,
 	EntityStorageHelper,
+	IndexHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -44,9 +52,9 @@ import type { IMySqlEntityStorageConnectorConstructorOptions } from "./models/IM
 /**
  * Class for performing entity storage operations using MySql.
  */
-export class MySqlEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class MySqlEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -69,6 +77,12 @@ export class MySqlEntityStorageConnector<
 	 * @internal
 	 */
 	private static readonly _PARTITION_KEY_VALUE: string = "root";
+
+	/**
+	 * Maximum number of rows per INSERT statement in setBatch.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
 
 	/**
 	 * The name for the schema.
@@ -95,10 +109,10 @@ export class MySqlEntityStorageConnector<
 	private readonly _config: IMySqlEntityStorageConnectorConfig;
 
 	/**
-	 * The connection pool for MySql.
+	 * Unique identifier for this connector instance, used to track references in SharedStore.
 	 * @internal
 	 */
-	private _pool?: Pool;
+	private readonly _instanceId: string;
 
 	/**
 	 * The primary key property.
@@ -107,7 +121,13 @@ export class MySqlEntityStorageConnector<
 	private readonly _primaryKeyProperty: IEntitySchemaProperty<T>;
 
 	/**
-	 * Milliseconds to wait for the directory lock before throwing.
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
 	 * @internal
 	 */
 	private readonly _mutexTimeoutMs?: number;
@@ -153,14 +173,58 @@ export class MySqlEntityStorageConnector<
 			nameof(options.config.tableName),
 			options.config.tableName
 		);
+		if (!Is.empty(options.config.pool?.connectionLimit)) {
+			Guards.integer(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.connectionLimit),
+				options.config.pool?.connectionLimit
+			);
+		}
+		if (!Is.empty(options.config.pool?.maxIdle)) {
+			Guards.integer(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.maxIdle),
+				options.config.pool?.maxIdle
+			);
+		}
+		if (!Is.empty(options.config.pool?.idleTimeout)) {
+			Guards.integer(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.idleTimeout),
+				options.config.pool?.idleTimeout
+			);
+		}
+		if (!Is.empty(options.config.pool?.queueLimit)) {
+			Guards.integer(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.queueLimit),
+				options.config.pool?.queueLimit
+			);
+		}
+		if (!Is.empty(options.config.pool?.enableKeepAlive)) {
+			Guards.boolean(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.enableKeepAlive),
+				options.config.pool?.enableKeepAlive
+			);
+		}
+		if (!Is.empty(options.config.pool?.waitForConnections)) {
+			Guards.boolean(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				nameof(options.config.pool?.waitForConnections),
+				options.config.pool?.waitForConnections
+			);
+		}
 
 		this._entitySchemaName = options.entitySchema;
 		this._entitySchema = EntitySchemaFactory.get(options.entitySchema);
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKeyProperty = EntitySchemaHelper.getPrimaryKey(this._entitySchema);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
 
 		this._config = options.config;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
+		this._instanceId = RandomHelper.generateUuidV7("compact");
 	}
 
 	/**
@@ -172,8 +236,8 @@ export class MySqlEntityStorageConnector<
 	}
 
 	/**
-	 * Get the health of the component.
-	 * @returns The health of the component.
+	 * Returns the health status of the component.
+	 * @returns The health status of the component.
 	 */
 	public async health(): Promise<IHealth[]> {
 		try {
@@ -184,6 +248,7 @@ export class MySqlEntityStorageConnector<
 			return [
 				{
 					source: MySqlEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { database: this._config.database, tableName: this._config.tableName }
@@ -193,6 +258,7 @@ export class MySqlEntityStorageConnector<
 			return [
 				{
 					source: MySqlEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",
@@ -275,6 +341,30 @@ export class MySqlEntityStorageConnector<
 					}
 				});
 			}
+
+			for (const prop of this._entitySchema.properties ?? []) {
+				if (
+					(prop.isSecondary === true || !Is.empty(prop.sortDirection)) &&
+					prop.type !== EntitySchemaPropertyType.Object &&
+					prop.type !== EntitySchemaPropertyType.Array
+				) {
+					const columnName = String(prop.property);
+					const needsPrefix =
+						prop.type === EntitySchemaPropertyType.String &&
+						prop.format !== EntitySchemaPropertyFormat.Uuid;
+					const indexCol = needsPrefix ? `\`${columnName}\`(255)` : `\`${columnName}\``;
+					const indexName = IndexHelper.generateName(this._config.tableName, columnName);
+					const [indexRows] = await pool.query(
+						"SELECT COUNT(1) AS indexExists FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND index_name = ?",
+						[this._config.database, this._config.tableName, indexName]
+					);
+					if (Is.array(indexRows) && ObjectHelper.propertyGet(indexRows[0], "indexExists") === 0) {
+						await pool.query(
+							`CREATE INDEX \`${indexName}\` ON \`${this._config.database}\`.\`${this._config.tableName}\` (${indexCol})`
+						);
+					}
+				}
+			}
 		} catch (error) {
 			await nodeLogging?.log({
 				level: "error",
@@ -298,37 +388,13 @@ export class MySqlEntityStorageConnector<
 	 * @returns Nothing.
 	 */
 	public async stop(nodeLoggingComponentType?: string): Promise<void> {
-		if (this._pool) {
-			const poolConfig = this.createPoolConfig();
-			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
-
-			try {
-				await Mutex.lock(`mySqlPools:${poolId}`, {
-					throwOnTimeout: true,
-					timeoutMs: this._mutexTimeoutMs
-				});
-				const sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
-					"mySqlPools",
-					() => ({})
-				);
-				if (sharedPools[poolId]) {
-					// Decrease the use counter and close the pool if no longer used
-					sharedPools[poolId].useCounter--;
-					if (sharedPools[poolId].useCounter <= 0) {
-						const poolInstance = sharedPools[poolId].pool;
-						await poolInstance.end();
-						delete sharedPools[poolId];
-						this._pool = undefined;
-					}
-					SharedStore.set("mySqlPools", sharedPools);
-				} else {
-					// Pool was already ended by another connector; clear our stale reference.
-					this._pool = undefined;
-				}
-			} finally {
-				Mutex.unlock(`mySqlPools:${poolId}`);
-			}
-		}
+		await ConnectionHelper.closeClient<Pool>(
+			"mySqlPools",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async pool => pool.end()
+		);
 	}
 
 	/**
@@ -400,6 +466,7 @@ export class MySqlEntityStorageConnector<
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The id of the entity.
+	 * @throws ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 	 */
 	public async set(entity: T, conditions?: { property: keyof T; value: unknown }[]): Promise<void> {
 		Guards.object<T>(MySqlEntityStorageConnector.CLASS_NAME, nameof(entity), entity);
@@ -407,6 +474,12 @@ export class MySqlEntityStorageConnector<
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
 
 		const prepared = EntityStorageHelper.prepareEntity(
 			entity,
@@ -421,12 +494,46 @@ export class MySqlEntityStorageConnector<
 		);
 
 		const id = prepared[this._primaryKeyProperty.property] as unknown as string;
+		const optimisticMutexKey =
+			Is.stringValue(this._versionKey) || Is.arrayValue(conditions)
+				? this.buildOptimisticMutexKey(partitionKey, id)
+				: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			if (Is.arrayValue(conditions)) {
-				const itemData = await this.get(id);
-				if (Is.notEmpty(itemData) && !this.verifyConditions(conditions, itemData)) {
-					return;
+			if (hasVersionCheck) {
+				if (Is.arrayValue(conditions)) {
+					const currentEntity = await this.get(id);
+					if (!Is.empty(currentEntity) && !this.verifyConditions(conditions, currentEntity)) {
+						throw new ConflictError(MySqlEntityStorageConnector.CLASS_NAME, "conditionFailed", id);
+					}
+				}
+				ObjectHelper.propertySet(prepared, this._versionKey, submittedVersion + 1);
+			} else if (this._versionKey || Is.arrayValue(conditions)) {
+				const currentEntity = await this.get(id);
+				if (!Is.empty(currentEntity)) {
+					if (Is.arrayValue(conditions) && !this.verifyConditions(conditions, currentEntity)) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(
+								MySqlEntityStorageConnector.CLASS_NAME,
+								"conditionFailed",
+								id
+							);
+						}
+						return;
+					}
+				}
+				if (Is.stringValue(this._versionKey)) {
+					const storedVersion = !Is.empty(currentEntity)
+						? (ObjectHelper.propertyGet<number>(currentEntity, this._versionKey) ?? 0)
+						: 0;
+					ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
 				}
 			}
 
@@ -454,14 +561,38 @@ export class MySqlEntityStorageConnector<
 				}
 			}
 
-			let sql = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\``;
-			sql += ` (${keys.map(key => `\`${key}\``).join(", ")})`;
-			sql += ` VALUES (${values.map(() => "?").join(", ")})`;
-			sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
-
 			const pool = await this.getPool();
-			await pool.query(sql, values);
+
+			if (hasVersionCheck) {
+				const updateSql = `UPDATE \`${this._config.database}\`.\`${this._config.tableName}\` SET ${keys.map(key => `\`${key}\` = ?`).join(", ")} WHERE \`${this._primaryKeyProperty.property as string}\` = ? AND \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ? AND \`${this._versionKey}\` = ?`;
+				const updateValues = [
+					...values,
+					id,
+					partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE,
+					submittedVersion
+				];
+				const [result] = (await pool.query(updateSql, updateValues)) as unknown as [
+					{ affectedRows: number }
+				];
+				if (result.affectedRows === 0) {
+					throw new ConflictError(
+						MySqlEntityStorageConnector.CLASS_NAME,
+						"optimisticLockFailed",
+						id
+					);
+				}
+			} else {
+				let sql = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\``;
+				sql += ` (${keys.map(key => `\`${key}\``).join(", ")})`;
+				sql += ` VALUES (${values.map(() => "?").join(", ")})`;
+				sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
+
+				await pool.query(sql, values);
+			}
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
 			throw new GeneralError(
 				MySqlEntityStorageConnector.CLASS_NAME,
 				"setFailed",
@@ -470,6 +601,10 @@ export class MySqlEntityStorageConnector<
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -506,30 +641,38 @@ export class MySqlEntityStorageConnector<
 			});
 
 			const keys = props.map(p => p.property as string);
-			const allValues: unknown[] = [];
-
-			for (const prepared of preparedEntities) {
-				for (const prop of props) {
-					const val = prepared[prop.property];
-					if (
-						prop.type === EntitySchemaPropertyType.Object ||
-						prop.type === EntitySchemaPropertyType.Array
-					) {
-						allValues.push(Is.empty(val) ? null : JSON.stringify(val));
-					} else {
-						allValues.push(Is.empty(val) ? null : val);
-					}
-				}
-			}
-
 			const rowPlaceholder = `(${keys.map(() => "?").join(", ")})`;
-			let sql = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\``;
-			sql += ` (${keys.map(key => `\`${key}\``).join(", ")})`;
-			sql += ` VALUES ${entities.map(() => rowPlaceholder).join(", ")}`;
-			sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
+			const columnList = `(${keys.map(key => `\`${key}\``).join(", ")})`;
+			const updateClause = keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ");
+			const baseInsert = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\` ${columnList} VALUES `;
+			const onDuplicate = ` ON DUPLICATE KEY UPDATE ${updateClause};`;
 
 			const pool = await this.getPool();
-			await pool.query(sql, allValues);
+			const chunkSize = MySqlEntityStorageConnector._BATCH_CHUNK_SIZE;
+
+			for (let offset = 0; offset < preparedEntities.length; offset += chunkSize) {
+				const chunk = preparedEntities.slice(offset, offset + chunkSize);
+				const chunkValues: unknown[] = [];
+
+				for (const prepared of chunk) {
+					for (const prop of props) {
+						const val = prepared[prop.property];
+						if (
+							prop.type === EntitySchemaPropertyType.Object ||
+							prop.type === EntitySchemaPropertyType.Array
+						) {
+							chunkValues.push(Is.empty(val) ? null : JSON.stringify(val));
+						} else {
+							chunkValues.push(Is.empty(val) ? null : val);
+						}
+					}
+				}
+
+				await pool.query(
+					`${baseInsert}${chunk.map(() => rowPlaceholder).join(", ")}${onDuplicate}`,
+					chunkValues
+				);
+			}
 		} catch (err) {
 			throw new GeneralError(
 				MySqlEntityStorageConnector.CLASS_NAME,
@@ -575,12 +718,30 @@ export class MySqlEntityStorageConnector<
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const optimisticMutexKey =
+			Is.stringValue(this._versionKey) || Is.arrayValue(conditions)
+				? this.buildOptimisticMutexKey(partitionKey, id)
+				: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
 			const pool = await this.getPool();
 
-			const itemData = await this.get(id, undefined, conditions);
-			if (Is.notEmpty(itemData)) {
+			const itemData = await this.get(id);
+			if (!Is.empty(itemData)) {
+				if (Is.arrayValue(conditions) && !this.verifyConditions(conditions, itemData)) {
+					if (Is.stringValue(this._versionKey)) {
+						throw new ConflictError(MySqlEntityStorageConnector.CLASS_NAME, "conditionFailed", id);
+					}
+					return;
+				}
+
 				const values: unknown[] = [];
 				const whereClauses: string[] = [];
 
@@ -603,6 +764,9 @@ export class MySqlEntityStorageConnector<
 				await pool.query(query, values);
 			}
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
 			throw new GeneralError(
 				MySqlEntityStorageConnector.CLASS_NAME,
 				"removeFailed",
@@ -611,6 +775,10 @@ export class MySqlEntityStorageConnector<
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -876,11 +1044,14 @@ export class MySqlEntityStorageConnector<
 
 	/**
 	 * Get all unique partition context ids present in the table.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns An array of context id objects, one per unique partition.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		if (!Is.arrayValue(this._partitionContextIds)) {
-			return [];
+			return undefined;
 		}
 
 		try {
@@ -888,10 +1059,36 @@ export class MySqlEntityStorageConnector<
 			const [rows] = await pool.query(
 				`SELECT DISTINCT \`${MySqlEntityStorageConnector._PARTITION_KEY}\` FROM \`${this._config.database}\`.\`${this._config.tableName}\``
 			);
-			return (rows as { [key: string]: string }[])
+			const partitionIds = (rows as { [key: string]: string }[])
 				.map(row => row[MySqlEntityStorageConnector._PARTITION_KEY])
-				.filter((id): id is string => Is.stringValue(id))
-				.map(id => ContextIdHelper.shortSplit(this._partitionContextIds ?? [], id));
+				.filter((id): id is string => Is.stringValue(id));
+			const contextIds: IContextIds[] = [];
+			const skipped: string[] = [];
+			for (const partitionId of partitionIds) {
+				const split = EntityStorageHelper.tryShortSplit(
+					this._partitionContextIds ?? [],
+					partitionId
+				);
+				if (Is.undefined(split)) {
+					skipped.push(partitionId);
+				} else {
+					contextIds.push(split);
+				}
+			}
+			if (Is.arrayValue(skipped)) {
+				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+				await nodeLogging?.log({
+					level: "warn",
+					source: MySqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "partitionIdsSkipped",
+					data: {
+						expected: this._partitionContextIds?.length,
+						partitionIds: skipped.join(", ")
+					}
+				});
+			}
+			return contextIds;
 		} catch (err) {
 			throw new GeneralError(
 				MySqlEntityStorageConnector.CLASS_NAME,
@@ -900,6 +1097,14 @@ export class MySqlEntityStorageConnector<
 				err
 			);
 		}
+	}
+
+	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
 	}
 
 	/**
@@ -936,7 +1141,7 @@ export class MySqlEntityStorageConnector<
 		// Teardown the existing table with the original name to free up the name for the new table
 		await this.teardown(loggingComponentType);
 
-		// RENAME TABLE is an atomic metadata-only operation in MySQL — no data copying needed.
+		// RENAME TABLE is an atomic metadata-only operation in MySQL - no data copying needed.
 		const pool = await this.getPool();
 		await pool.query(
 			`RENAME TABLE \`${targetConnector._config.database}\`.\`${targetConnector._config.tableName}\` TO \`${this._config.database}\`.\`${this._config.tableName}\``
@@ -1071,42 +1276,27 @@ export class MySqlEntityStorageConnector<
 	}
 
 	/**
-	 * Get or create the connection pool.
+	 * Get or create the shared connection pool for this endpoint.
 	 * @returns The MySql connection pool.
 	 * @internal
 	 */
 	private async getPool(): Promise<Pool> {
-		if (!this._pool) {
-			const poolConfig = this.createPoolConfig();
-			const poolId = `${poolConfig.host}|${poolConfig.port}|${poolConfig.user}`;
+		return ConnectionHelper.openClient<Pool>(
+			"mySqlPools",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async () => createPool(this.createPoolConfig())
+		);
+	}
 
-			try {
-				await Mutex.lock(`mySqlPools:${poolId}`, {
-					throwOnTimeout: true,
-					timeoutMs: this._mutexTimeoutMs
-				});
-
-				const sharedPools = SharedStore.get<{ [id: string]: { pool: Pool; useCounter: number } }>(
-					"mySqlPools",
-					() => ({})
-				);
-
-				// If there is no pool for the id, create it
-				if (!sharedPools[poolId]) {
-					sharedPools[poolId] = {
-						pool: createPool(poolConfig),
-						useCounter: 0
-					};
-					SharedStore.set("mySqlPools", sharedPools);
-				}
-				// Increase the use counter and return the pool
-				sharedPools[poolId].useCounter++;
-				this._pool = sharedPools[poolId].pool;
-			} finally {
-				Mutex.unlock(`mySqlPools:${poolId}`);
-			}
-		}
-		return this._pool;
+	/**
+	 * Build a stable cache key for the shared pool based on connection parameters.
+	 * @returns The pool cache key.
+	 * @internal
+	 */
+	private createClientId(): string {
+		return `${this._config.host}|${this._config.port ?? 3306}|${this._config.user}`;
 	}
 
 	/**
@@ -1115,21 +1305,18 @@ export class MySqlEntityStorageConnector<
 	 * @internal
 	 */
 	private createPoolConfig(): PoolOptions {
-		const poolConfig = this._config.pool ?? {};
-
 		return {
 			host: this._config.host,
-			port: this._config.port ?? 3306,
+			port: this._config.port,
 			user: this._config.user,
 			password: this._config.password,
 
-			connectionLimit: poolConfig.connectionLimit ?? 10,
-			maxIdle: poolConfig.maxIdle ?? 10,
-			idleTimeout: poolConfig.idleTimeout ?? 60000,
-			enableKeepAlive: poolConfig.enableKeepAlive ?? true,
-			keepAliveInitialDelay: 0,
-			waitForConnections: poolConfig.waitForConnections ?? true,
-			queueLimit: poolConfig.queueLimit ?? 0
+			connectionLimit: this._config.pool?.connectionLimit ?? 20,
+			maxIdle: this._config.pool?.maxIdle,
+			idleTimeout: this._config.pool?.idleTimeout,
+			enableKeepAlive: this._config.pool?.enableKeepAlive,
+			waitForConnections: this._config.pool?.waitForConnections,
+			queueLimit: this._config.pool?.queueLimit
 		};
 	}
 
@@ -1237,7 +1424,7 @@ export class MySqlEntityStorageConnector<
 		if (comparator.comparison === ComparisonOperator.In) {
 			const inValues = Is.array(comparator.value) ? comparator.value : [comparator.value];
 			if (inValues.length === 0) {
-				// MySQL rejects `IN ()` as a syntax error — short-circuit to a condition
+				// MySQL rejects `IN ()` as a syntax error - short-circuit to a condition
 				// that is always false so the query returns zero rows cleanly (#141).
 				return "1 = 0";
 			}
@@ -1246,7 +1433,7 @@ export class MySqlEntityStorageConnector<
 			return `\`${prop}\` IN (${placeholders})`;
 		}
 
-		// null/undefined must use IS NULL / IS NOT NULL — never a parameterised placeholder.
+		// null/undefined must use IS NULL / IS NOT NULL - never a parameterised placeholder.
 		// Passing undefined through propertyToDbValue() coerces it to NaN for number fields
 		// (Number(undefined) === NaN), and null coerces to 0 (Number(null) === 0), both of
 		// which produce semantically wrong or invalid SQL.
@@ -1405,6 +1592,17 @@ export class MySqlEntityStorageConnector<
 		return conditions.every(
 			condition => ObjectHelper.propertyGet(obj, condition.property as string) === condition.value
 		);
+	}
+
+	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param partitionKey The resolved partition key.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private buildOptimisticMutexKey(partitionKey: string | undefined, id: string): string {
+		return `${MySqlEntityStorageConnector.CLASS_NAME}:optimistic:${this._config.database}:${this._config.tableName}:${partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE}:${id}`;
 	}
 
 	/**

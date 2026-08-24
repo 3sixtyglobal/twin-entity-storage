@@ -1,10 +1,11 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore, type IContextIds } from "@twin.org/context";
-import { Converter, RandomHelper } from "@twin.org/core";
+import { ComponentFactory, Converter, Is, RandomHelper } from "@twin.org/core";
 import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
 import {
 	MigrationHelper,
+	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IResolvedMigrationStep
 } from "@twin.org/entity-storage-models";
@@ -19,7 +20,7 @@ const TEST_DIRECTORY = `${TEST_DIRECTORY_ROOT}test-data-${Converter.bytesToHex(R
 // createConnectors it the only code that should differ
 
 /**
- * Partition/migration V1 entity — used for both getPartitionContextIds and migration tests.
+ * Partition/migration V1 entity - used for both getPartitionContextIds and migration tests.
  */
 @entity()
 class MigV1 {
@@ -31,7 +32,7 @@ class MigV1 {
 }
 
 /**
- * V2 migration entity — drops legacyField, adds optional newField.
+ * V2 migration entity - drops legacyField, adds optional newField.
  */
 @entity()
 class MigV2 {
@@ -43,7 +44,7 @@ class MigV2 {
 }
 
 /**
- * V3 migration entity — changes legacyField type from string to integer.
+ * V3 migration entity - changes legacyField type from string to integer.
  */
 @entity()
 class MigV3TypeChange {
@@ -55,7 +56,7 @@ class MigV3TypeChange {
 }
 
 /**
- * V1 with a plain string info field — used to test transformEntityProperty for object target types.
+ * V1 with a plain string info field - used to test transformEntityProperty for object target types.
  */
 @entity()
 class MigV1WithStr {
@@ -67,7 +68,7 @@ class MigV1WithStr {
 }
 
 /**
- * V2 with an object info field — changing from string triggers the transformEntityProperty requirement.
+ * V2 with an object info field - changing from string triggers the transformEntityProperty requirement.
  */
 @entity()
 class MigV2WithObj {
@@ -79,7 +80,7 @@ class MigV2WithObj {
 }
 
 /**
- * Optional-field variant of MigV3TypeChange — legacyField is integer but optional.
+ * Optional-field variant of MigV3TypeChange - legacyField is integer but optional.
  */
 @entity()
 class MigV3OptionalTypeChange {
@@ -91,7 +92,7 @@ class MigV3OptionalTypeChange {
 }
 
 /**
- * Minimal source entity with only the primary key — used to test added-field defaults.
+ * Minimal source entity with only the primary key - used to test added-field defaults.
  */
 @entity()
 class MigJustId {
@@ -128,7 +129,7 @@ class MigAllAddedDefaults {
 }
 
 /**
- * V3 entity — changes legacyField type from string to boolean.
+ * V3 entity - changes legacyField type from string to boolean.
  */
 @entity()
 class MigV3BoolChange {
@@ -140,7 +141,7 @@ class MigV3BoolChange {
 }
 
 /**
- * V3 entity — changes legacyField type from integer to string.
+ * V3 entity - changes legacyField type from integer to string.
  */
 @entity()
 class MigV3ToStr {
@@ -152,7 +153,7 @@ class MigV3ToStr {
 }
 
 /**
- * Multi-field source entity — used to test multiple field renames in one migration.
+ * Multi-field source entity - used to test multiple field renames in one migration.
  */
 @entity()
 class MigMultiFieldA {
@@ -167,7 +168,7 @@ class MigMultiFieldA {
 }
 
 /**
- * Multi-field target entity — fieldA and fieldB are renamed.
+ * Multi-field target entity - fieldA and fieldB are renamed.
  */
 @entity()
 class MigMultiFieldB {
@@ -183,16 +184,21 @@ class MigMultiFieldB {
 
 let currentUser = "user";
 let currentConnector: IEntityStorageMigrationConnector | undefined;
+const originalMigrateWithChain = MigrationHelper.migrateWithChain.bind(MigrationHelper);
+let trackedConnectors: IEntityStorageConnector[] = [];
 
 // Swap this factory to run these tests against a different connector implementation.
-// It receives the entity schema name and optional partition context ids and must return
-// a fresh, bootstrapped IEntityStorageMigrationConnector configured for those settings.
+// It receives the entity schema name, optional partition context ids and an optional
+// storage id, and must return a fresh, bootstrapped IEntityStorageMigrationConnector
+// configured for those settings. Calls sharing a storageId must resolve to the same
+// underlying storage.
 let createConnector: (
 	entitySchema: string,
-	partitionContextIds?: string[]
+	partitionContextIds?: string[],
+	storageId?: string
 ) => Promise<IEntityStorageMigrationConnector>;
 
-describe("FileEntityStorageConnector — partitioning and migration", () => {
+describe("FileEntityStorageConnector - partitioning and migration", () => {
 	beforeAll(async () => {
 		EntitySchemaFactory.register(nameof<MigV1>(), () => EntitySchemaHelper.getSchema(MigV1));
 		EntitySchemaFactory.register(nameof<MigV2>(), () => EntitySchemaHelper.getSchema(MigV2));
@@ -227,13 +233,14 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			EntitySchemaHelper.getSchema(MigMultiFieldB)
 		);
 
-		createConnector = async (entitySchema, partitionContextIds) => {
+		createConnector = async (entitySchema, partitionContextIds, storageId) => {
 			currentConnector = new FileEntityStorageConnector({
 				entitySchema,
 				partitionContextIds,
-				config: { directory: TEST_DIRECTORY }
+				config: { directory: `${TEST_DIRECTORY}${storageId ?? ""}` }
 			});
 			await currentConnector.bootstrap?.();
+			trackedConnectors.push(currentConnector);
 			return currentConnector;
 		};
 
@@ -245,9 +252,15 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 	afterEach(async () => {
 		currentUser = "user";
 
-		try {
-			await currentConnector?.teardown?.();
-		} catch {}
+		for (const connector of trackedConnectors) {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+		}
+		trackedConnectors = [];
 	});
 
 	describe("getPartitionContextIds", () => {
@@ -261,14 +274,14 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			expect(result).toEqual([]);
 		});
 
-		test("returns empty array when no partition context ids are configured", async () => {
+		test("returns undefined when no partition context ids are configured", async () => {
 			const entityStorage = (await createConnector(
 				nameof<MigV1>()
 			)) as IEntityStorageMigrationConnector<MigV1>;
 			await entityStorage.set({ id: "1", legacyField: "a" });
 			await entityStorage.set({ id: "2", legacyField: "b" });
 			const result = await entityStorage.getPartitionContextIds();
-			expect(result).toEqual([]);
+			expect(result).toBeUndefined();
 		});
 
 		test("returns a single entry when all entities share the same partition", async () => {
@@ -283,7 +296,11 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			await entityStorage.set({ id: "3", legacyField: "c" });
 			const result = await entityStorage.getPartitionContextIds();
 			expect(result).toHaveLength(1);
-			expect(result[0]).toEqual({ node: "node", tenant: "tenant", user: "user1" });
+			expect((result as IContextIds[])[0]).toEqual({
+				node: "node",
+				tenant: "tenant",
+				user: "user1"
+			});
 		});
 
 		test("returns one entry per unique partition", async () => {
@@ -324,10 +341,47 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const result = await entityStorage.getPartitionContextIds();
 			expect(result).toHaveLength(2);
 		});
+
+		test("skips partition ids whose depth does not match the configured partition keys", async () => {
+			const storageId = `ms${Date.now().toString(36)}`;
+			const legacyStorage = (await createConnector(
+				nameof<MigV1>(),
+				["user"],
+				storageId
+			)) as IEntityStorageMigrationConnector<MigV1>;
+			await legacyStorage.set({ id: "1", legacyField: "a" });
+
+			const entityStorage = (await createConnector(
+				nameof<MigV1>(),
+				["tenant", "user"],
+				storageId
+			)) as IEntityStorageMigrationConnector<MigV1>;
+			currentUser = "user1";
+			await entityStorage.set({ id: "2", legacyField: "b" });
+
+			const logSpy = vi.fn();
+			ComponentFactory.register("test-logging", () => ({
+				className: () => "TestLogging",
+				log: logSpy
+			}));
+			try {
+				const result = await entityStorage.getPartitionContextIds("test-logging");
+				expect(result).toEqual([{ tenant: "tenant", user: "user1" }]);
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.objectContaining({
+						level: "warn",
+						message: "partitionIdsSkipped",
+						data: expect.objectContaining({ partitionIds: "user" })
+					})
+				);
+			} finally {
+				ComponentFactory.unregister("test-logging");
+			}
+		});
 	});
 
 	// -----------------------------------------------------------------------
-	// Step builder — creates a single IResolvedMigrationStep from the source
+	// Step builder - creates a single IResolvedMigrationStep from the source
 	// connector's live schema and the named target schema in EntitySchemaFactory.
 	// -----------------------------------------------------------------------
 
@@ -353,7 +407,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 				async (contextIds: IContextIds, fn: () => unknown) => {
 					const prevUser = currentUser;
 					const ctxUser = (contextIds as { [key: string]: string }).user;
-					if (typeof ctxUser === "string") {
+					if (Is.string(ctxUser)) {
 						currentUser = ctxUser;
 					}
 					try {
@@ -363,6 +417,13 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 					}
 				}
 			);
+			vi.spyOn(MigrationHelper, "migrateWithChain").mockImplementation(
+				async (...args: Parameters<typeof MigrationHelper.migrateWithChain>) => {
+					const result = await originalMigrateWithChain(...args);
+					trackedConnectors.push(result.finalConnector);
+					return result;
+				}
+			);
 		});
 
 		afterEach(() => {
@@ -370,11 +431,13 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 		});
 
 		async function makeV1Connector(
-			partitionContextIds: string[] = ["user"]
+			partitionContextIds: string[] = ["user"],
+			storageId?: string
 		): Promise<IEntityStorageMigrationConnector<MigV1>> {
 			return (await createConnector(
 				nameof<MigV1>(),
-				partitionContextIds
+				partitionContextIds,
+				storageId
 			)) as IEntityStorageMigrationConnector<MigV1>;
 		}
 
@@ -386,6 +449,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV2>())]
 			);
 
@@ -407,11 +471,39 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV2>())]
 			);
 
 			expect(migrated).toBe(3);
 			expect(await finalConnector.count()).toBe(3);
+		});
+
+		test("discards entities in partitions whose depth does not match during migration", async () => {
+			const storageId = `md${Date.now().toString(36)}`;
+			const legacySource = await makeV1Connector(["user"], storageId);
+			await legacySource.set({ id: "1", legacyField: "legacy" });
+
+			const source = await makeV1Connector(["tenant", "user"], storageId);
+			currentUser = "user1";
+			await source.set({ id: "2", legacyField: "a" });
+			currentUser = "user2";
+			await source.set({ id: "3", legacyField: "b" });
+
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
+				[makeStep(source, nameof<MigV2>())]
+			);
+
+			expect(migrated).toBe(2);
+			currentUser = "user1";
+			expect(await finalConnector.get("2")).toBeDefined();
+			currentUser = "user2";
+			expect(await finalConnector.get("3")).toBeDefined();
+			currentUser = "user";
+			expect(await finalConnector.get("1")).toBeUndefined();
 		});
 
 		test("migrates with coercible string-to-integer type change", async () => {
@@ -422,6 +514,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV3TypeChange>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV3TypeChange>())]
 			);
 
@@ -435,9 +528,12 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "1", legacyField: "not-a-number" });
 
 			await expect(
-				MigrationHelper.migrateWithChain(source, nameof<MigV3TypeChange>(), [
-					makeStep(source, nameof<MigV3TypeChange>())
-				])
+				MigrationHelper.migrateWithChain(
+					source,
+					nameof<MigV3TypeChange>(),
+					await source.getPartitionContextIds(),
+					[makeStep(source, nameof<MigV3TypeChange>())]
+				)
 			).rejects.toMatchObject({
 				name: "GeneralError",
 				message: "migrationHelper.migrateSchemaFailed"
@@ -452,6 +548,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV2>(), [{ from: "legacyField", to: "newField" }])]
 			);
 
@@ -464,9 +561,12 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const source = await makeV1Connector();
 			await source.set({ id: "1", legacyField: "hello" });
 
-			const { finalConnector } = await MigrationHelper.migrateWithChain(source, nameof<MigV2>(), [
-				makeStep(source, nameof<MigV2>(), [{ from: "legacyField", to: "newField" }])
-			]);
+			const { finalConnector } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
+				[makeStep(source, nameof<MigV2>(), [{ from: "legacyField", to: "newField" }])]
+			);
 
 			const item = await finalConnector.get("1");
 			expect((item as { legacyField?: string }).legacyField).toBeUndefined();
@@ -477,9 +577,12 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const source = await makeV1Connector();
 			await source.set({ id: "1", legacyField: "hello" });
 
-			const { finalConnector } = await MigrationHelper.migrateWithChain(source, nameof<MigV2>(), [
-				makeStep(source, nameof<MigV2>())
-			]);
+			const { finalConnector } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
+				[makeStep(source, nameof<MigV2>())]
+			);
 
 			expect(((await finalConnector.get("1")) as MigV2).newField).toBeUndefined();
 		});
@@ -488,9 +591,12 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const source = await makeV1Connector();
 			await source.set({ id: "1", legacyField: "hello" });
 
-			const { finalConnector } = await MigrationHelper.migrateWithChain(source, nameof<MigV2>(), [
-				makeStep(source, nameof<MigV2>(), [{ from: "legacyField", to: "newField" }])
-			]);
+			const { finalConnector } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
+				[makeStep(source, nameof<MigV2>(), [{ from: "legacyField", to: "newField" }])]
+			);
 
 			expect(((await finalConnector.get("1")) as MigV2).newField).toBe("hello");
 		});
@@ -507,6 +613,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV2>(), [{ from: "legacyField", to: "newField" }])]
 			);
 
@@ -534,6 +641,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV2>())]
 			);
 
@@ -566,6 +674,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV2>())]
 			);
 
@@ -587,6 +696,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV2>())],
 				{ batchSize: 2 }
 			);
@@ -598,9 +708,12 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const source = await makeV1Connector();
 			await source.set({ id: "1", legacyField: "hello" });
 
-			const { migrated } = await MigrationHelper.migrateWithChain(source, nameof<MigV2>(), [
-				makeStep(source, nameof<MigV2>())
-			]);
+			const { migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
+				[makeStep(source, nameof<MigV2>())]
+			);
 
 			expect(migrated).toBe(1);
 		});
@@ -614,6 +727,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV2>())],
 				{ batchSize: 3 }
 			);
@@ -632,7 +746,12 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2WithObj>(),
-				[makeStep(source, nameof<MigV2WithObj>(), undefined, (f, t, v) => ({ label: v as string }))]
+				await source.getPartitionContextIds(),
+				[
+					makeStep(source, nameof<MigV2WithObj>(), undefined, (orig, f, t, v) => ({
+						label: v as string
+					}))
+				]
 			);
 
 			expect(migrated).toBe(2);
@@ -651,9 +770,12 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "1", info: "hello" });
 
 			await expect(
-				MigrationHelper.migrateWithChain(source, nameof<MigV2WithObj>(), [
-					makeStep(source, nameof<MigV2WithObj>())
-				])
+				MigrationHelper.migrateWithChain(
+					source,
+					nameof<MigV2WithObj>(),
+					await source.getPartitionContextIds(),
+					[makeStep(source, nameof<MigV2WithObj>())]
+				)
 			).rejects.toMatchObject({
 				name: "GeneralError",
 				message: "migrationHelper.migrateSchemaFailed"
@@ -667,6 +789,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV3OptionalTypeChange>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV3OptionalTypeChange>())]
 			);
 
@@ -686,6 +809,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigAllAddedDefaults>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigAllAddedDefaults>())]
 			);
 
@@ -708,6 +832,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV3BoolChange>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV3BoolChange>())]
 			);
 
@@ -727,6 +852,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV3ToStr>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV3ToStr>())]
 			);
 
@@ -745,6 +871,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigMultiFieldB>(),
+				await source.getPartitionContextIds(),
 				[
 					makeStep(source, nameof<MigMultiFieldB>(), [
 						{ from: "fieldA", to: "renamedA" },
@@ -770,6 +897,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV2>())]
 			);
 
@@ -785,6 +913,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV1>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV1>())]
 			);
 
@@ -806,9 +935,12 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			await source.set({ id: "3", legacyField: "c" });
 
 			currentUser = "userA";
-			const { migrated } = await MigrationHelper.migrateWithChain(source, nameof<MigV2>(), [
-				makeStep(source, nameof<MigV2>())
-			]);
+			const { migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
+				[makeStep(source, nameof<MigV2>())]
+			);
 
 			expect(migrated).toBe(3);
 		});
@@ -824,6 +956,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV2>())]
 			);
 
@@ -840,6 +973,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV2>())]
 			);
 
@@ -861,6 +995,7 @@ describe("FileEntityStorageConnector — partitioning and migration", () => {
 			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
 				source,
 				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
 				[makeStep(source, nameof<MigV2>(), [{ from: "legacyField", to: "newField" }])]
 			);
 

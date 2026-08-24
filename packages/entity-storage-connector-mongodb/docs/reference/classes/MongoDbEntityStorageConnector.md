@@ -11,6 +11,7 @@ Class for performing entity storage operations using MongoDb.
 ## Implements
 
 - `IEntityStorageMigrationConnector`\<`T`\>
+- `IHealthProviderComponent`
 
 ## Constructors
 
@@ -68,9 +69,9 @@ A promise that resolves to a boolean indicating success.
 
 ***
 
-### stop()? {#stop}
+### stop() {#stop}
 
-> `optional` **stop**(`nodeLoggingComponentType?`): `Promise`\<`void`\>
+> **stop**(`nodeLoggingComponentType?`): `Promise`\<`void`\>
 
 The component needs to be stopped when the node is closed.
 
@@ -126,7 +127,7 @@ The health status of the component.
 
 #### Implementation of
 
-`IEntityStorageMigrationConnector.health`
+`IHealthProviderComponent.health`
 
 ***
 
@@ -211,6 +212,10 @@ The optional conditions to match for the entities.
 `Promise`\<`void`\>
 
 The id of the entity.
+
+#### Throws
+
+ConflictError when the entity exists but the supplied conditions or version do not match the stored state.
 
 #### Implementation of
 
@@ -425,19 +430,45 @@ The total count of entities in the storage.
 
 ### getPartitionContextIds() {#getpartitioncontextids}
 
-> **getPartitionContextIds**(): `Promise`\<`IContextIds`[]\>
+> **getPartitionContextIds**(`loggingComponentType?`): `Promise`\<`IContextIds`[] \| `undefined`\>
 
 Get all unique partition context ids present in the collection.
 
+#### Parameters
+
+##### loggingComponentType?
+
+`string`
+
+The optional component type to use for logging skipped partition ids.
+
 #### Returns
 
-`Promise`\<`IContextIds`[]\>
+`Promise`\<`IContextIds`[] \| `undefined`\>
 
 An array of context id objects, one per unique partition.
 
 #### Implementation of
 
 `IEntityStorageMigrationConnector.getPartitionContextIds`
+
+***
+
+### connectorVersion() {#connectorversion}
+
+> **connectorVersion**(): `number`
+
+Get the connector implementation version.
+
+#### Returns
+
+`number`
+
+The connector implementation version.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.connectorVersion`
 
 ***
 

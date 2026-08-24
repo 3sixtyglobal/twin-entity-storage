@@ -7,6 +7,7 @@ import type { IEntitySchemaProperty } from "@twin.org/entity";
  * Used in migration steps for custom property transformations.
  */
 export type EntityPropertyTransformer<T = unknown, U = unknown> = (
+	entity: T,
 	schema1Property: IEntitySchemaProperty<T>,
 	schemaProperty2: IEntitySchemaProperty<U>,
 	value: unknown

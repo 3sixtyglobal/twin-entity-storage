@@ -1,6 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdStore } from "@twin.org/context";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
 	Coerce,
@@ -16,6 +16,7 @@ import {
 } from "@twin.org/entity";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
+import type { EntityPropertyRemover } from "../models/entityPropertyRemover.js";
 import type { EntityPropertyTransformer } from "../models/entityPropertyTransformer.js";
 import type { IEntityStorageConnector } from "../models/IEntityStorageConnector.js";
 import type { IEntityStorageMigrationConnector } from "../models/IEntityStorageMigrationConnector.js";
@@ -40,6 +41,7 @@ export class MigrationHelper {
 	 * A chain of one step is equivalent to a traditional single-step migration.
 	 * @param sourceConnector The connector holding data at the stored schema version.
 	 * @param targetSchemaName The schema name for the current version (used to create the target connector).
+	 * @param partitions The partitions to migrate.
 	 * @param steps Ordered, fully-resolved migration steps from stored to current version.
 	 * @param options Optional migration options.
 	 * @param loggingComponentType The optional component type to use for logging the migration progress.
@@ -48,6 +50,7 @@ export class MigrationHelper {
 	public static async migrateWithChain(
 		sourceConnector: IEntityStorageMigrationConnector,
 		targetSchemaName: string,
+		partitions: IContextIds[] | undefined,
 		steps: IResolvedMigrationStep[],
 		options?: IMigrationOptions,
 		loggingComponentType?: string
@@ -73,14 +76,19 @@ export class MigrationHelper {
 			await MigrationHelper.startupConnector(sourceConnector, loggingComponentType);
 			await MigrationHelper.startupConnector(targetConnector, loggingComponentType);
 
-			let partitionContextIds = await sourceConnector.getPartitionContextIds();
-			if (!Is.arrayValue(partitionContextIds)) {
-				partitionContextIds ??= [];
-				partitionContextIds.push({});
+			// undefined → not partitioned: run one pass with empty context.
+			// []        → partitioned but table is empty: skip all passes (count() never called).
+			// [{…}, …]  → partitioned with data: expand short-form values to long form and iterate.
+			let effectivePartitions: IContextIds[];
+			if (partitions === undefined) {
+				effectivePartitions = [{}];
+			} else if (partitions.length === 0) {
+				effectivePartitions = [];
+			} else {
+				effectivePartitions = partitions.map(ctx => ContextIdHelper.longAll(ctx, Object.keys(ctx)));
 			}
 
 			let migrated = 0;
-			const effectivePartitions = partitionContextIds.length > 0 ? partitionContextIds : [{}];
 
 			await options?.onProgress?.("partitionStart", effectivePartitions.length, 0);
 
@@ -220,7 +228,8 @@ export class MigrationHelper {
 			current = MigrationHelper.applyEntityTransform(
 				current as Partial<unknown>,
 				diff,
-				step.transformEntityProperty
+				step.transformEntityProperty,
+				step.removeEntityProperty
 			);
 		}
 		return current;
@@ -232,6 +241,7 @@ export class MigrationHelper {
 	 * @param entity The entity to transform.
 	 * @param schemaDiff The schema diff between the old and new schemas.
 	 * @param transformEntityProperty Optional per-property transform hook for object/array properties.
+	 * @param removeEntityProperty Optional hook called with the original entity and dropped property schemas.
 	 * @returns The transformed entity ready to be written to the new schema.
 	 * @throws GeneralError if a transformation is required for an object or array property but no transformEntityProperty function is provided.
 	 * @throws GeneralError if coercion of a modified property results in undefined for a non-optional target property.
@@ -239,7 +249,8 @@ export class MigrationHelper {
 	public static applyEntityTransform<T = unknown, U = unknown>(
 		entity: Partial<T>,
 		schemaDiff: IEntitySchemaDiff<T, U>,
-		transformEntityProperty?: EntityPropertyTransformer<T, U>
+		transformEntityProperty?: EntityPropertyTransformer<T, U>,
+		removeEntityProperty?: EntityPropertyRemover<T>
 	): U {
 		const newEntity = {} as U;
 
@@ -252,27 +263,32 @@ export class MigrationHelper {
 		}
 
 		for (const change of schemaDiff.added) {
-			let defValue;
+			const existingValue = ObjectHelper.propertyGet(entity, change.property as string);
+			if (!Is.undefined(existingValue)) {
+				ObjectHelper.propertySet(newEntity, change.property as string, existingValue);
+			} else {
+				let defValue;
 
-			if (!(change.optional ?? false)) {
-				if (change.type === EntitySchemaPropertyType.Boolean) {
-					defValue = change.defaultValue ?? false;
-				} else if (
-					change.type === EntitySchemaPropertyType.Number ||
-					change.type === EntitySchemaPropertyType.Integer
-				) {
-					defValue = change.defaultValue ?? 0;
-				} else if (change.type === EntitySchemaPropertyType.String) {
-					defValue = change.defaultValue ?? "";
-				} else if (change.type === EntitySchemaPropertyType.Array) {
-					defValue = change.defaultValue ?? [];
-				} else if (change.type === EntitySchemaPropertyType.Object) {
-					defValue = change.defaultValue ?? {};
+				if (!(change.optional ?? false)) {
+					if (change.type === EntitySchemaPropertyType.Boolean) {
+						defValue = change.defaultValue ?? false;
+					} else if (
+						change.type === EntitySchemaPropertyType.Number ||
+						change.type === EntitySchemaPropertyType.Integer
+					) {
+						defValue = change.defaultValue ?? 0;
+					} else if (change.type === EntitySchemaPropertyType.String) {
+						defValue = change.defaultValue ?? "";
+					} else if (change.type === EntitySchemaPropertyType.Array) {
+						defValue = change.defaultValue ?? [];
+					} else if (change.type === EntitySchemaPropertyType.Object) {
+						defValue = change.defaultValue ?? {};
+					}
 				}
-			}
 
-			if (Is.notEmpty(defValue)) {
-				ObjectHelper.propertySet(newEntity, change.property as string, defValue);
+				if (Is.notEmpty(defValue)) {
+					ObjectHelper.propertySet(newEntity, change.property as string, defValue);
+				}
 			}
 		}
 
@@ -301,7 +317,7 @@ export class MigrationHelper {
 					});
 				}
 
-				newValue = transformEntityProperty(change.from, change.to, currentValue);
+				newValue = transformEntityProperty(entity as T, change.from, change.to, currentValue);
 			}
 
 			if (newValue === undefined && !(change.to.optional ?? false)) {
@@ -316,7 +332,9 @@ export class MigrationHelper {
 			}
 		}
 
-		// Removed properties are simply dropped.
+		if (Is.arrayValue(schemaDiff.removed) && Is.function(removeEntityProperty)) {
+			removeEntityProperty(entity as T, schemaDiff.removed);
+		}
 
 		return newEntity;
 	}

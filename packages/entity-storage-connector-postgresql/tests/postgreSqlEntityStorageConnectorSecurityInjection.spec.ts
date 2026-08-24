@@ -20,7 +20,7 @@ class TestType {
 	public value1!: string;
 }
 
-describe("PostgreSqlEntityStorageConnector — SQL injection guard", () => {
+describe("PostgreSqlEntityStorageConnector - SQL injection guard", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<TestType>(), () => EntitySchemaHelper.getSchema(TestType));
 	});

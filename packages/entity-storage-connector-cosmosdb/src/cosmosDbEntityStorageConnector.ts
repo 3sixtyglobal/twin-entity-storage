@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0.
 import {
 	BulkOperationType,
+	type CompositePath,
 	type Container,
 	CosmosClient,
 	type FeedOptions,
+	type IndexingPolicy,
 	type ItemDefinition,
 	type JSONValue,
 	type OperationInput,
@@ -13,18 +15,25 @@ import {
 	type SqlParameter,
 	type SqlQuerySpec
 } from "@azure/cosmos";
+import {
+	HealthCategory,
+	HealthStatus,
+	type IHealth,
+	type IHealthProviderComponent
+} from "@twin.org/api-models";
 import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	ConflictError,
 	GeneralError,
 	Guards,
-	HealthStatus,
-	type IHealth,
 	Is,
+	Mutex,
 	type IValidationFailure,
 	ObjectHelper,
+	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
@@ -40,6 +49,7 @@ import {
 	SortDirection
 } from "@twin.org/entity";
 import {
+	ConnectionHelper,
 	EntityStorageHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
@@ -53,9 +63,9 @@ import type { ICosmosDbEntityStorageConnectorConstructorOptions } from "./models
 /**
  * Class for performing entity storage operations using Cosmos DB.
  */
-export class CosmosDbEntityStorageConnector<
-	T = unknown
-> implements IEntityStorageMigrationConnector<T> {
+export class CosmosDbEntityStorageConnector<T = unknown>
+	implements IEntityStorageMigrationConnector<T>, IHealthProviderComponent
+{
 	/**
 	 * Runtime name for the class.
 	 */
@@ -78,6 +88,18 @@ export class CosmosDbEntityStorageConnector<
 	 * @internal
 	 */
 	private static readonly _PARTITION_KEY_VALUE: string = "root";
+
+	/**
+	 * Batch chunk size for bulk write operations.
+	 * @internal
+	 */
+	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
+	 * Number of bulk operation chunks to dispatch concurrently in setBatch.
+	 * @internal
+	 */
+	private static readonly _WRITE_CONCURRENCY: number = 10;
 
 	/**
 	 * The name for the schema.
@@ -104,22 +126,28 @@ export class CosmosDbEntityStorageConnector<
 	private readonly _primaryKey: IEntitySchemaProperty<T>;
 
 	/**
+	 * The name of the version property, if any.
+	 * @internal
+	 */
+	private readonly _versionKey?: string;
+
+	/**
 	 * The configuration for the connector.
 	 * @internal
 	 */
 	private readonly _config: ICosmosDbEntityStorageConnectorConfig;
 
 	/**
-	 * The Cosmos DB client.
+	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
 	 * @internal
 	 */
-	private readonly _client: CosmosClient;
+	private readonly _mutexTimeoutMs?: number;
 
 	/**
-	 * Container user for the data storage.
+	 * Unique identifier for this connector instance, used to track references in SharedStore.
 	 * @internal
 	 */
-	private readonly _container: Container;
+	private readonly _instanceId: string;
 
 	/**
 	 * Create a new instance of CosmosDbEntityStorageConnector.
@@ -163,20 +191,26 @@ export class CosmosDbEntityStorageConnector<
 		this._partitionContextIds = options.partitionContextIds;
 
 		this._primaryKey = EntitySchemaHelper.getPrimaryKey<T>(this._entitySchema);
+		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
 
 		this._config = options.config;
+		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
+		this._instanceId = RandomHelper.generateUuidV7("compact");
+	}
 
-		this._client = new CosmosClient({
-			endpoint: this._config.endpoint,
-			key: this._config.key,
-			connectionPolicy: {
-				enableEndpointDiscovery: !this._config.disableEndpointDiscovery
-			}
-		});
-
-		this._container = this._client
-			.database(this._config.databaseId)
-			.container(this._config.containerId);
+	/**
+	 * The component needs to be stopped when the node is closed.
+	 * @param nodeLoggingComponentType The node logging component type.
+	 * @returns Nothing.
+	 */
+	public async stop(nodeLoggingComponentType?: string): Promise<void> {
+		await ConnectionHelper.closeClient<CosmosClient>(
+			"cosmosDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async client => client.dispose()
+		);
 	}
 
 	/**
@@ -186,6 +220,7 @@ export class CosmosDbEntityStorageConnector<
 	 */
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+		const client = await this.getClient();
 
 		// Create the database if it does not exist
 		try {
@@ -212,7 +247,7 @@ export class CosmosDbEntityStorageConnector<
 					}
 				});
 
-				await this._client.databases.create({
+				await client.databases.create({
 					id: this._config.databaseId
 				});
 
@@ -257,13 +292,14 @@ export class CosmosDbEntityStorageConnector<
 					}
 				});
 
-				await this._client.database(this._config.databaseId).containers.create(
+				await client.database(this._config.databaseId).containers.create(
 					{
 						id: this._config.containerId,
 						partitionKey: {
 							kind: PartitionKeyKind.Hash,
 							paths: [`/${CosmosDbEntityStorageConnector._PARTITION_KEY}`]
-						}
+						},
+						indexingPolicy: this.buildIndexingPolicy()
 					},
 					{ offerThroughput: this._config.offerThroughput }
 				);
@@ -301,13 +337,12 @@ export class CosmosDbEntityStorageConnector<
 	 */
 	public async health(): Promise<IHealth[]> {
 		try {
-			await this._client
-				.database(this._config.databaseId)
-				.container(this._config.containerId)
-				.read();
+			const container = await this.getContainer();
+			await container.read();
 			return [
 				{
 					source: CosmosDbEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Ok,
 					description: "healthDescription",
 					data: { databaseId: this._config.databaseId, containerId: this._config.containerId }
@@ -317,6 +352,7 @@ export class CosmosDbEntityStorageConnector<
 			return [
 				{
 					source: CosmosDbEntityStorageConnector.CLASS_NAME,
+					category: HealthCategory.Connectivity,
 					status: HealthStatus.Error,
 					description: "healthDescription",
 					message: "connectionFailed",
@@ -353,11 +389,15 @@ export class CosmosDbEntityStorageConnector<
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
+			const container = await this.getContainer();
 			// No secondary index or conditions
 			if (Is.empty(secondaryIndex) && !Is.arrayValue(conditions)) {
-				const { resource: item } = await this._container
+				const { resource: item } = await container
 					.item(id, partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE)
 					.read<ItemDefinition>();
+				if (Is.empty(item)) {
+					return undefined;
+				}
 				return this.itemToEntity(item);
 			}
 
@@ -396,7 +436,7 @@ export class CosmosDbEntityStorageConnector<
 				parameters: conditionValues
 			};
 
-			const { resources: items } = await this._container.items.query(query).fetchAll();
+			const { resources: items } = await container.items.query(query).fetchAll();
 
 			if (items.length === 1) {
 				return this.itemToEntity(items[0]);
@@ -437,31 +477,91 @@ export class CosmosDbEntityStorageConnector<
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
+		const submittedVersion = Is.stringValue(this._versionKey)
+			? ObjectHelper.propertyGet<number>(entity, this._versionKey)
+			: undefined;
+		const hasVersionCheck =
+			!Is.empty(this._versionKey) && !Is.empty(submittedVersion) && submittedVersion > 0;
+
 		const prepared = EntityStorageHelper.prepareEntity(entity, this._entitySchema, undefined, {
 			nullBehavior: "omit"
 		});
 
 		const id = prepared[this._primaryKey.property] as string;
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			if (Is.arrayValue(conditions)) {
-				const item = this._container.item(
+			const container = await this.getContainer();
+			let itemEtag: string | undefined;
+
+			if (Is.stringValue(this._versionKey) || Is.arrayValue(conditions)) {
+				const item = container.item(
 					id,
 					partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
 				);
 				const { resource: itemData } = await item.read<ItemDefinition>();
-				if (Is.notEmpty(itemData) && !this.verifyConditions(conditions, itemData as T)) {
-					return;
+				if (!Is.empty(itemData)) {
+					if (hasVersionCheck) {
+						const storedVersion = ObjectHelper.propertyGet<number>(itemData, this._versionKey) ?? 0;
+						if (storedVersion !== submittedVersion) {
+							throw new ConflictError(
+								CosmosDbEntityStorageConnector.CLASS_NAME,
+								"optimisticLockFailed",
+								id
+							);
+						}
+					}
+					if (Is.arrayValue(conditions) && !this.verifyConditions(conditions, itemData as T)) {
+						if (Is.stringValue(this._versionKey)) {
+							throw new ConflictError(
+								CosmosDbEntityStorageConnector.CLASS_NAME,
+								"conditionFailed",
+								id
+							);
+						}
+						return;
+					}
+					itemEtag = ObjectHelper.propertyGet(itemData, "_etag");
+				}
+				if (Is.stringValue(this._versionKey)) {
+					const storedVersion = !Is.empty(itemData)
+						? (ObjectHelper.propertyGet<number>(itemData, this._versionKey) ?? 0)
+						: 0;
+					ObjectHelper.propertySet(prepared, this._versionKey, storedVersion + 1);
 				}
 			}
 
-			await this._container.items.upsert({
-				id,
-				[CosmosDbEntityStorageConnector._PARTITION_KEY]:
-					partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
-				...prepared
-			});
+			await container.items.upsert(
+				{
+					id,
+					[CosmosDbEntityStorageConnector._PARTITION_KEY]:
+						partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
+					...prepared
+				},
+				Is.stringValue(itemEtag)
+					? { accessCondition: { type: "IfMatch", condition: itemEtag } }
+					: undefined
+			);
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
+			if (Is.object<{ code?: number }>(err) && err.code === 412) {
+				throw new ConflictError(
+					CosmosDbEntityStorageConnector.CLASS_NAME,
+					"optimisticLockFailed",
+					id
+				);
+			}
 			if (BaseError.isAggregateError(err)) {
 				const errors = BaseError.fromAggregate(err);
 				if (BaseError.someErrorCode(errors, "ResourceNotFoundException")) {
@@ -483,6 +583,10 @@ export class CosmosDbEntityStorageConnector<
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -504,21 +608,37 @@ export class CosmosDbEntityStorageConnector<
 		);
 
 		try {
-			await this._container.items.executeBulkOperations(
-				preparedEntities.map(
-					prepared =>
-						({
-							operationType: BulkOperationType.Upsert,
-							partitionKey: partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
-							resourceBody: {
-								id: prepared[this._primaryKey.property] as string,
-								[CosmosDbEntityStorageConnector._PARTITION_KEY]:
-									partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE,
-								...(prepared as { [key: string]: unknown })
-							}
-						}) as OperationInput
-				)
-			);
+			const container = await this.getContainer();
+			const pk = partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE;
+			const chunkSize = CosmosDbEntityStorageConnector._BATCH_CHUNK_SIZE;
+			const concurrency = CosmosDbEntityStorageConnector._WRITE_CONCURRENCY;
+			const windowSize = chunkSize * concurrency;
+			for (let offset = 0; offset < preparedEntities.length; offset += windowSize) {
+				const window = preparedEntities.slice(offset, offset + windowSize);
+				const sends: Promise<void>[] = [];
+				for (let j = 0; j < window.length; j += chunkSize) {
+					const chunk = window.slice(j, j + chunkSize);
+					sends.push(
+						(async () => {
+							await container.items.executeBulkOperations(
+								chunk.map(
+									prepared =>
+										({
+											operationType: BulkOperationType.Upsert,
+											partitionKey: pk,
+											resourceBody: {
+												id: prepared[this._primaryKey.property] as string,
+												[CosmosDbEntityStorageConnector._PARTITION_KEY]: pk,
+												...(prepared as { [key: string]: unknown })
+											}
+										}) as OperationInput
+								)
+							);
+						})()
+					);
+				}
+				await Promise.all(sends);
+			}
 		} catch (err) {
 			throw new GeneralError(
 				CosmosDbEntityStorageConnector.CLASS_NAME,
@@ -539,10 +659,11 @@ export class CosmosDbEntityStorageConnector<
 		const pk = partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE;
 
 		try {
+			const container = await this.getContainer();
 			let continuationToken: string | undefined;
 			do {
 				const feedOptions: FeedOptions = { maxItemCount: 100, continuationToken };
-				const { resources, continuationToken: nextToken } = await this._container.items
+				const { resources, continuationToken: nextToken } = await container.items
 					.query<{ id: string }>(
 						{
 							query: `SELECT c.id FROM c WHERE c.${CosmosDbEntityStorageConnector._PARTITION_KEY} = @pk`,
@@ -560,7 +681,7 @@ export class CosmosDbEntityStorageConnector<
 						id: r.id,
 						partitionKey: pk
 					}));
-					await this._container.items.executeBulkOperations(operations);
+					await container.items.executeBulkOperations(operations);
 				}
 			} while (Is.stringValue(continuationToken));
 		} catch (err) {
@@ -588,21 +709,42 @@ export class CosmosDbEntityStorageConnector<
 
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+		const optimisticMutexKey = Is.stringValue(this._versionKey)
+			? this.buildOptimisticMutexKey(partitionKey, id)
+			: undefined;
+
+		if (Is.stringValue(optimisticMutexKey)) {
+			await Mutex.lock(optimisticMutexKey, {
+				throwOnTimeout: true,
+				timeoutMs: this._mutexTimeoutMs
+			});
+		}
 
 		try {
-			const item = this._container.item(
+			const container = await this.getContainer();
+			const item = container.item(
 				id,
 				partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
 			);
 			const { resource: itemData } = await item.read<ItemDefinition>();
 			if (Is.notEmpty(itemData)) {
 				if (Is.arrayValue(conditions) && !this.verifyConditions(conditions, itemData as T)) {
+					if (Is.stringValue(this._versionKey)) {
+						throw new ConflictError(
+							CosmosDbEntityStorageConnector.CLASS_NAME,
+							"conditionFailed",
+							id
+						);
+					}
 					return;
 				}
 
 				await item.delete();
 			}
 		} catch (err) {
+			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
+				throw err;
+			}
 			if (
 				BaseError.fromError(err) &&
 				Is.object<{ body?: { code?: string } }>(err) &&
@@ -618,6 +760,10 @@ export class CosmosDbEntityStorageConnector<
 				},
 				err
 			);
+		} finally {
+			if (Is.stringValue(optimisticMutexKey)) {
+				Mutex.unlock(optimisticMutexKey);
+			}
 		}
 	}
 
@@ -633,13 +779,14 @@ export class CosmosDbEntityStorageConnector<
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
 
 		try {
+			const container = await this.getContainer();
 			const operations: OperationInput[] = ids.map(id => ({
 				operationType: BulkOperationType.Delete,
 				id,
 				partitionKey: partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
 			}));
 
-			await this._container.items.executeBulkOperations(operations);
+			await container.items.executeBulkOperations(operations);
 		} catch (err) {
 			throw new GeneralError(
 				CosmosDbEntityStorageConnector.CLASS_NAME,
@@ -667,8 +814,9 @@ export class CosmosDbEntityStorageConnector<
 		});
 
 		try {
+			const container = await this.getContainer();
 			if (await this.containerExists()) {
-				await this._container.delete();
+				await container.delete();
 				await this.waitForContainerNotExists();
 			}
 
@@ -719,6 +867,19 @@ export class CosmosDbEntityStorageConnector<
 		EntityStorageHelper.validateProperties(this._entitySchema, properties);
 		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 
+		// Only the sort shapes covered by the composite indexes from buildIndexingPolicy are accepted.
+		if (Is.arrayValue(sortProperties)) {
+			const nonPrimarySorts = sortProperties.filter(
+				sortProperty => sortProperty.property !== this._primaryKey.property
+			);
+			if (nonPrimarySorts.length > 1) {
+				throw new GeneralError(CosmosDbEntityStorageConnector.CLASS_NAME, "sortUnsupported", {
+					properties: sortProperties.map(sortProperty => sortProperty.property),
+					primaryKey: this._primaryKey.property
+				});
+			}
+		}
+
 		if (!Is.empty(limit)) {
 			const validationFailures: IValidationFailure[] = [];
 			Validation.integer(nameof(limit), limit, validationFailures, undefined, { minValue: 1 });
@@ -730,17 +891,23 @@ export class CosmosDbEntityStorageConnector<
 		}
 
 		try {
+			const container = await this.getContainer();
 			const returnSize = limit ?? CosmosDbEntityStorageConnector._DEFAULT_LIMIT;
 
 			let orderByClause: string = "";
-			if (Array.isArray(sortProperties)) {
-				if (sortProperties.length > 1) {
-					throw new GeneralError(CosmosDbEntityStorageConnector.CLASS_NAME, "sortSingle");
-				}
-				for (const sortProperty of sortProperties) {
+			if (Is.arrayValue(sortProperties)) {
+				// The primary key is unique so no property after its first occurrence can affect
+				// the order, truncating keeps the ORDER BY within the provisioned composite indexes.
+				const primaryKeyIndex = sortProperties.findIndex(
+					sortProperty => sortProperty.property === this._primaryKey.property
+				);
+				const effectiveSorts =
+					primaryKeyIndex === -1 ? sortProperties : sortProperties.slice(0, primaryKeyIndex + 1);
+				const orderClauses = effectiveSorts.map(sortProperty => {
 					const direction = sortProperty.sortDirection === SortDirection.Ascending ? "asc" : "desc";
-					orderByClause = `ORDER BY c.${String(sortProperty.property)} ${direction}`;
-				}
+					return `c.${String(sortProperty.property)} ${direction}`;
+				});
+				orderByClause = `ORDER BY ${orderClauses.join(", ")}`;
 			}
 
 			const attributeNames: { [id: string]: string } = {};
@@ -764,13 +931,13 @@ export class CosmosDbEntityStorageConnector<
 			];
 			const queryPartitionKey = partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE;
 
-			// For sorted queries use OFFSET LIMIT — CosmosDB continuation tokens are
+			// For sorted queries use OFFSET LIMIT - CosmosDB continuation tokens are
 			// not reliably returned for ORDER BY queries across all service versions.
 			// The cursor is a numeric offset encoded as a string (same as SQL connectors).
 			const startIndex = Coerce.number(cursor) ?? 0;
 			sql = `${baseQuery} ${orderByClause} OFFSET ${startIndex} LIMIT ${returnSize + 1}`;
 			const sortedQuerySpecs: SqlQuerySpec = { query: sql, parameters: queryParameters };
-			const sortedResponse = await this._container.items
+			const sortedResponse = await container.items
 				.query(sortedQuerySpecs, {
 					partitionKey: queryPartitionKey,
 					maxItemCount: returnSize + 1
@@ -802,6 +969,7 @@ export class CosmosDbEntityStorageConnector<
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
 		EntityStorageHelper.validateConditionProperties(this._entitySchema, conditions);
 		try {
+			const container = await this.getContainer();
 			const contextIds = await ContextIdStore.getContextIds();
 			const partitionKey = ContextIdHelper.combinedContextKey(
 				contextIds,
@@ -830,7 +998,7 @@ export class CosmosDbEntityStorageConnector<
 					)
 				]
 			};
-			const { resources } = await this._container.items.query(querySpec).fetchAll();
+			const { resources } = await container.items.query(querySpec).fetchAll();
 			return resources[0] ?? 0;
 		} catch (err) {
 			throw new GeneralError(
@@ -844,22 +1012,47 @@ export class CosmosDbEntityStorageConnector<
 
 	/**
 	 * Get a unique list of all the context ids from the storage.
+	 * @param loggingComponentType The optional component type to use for logging skipped partition ids.
 	 * @returns The list of unique context ids.
 	 */
-	public async getPartitionContextIds(): Promise<IContextIds[]> {
+	public async getPartitionContextIds(
+		loggingComponentType?: string
+	): Promise<IContextIds[] | undefined> {
 		const partitionContextIds = this._partitionContextIds;
 		if (!Is.arrayValue(partitionContextIds)) {
-			return [];
+			return undefined;
 		}
 		try {
-			const { resources: partitionIds } = await this._container.items
+			const container = await this.getContainer();
+			const { resources: partitionIds } = await container.items
 				.query<string>({
 					query: `SELECT DISTINCT VALUE c.${CosmosDbEntityStorageConnector._PARTITION_KEY} FROM c`
 				})
 				.fetchAll();
-			return partitionIds
-				.filter(id => Is.stringValue(id))
-				.map(id => ContextIdHelper.shortSplit(partitionContextIds, id));
+			const contextIds: IContextIds[] = [];
+			const skipped: string[] = [];
+			for (const partitionId of partitionIds.filter(id => Is.stringValue(id))) {
+				const split = EntityStorageHelper.tryShortSplit(partitionContextIds, partitionId);
+				if (Is.undefined(split)) {
+					skipped.push(partitionId);
+				} else {
+					contextIds.push(split);
+				}
+			}
+			if (Is.arrayValue(skipped)) {
+				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
+				await nodeLogging?.log({
+					level: "warn",
+					source: CosmosDbEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "partitionIdsSkipped",
+					data: {
+						expected: partitionContextIds.length,
+						partitionIds: skipped.join(", ")
+					}
+				});
+			}
+			return contextIds;
 		} catch (err) {
 			throw new GeneralError(
 				CosmosDbEntityStorageConnector.CLASS_NAME,
@@ -868,6 +1061,14 @@ export class CosmosDbEntityStorageConnector<
 				err
 			);
 		}
+	}
+
+	/**
+	 * Get the connector implementation version.
+	 * @returns The connector implementation version.
+	 */
+	public connectorVersion(): number {
+		return 0;
 	}
 
 	/**
@@ -953,29 +1154,31 @@ export class CosmosDbEntityStorageConnector<
 	private async bulkCopy<U>(
 		sourceConnector: CosmosDbEntityStorageConnector<U>,
 		destConnector: CosmosDbEntityStorageConnector<U>,
-		partitions: IContextIds[],
+		partitions: IContextIds[] | undefined,
 		batchSize: number
 	): Promise<void> {
-		let partitionList: IContextIds[];
-		if (Is.arrayValue(partitions)) {
-			partitionList = partitions;
-		} else if (Is.arrayValue(sourceConnector._partitionContextIds)) {
-			partitionList = [];
-		} else {
-			partitionList = [{}];
+		// undefined → not partitioned: one pass with no partition key.
+		// []        → partitioned but empty: nothing to copy, return early.
+		// [{…}, …]  → partitioned with data: iterate over each partition.
+		if (partitions?.length === 0) {
+			return;
 		}
+		const partitionList = partitions ?? [{}];
 
 		for (let i = 0; i < partitionList.length; i++) {
-			const partitionKey =
-				ContextIdHelper.combinedContextKey(
-					partitionList[i],
-					sourceConnector._partitionContextIds
-				) ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE;
+			// Values from getPartitionContextIds are already short-form, so we join them
+			// directly rather than using combinedContextKey, which expects long-form input
+			// and calls guardAll (throwing if a registered handler rejects short-form values).
+			const partitionKey = Is.arrayValue(sourceConnector._partitionContextIds)
+				? sourceConnector._partitionContextIds.map(k => partitionList[i][k]).join("/")
+				: CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE;
 
 			let continuationToken: string | undefined;
 			do {
 				const feedOptions: FeedOptions = { maxItemCount: batchSize, continuationToken };
-				const { resources, continuationToken: nextToken } = await sourceConnector._container.items
+				const { resources, continuationToken: nextToken } = await (
+					await sourceConnector.getContainer()
+				).items
 					.query<ItemDefinition & Resource>(
 						{
 							query: `SELECT * FROM c WHERE c.${CosmosDbEntityStorageConnector._PARTITION_KEY} = @partitionId`,
@@ -1002,7 +1205,7 @@ export class CosmosDbEntityStorageConnector<
 							resourceBody: rest
 						})
 					);
-					await destConnector._container.items.executeBulkOperations(operations);
+					await (await destConnector.getContainer()).items.executeBulkOperations(operations);
 				}
 			} while (Is.stringValue(continuationToken));
 		}
@@ -1101,7 +1304,7 @@ export class CosmosDbEntityStorageConnector<
 		} else if (Is.array(comparator.value)) {
 			const dbValues = comparator.value.map(v => this.propertyToDbValue(v, type));
 			if (dbValues.length === 0 && comparator.comparison === ComparisonOperator.In) {
-				// CosmosDB rejects `IN ()` — return always-false sentinel (#141).
+				// CosmosDB rejects `IN ()` - return always-false sentinel (#141).
 				return "1=0";
 			}
 			const arrAttributeNames = [];
@@ -1269,6 +1472,17 @@ export class CosmosDbEntityStorageConnector<
 	}
 
 	/**
+	 * Build a mutex key for optimistic-locking critical sections.
+	 * @param partitionKey The resolved partition key.
+	 * @param id The entity id.
+	 * @returns The mutex key.
+	 * @internal
+	 */
+	private buildOptimisticMutexKey(partitionKey: string | undefined, id: string): string {
+		return `${CosmosDbEntityStorageConnector.CLASS_NAME}:optimistic:${this._config.databaseId}:${this._config.containerId}:${partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE}:${id}`;
+	}
+
+	/**
 	 * Convert an entity to an item.
 	 * @param item The item to convert.
 	 * @returns The entity.
@@ -1286,13 +1500,56 @@ export class CosmosDbEntityStorageConnector<
 	}
 
 	/**
+	 * Retrieve (or lazily create) the shared Cosmos DB client for this endpoint.
+	 * @returns The shared client.
+	 * @internal
+	 */
+	private async getClient(): Promise<CosmosClient> {
+		return ConnectionHelper.openClient<CosmosClient>(
+			"cosmosDbClients",
+			this.createClientId(),
+			this._instanceId,
+			this._mutexTimeoutMs,
+			async () =>
+				new CosmosClient({
+					endpoint: this._config.endpoint,
+					key: this._config.key,
+					connectionPolicy: {
+						enableEndpointDiscovery: !this._config.disableEndpointDiscovery
+					}
+				})
+		);
+	}
+
+	/**
+	 * Get the container for this connector's configured database and container.
+	 * @returns The container reference.
+	 * @internal
+	 */
+	private async getContainer(): Promise<Container> {
+		return (await this.getClient())
+			.database(this._config.databaseId)
+			.container(this._config.containerId);
+	}
+
+	/**
+	 * Build a stable cache key for the shared client based on connection parameters.
+	 * @returns The client cache key.
+	 * @internal
+	 */
+	private createClientId(): string {
+		return `${this._config.endpoint}|${this._config.databaseId}|${this._config.containerId}`;
+	}
+
+	/**
 	 * Check if the database exists.
 	 * @returns True if the database exists, false otherwise.
 	 * @internal
 	 */
 	private async databaseExists(): Promise<boolean> {
 		try {
-			const { resources: databaseList } = await this._client.databases.readAll().fetchAll();
+			const client = await this.getClient();
+			const { resources: databaseList } = await client.databases.readAll().fetchAll();
 
 			return databaseList.some((db: Resource) => db.id === this._config.databaseId);
 		} catch {
@@ -1316,13 +1573,52 @@ export class CosmosDbEntityStorageConnector<
 	}
 
 	/**
+	 * Build the composite indexes needed to serve multi-property ORDER BY queries.
+	 * Pairing each sortable property with the primary key in both directions covers all
+	 * four direction combinations, as Cosmos DB also serves each index reversed.
+	 * @returns The indexing policy for the container, or undefined if the schema has no
+	 * sortable properties.
+	 * @internal
+	 */
+	private buildIndexingPolicy(): IndexingPolicy | undefined {
+		const primaryKeyPath = `/${this._primaryKey.property as string}`;
+		const compositeIndexes: CompositePath[][] = [];
+
+		if (Is.arrayValue(this._entitySchema.properties)) {
+			for (const prop of this._entitySchema.properties) {
+				if (!prop.isPrimary && (Is.stringValue(prop.sortDirection) || prop.isSecondary)) {
+					const propertyPath = `/${prop.property as string}`;
+					compositeIndexes.push([
+						{ path: propertyPath, order: "ascending" },
+						{ path: primaryKeyPath, order: "ascending" }
+					]);
+					compositeIndexes.push([
+						{ path: propertyPath, order: "ascending" },
+						{ path: primaryKeyPath, order: "descending" }
+					]);
+				}
+			}
+		}
+
+		return compositeIndexes.length > 0
+			? {
+					indexingMode: "consistent",
+					automatic: true,
+					includedPaths: [{ path: "/*" }],
+					compositeIndexes
+				}
+			: undefined;
+	}
+
+	/**
 	 * Check if the container exists.
 	 * @returns True if the container exists, false otherwise.
 	 * @internal
 	 */
 	private async containerExists(): Promise<boolean> {
 		try {
-			const { resources: containers } = await this._client
+			const client = await this.getClient();
+			const { resources: containers } = await client
 				.database(this._config.databaseId)
 				.containers.readAll()
 				.fetchAll();

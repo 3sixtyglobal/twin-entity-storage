@@ -28,6 +28,7 @@
 		"datname",
 		"elem",
 		"Firestore",
+		"hotfixes",
 		"ILIKE",
 		"LONGTEXT",
 		"nameof",

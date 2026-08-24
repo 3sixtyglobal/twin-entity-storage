@@ -20,7 +20,7 @@ each successful migration.
 
 > **schemaName**: `string`
 
-The entity schema type name — primary key.
+The entity schema type name - primary key.
 
 ***
 
