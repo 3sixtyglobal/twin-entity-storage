@@ -191,9 +191,12 @@ export class MigrationHelper {
 				cursor = page.cursor;
 
 				if (Is.arrayValue(page.entities)) {
-					const transformedBatch: unknown[] = page.entities.map(entity =>
-						MigrationHelper.applyEntityChain(entity, steps)
-					);
+					const transformedBatch: unknown[] = [];
+
+					for (const entity of page.entities) {
+						transformedBatch.push(await MigrationHelper.applyEntityChain(entity, steps));
+					}
+
 					await target.setBatch(transformedBatch);
 					migrated += transformedBatch.length;
 				}
@@ -217,7 +220,10 @@ export class MigrationHelper {
 	 * Each step's fromProperties and toProperties are resolved by the caller before invocation.
 	 * @returns The entity transformed to the shape described by steps[last].toProperties.
 	 */
-	public static applyEntityChain(entity: unknown, steps: IResolvedMigrationStep[]): unknown {
+	public static async applyEntityChain(
+		entity: unknown,
+		steps: IResolvedMigrationStep[]
+	): Promise<unknown> {
 		let current: unknown = entity;
 		for (const step of steps) {
 			const diff = EntitySchemaDiffHelper.diff(
@@ -225,7 +231,7 @@ export class MigrationHelper {
 				step.toProperties,
 				step.renames
 			);
-			current = MigrationHelper.applyEntityTransform(
+			current = await MigrationHelper.applyEntityTransform(
 				current as Partial<unknown>,
 				diff,
 				step.transformEntityProperty,
@@ -246,12 +252,12 @@ export class MigrationHelper {
 	 * @throws GeneralError if a transformation is required for an object or array property but no transformEntityProperty function is provided.
 	 * @throws GeneralError if coercion of a modified property results in undefined for a non-optional target property.
 	 */
-	public static applyEntityTransform<T = unknown, U = unknown>(
+	public static async applyEntityTransform<T = unknown, U = unknown>(
 		entity: Partial<T>,
 		schemaDiff: IEntitySchemaDiff<T, U>,
 		transformEntityProperty?: EntityPropertyTransformer<T, U>,
 		removeEntityProperty?: EntityPropertyRemover<T>
-	): U {
+	): Promise<U> {
 		const newEntity = {} as U;
 
 		for (const property of schemaDiff.unchanged) {
@@ -317,7 +323,7 @@ export class MigrationHelper {
 					});
 				}
 
-				newValue = transformEntityProperty(entity as T, change.from, change.to, currentValue);
+				newValue = await transformEntityProperty(entity as T, change.from, change.to, currentValue);
 			}
 
 			if (newValue === undefined && !(change.to.optional ?? false)) {
@@ -333,7 +339,7 @@ export class MigrationHelper {
 		}
 
 		if (Is.arrayValue(schemaDiff.removed) && Is.function(removeEntityProperty)) {
-			removeEntityProperty(entity as T, schemaDiff.removed);
+			await removeEntityProperty(entity as T, schemaDiff.removed);
 		}
 
 		return newEntity;

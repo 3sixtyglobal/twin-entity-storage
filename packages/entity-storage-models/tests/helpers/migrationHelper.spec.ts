@@ -46,84 +46,111 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		return { property, type, ...extra };
 	}
 
-	test("copies unchanged properties from source entity", () => {
+	test("copies unchanged properties from source entity", async () => {
 		const d = diff({
 			unchanged: [
 				prop("id", EntitySchemaPropertyType.String),
 				prop("value", EntitySchemaPropertyType.String)
 			]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ id: "1", value: "hello" },
 			d
 		);
 		expect(result).toEqual({ id: "1", value: "hello" });
 	});
 
-	test("added non-optional boolean property defaults to false", () => {
+	test("added non-optional boolean property defaults to false", async () => {
 		const d = diff({ added: [prop("active", EntitySchemaPropertyType.Boolean)] });
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>({}, d);
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{},
+			d
+		);
 		expect(result.active).toBe(false);
 	});
 
-	test("added non-optional number property defaults to 0", () => {
+	test("added non-optional number property defaults to 0", async () => {
 		const d = diff({ added: [prop("count", EntitySchemaPropertyType.Number)] });
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>({}, d);
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{},
+			d
+		);
 		expect(result.count).toBe(0);
 	});
 
-	test("added non-optional integer property defaults to 0", () => {
+	test("added non-optional integer property defaults to 0", async () => {
 		const d = diff({ added: [prop("age", EntitySchemaPropertyType.Integer)] });
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>({}, d);
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{},
+			d
+		);
 		expect(result.age).toBe(0);
 	});
 
-	test("added non-optional string property defaults to empty string", () => {
+	test("added non-optional string property defaults to empty string", async () => {
 		const d = diff({ added: [prop("name", EntitySchemaPropertyType.String)] });
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>({}, d);
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{},
+			d
+		);
 		expect(result.name).toBe("");
 	});
 
-	test("added non-optional array property defaults to []", () => {
+	test("added non-optional array property defaults to []", async () => {
 		const d = diff({ added: [prop("tags", EntitySchemaPropertyType.Array)] });
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>({}, d);
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{},
+			d
+		);
 		expect(result.tags).toEqual([]);
 	});
 
-	test("added non-optional object property defaults to {}", () => {
+	test("added non-optional object property defaults to {}", async () => {
 		const d = diff({ added: [prop("meta", EntitySchemaPropertyType.Object)] });
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>({}, d);
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{},
+			d
+		);
 		expect(result.meta).toEqual({});
 	});
 
-	test("added non-optional string property uses defaultValue when provided", () => {
+	test("added non-optional string property uses defaultValue when provided", async () => {
 		const d = diff({
 			added: [prop("status", EntitySchemaPropertyType.String, { defaultValue: "active" })]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>({}, d);
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{},
+			d
+		);
 		expect(result.status).toBe("active");
 	});
 
-	test("added non-optional integer property uses defaultValue when provided", () => {
+	test("added non-optional integer property uses defaultValue when provided", async () => {
 		const d = diff({
 			added: [prop("score", EntitySchemaPropertyType.Integer, { defaultValue: 42 })]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>({}, d);
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{},
+			d
+		);
 		expect(result.score).toBe(42);
 	});
 
-	test("added optional property defaults to undefined", () => {
+	test("added optional property defaults to undefined", async () => {
 		const d = diff({ added: [prop("note", EntitySchemaPropertyType.String, { optional: true })] });
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>({}, d);
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{},
+			d
+		);
 		expect(result.note).toBeUndefined();
 	});
 
-	test("removed property is not present in result", () => {
+	test("removed property is not present in result", async () => {
 		const d = diff({
 			unchanged: [prop("id", EntitySchemaPropertyType.String)],
 			removed: [prop("legacy", EntitySchemaPropertyType.String)]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ id: "1", legacy: "old" },
 			d
 		);
@@ -131,7 +158,7 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		expect(result.id).toBe("1");
 	});
 
-	test("modified property: string value coerced to boolean", () => {
+	test("modified property: string value coerced to boolean", async () => {
 		const d = diff({
 			modified: [
 				{
@@ -140,14 +167,14 @@ describe("MigrationHelper.applyEntityTransform", () => {
 				}
 			]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ flag: "true" },
 			d
 		);
 		expect(result.flag).toBe(true);
 	});
 
-	test("modified property: string value coerced to number", () => {
+	test("modified property: string value coerced to number", async () => {
 		const d = diff({
 			modified: [
 				{
@@ -156,14 +183,14 @@ describe("MigrationHelper.applyEntityTransform", () => {
 				}
 			]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ qty: "42" },
 			d
 		);
 		expect(result.qty).toBe(42);
 	});
 
-	test("modified property: string value coerced to integer", () => {
+	test("modified property: string value coerced to integer", async () => {
 		const d = diff({
 			modified: [
 				{
@@ -172,14 +199,14 @@ describe("MigrationHelper.applyEntityTransform", () => {
 				}
 			]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ qty: "7" },
 			d
 		);
 		expect(result.qty).toBe(7);
 	});
 
-	test("modified property: number value coerced to string", () => {
+	test("modified property: number value coerced to string", async () => {
 		const d = diff({
 			modified: [
 				{
@@ -188,14 +215,14 @@ describe("MigrationHelper.applyEntityTransform", () => {
 				}
 			]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ code: 99 },
 			d
 		);
 		expect(result.code).toBe("99");
 	});
 
-	test("modified property: array type without transformEntityProperty throws GeneralError", () => {
+	test("modified property: array type without transformEntityProperty throws GeneralError", async () => {
 		const d = diff({
 			modified: [
 				{
@@ -204,12 +231,12 @@ describe("MigrationHelper.applyEntityTransform", () => {
 				}
 			]
 		});
-		expect(() =>
+		await expect(
 			MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>({ data: "raw" }, d)
-		).toThrow(GeneralError);
+		).rejects.toThrow(GeneralError);
 	});
 
-	test("modified property: object type without transformEntityProperty throws GeneralError", () => {
+	test("modified property: object type without transformEntityProperty throws GeneralError", async () => {
 		const d = diff({
 			modified: [
 				{
@@ -218,12 +245,12 @@ describe("MigrationHelper.applyEntityTransform", () => {
 				}
 			]
 		});
-		expect(() =>
+		await expect(
 			MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>({ meta: "raw" }, d)
-		).toThrow(GeneralError);
+		).rejects.toThrow(GeneralError);
 	});
 
-	test("modified property: array type with transformEntityProperty uses the return value", () => {
+	test("modified property: array type with transformEntityProperty uses the return value", async () => {
 		const d = diff({
 			modified: [
 				{
@@ -232,7 +259,7 @@ describe("MigrationHelper.applyEntityTransform", () => {
 				}
 			]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ tags: "a,b,c" },
 			d,
 			(entity, f, t, v) => (v as string).split(",")
@@ -240,13 +267,30 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		expect(result.tags).toEqual(["a", "b", "c"]);
 	});
 
-	test("combination: unchanged, added, and removed properties all handled correctly", () => {
+	test("modified property: array type with async transformEntityProperty uses the return value", async () => {
+		const d = diff({
+			modified: [
+				{
+					from: prop("tags", EntitySchemaPropertyType.String),
+					to: prop("tags", EntitySchemaPropertyType.Array)
+				}
+			]
+		});
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ tags: "a,b,c" },
+			d,
+			async (entity, f, t, v) => (v as string).split(",")
+		);
+		expect(result.tags).toEqual(["a", "b", "c"]);
+	});
+
+	test("combination: unchanged, added, and removed properties all handled correctly", async () => {
 		const d = diff({
 			unchanged: [prop("id", EntitySchemaPropertyType.String)],
 			added: [prop("newField", EntitySchemaPropertyType.Number)],
 			removed: [prop("old", EntitySchemaPropertyType.String)]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ id: "42", old: "gone" },
 			d
 		);
@@ -255,11 +299,11 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		expect(result.old).toBeUndefined();
 	});
 
-	test("removed property: removeEntityProperty hook called with original entity and removed schemas", () => {
+	test("removed property: removeEntityProperty hook called with original entity and removed schemas", async () => {
 		const removed = [prop("old", EntitySchemaPropertyType.String)];
 		const d = diff({ removed });
 		const calls: { entity: unknown; props: unknown[] }[] = [];
-		MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ old: "gone" },
 			d,
 			undefined,
@@ -272,10 +316,27 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		expect(calls[0].props).toEqual(removed);
 	});
 
-	test("removed property: removeEntityProperty hook not called when no properties are removed", () => {
+	test("removed property: async removeEntityProperty hook called with original entity and removed schemas", async () => {
+		const removed = [prop("old", EntitySchemaPropertyType.String)];
+		const d = diff({ removed });
+		const calls: { entity: unknown; props: unknown[] }[] = [];
+		await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ old: "gone" },
+			d,
+			undefined,
+			async (entity, removedProperties) => {
+				calls.push({ entity, props: removedProperties });
+			}
+		);
+		expect(calls).toHaveLength(1);
+		expect(calls[0].entity).toEqual({ old: "gone" });
+		expect(calls[0].props).toEqual(removed);
+	});
+
+	test("removed property: removeEntityProperty hook not called when no properties are removed", async () => {
 		const d = diff({ unchanged: [prop("id", EntitySchemaPropertyType.String)] });
 		const calls: unknown[] = [];
-		MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ id: "1" },
 			d,
 			undefined,
@@ -286,7 +347,21 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		expect(calls).toHaveLength(0);
 	});
 
-	test("modified property: property renamed - value moved to new property name", () => {
+	test("removed property: async removeEntityProperty hook not called when no properties are removed", async () => {
+		const d = diff({ unchanged: [prop("id", EntitySchemaPropertyType.String)] });
+		const calls: unknown[] = [];
+		await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ id: "1" },
+			d,
+			undefined,
+			async (entity, removedProperties) => {
+				calls.push({ entity, removedProperties });
+			}
+		);
+		expect(calls).toHaveLength(0);
+	});
+
+	test("modified property: property renamed - value moved to new property name", async () => {
 		const d = diff({
 			modified: [
 				{
@@ -295,7 +370,7 @@ describe("MigrationHelper.applyEntityTransform", () => {
 				}
 			]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ qty: "5" },
 			d
 		);
@@ -303,7 +378,7 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		expect(result.qty).toBeUndefined();
 	});
 
-	test("modified property: missing source value on non-optional boolean target throws GeneralError", () => {
+	test("modified property: missing source value on non-optional boolean target throws GeneralError", async () => {
 		const d = diff({
 			modified: [
 				{
@@ -312,10 +387,10 @@ describe("MigrationHelper.applyEntityTransform", () => {
 				}
 			]
 		});
-		expect(() => MigrationHelper.applyEntityTransform({}, d)).toThrow(GeneralError);
+		await expect(MigrationHelper.applyEntityTransform({}, d)).rejects.toThrow(GeneralError);
 	});
 
-	test("modified property: missing source value on non-optional number target throws GeneralError", () => {
+	test("modified property: missing source value on non-optional number target throws GeneralError", async () => {
 		const d = diff({
 			modified: [
 				{
@@ -324,10 +399,10 @@ describe("MigrationHelper.applyEntityTransform", () => {
 				}
 			]
 		});
-		expect(() => MigrationHelper.applyEntityTransform({}, d)).toThrow(GeneralError);
+		await expect(MigrationHelper.applyEntityTransform({}, d)).rejects.toThrow(GeneralError);
 	});
 
-	test("modified property: missing source value on non-optional string target throws GeneralError", () => {
+	test("modified property: missing source value on non-optional string target throws GeneralError", async () => {
 		const d = diff({
 			modified: [
 				{
@@ -336,10 +411,10 @@ describe("MigrationHelper.applyEntityTransform", () => {
 				}
 			]
 		});
-		expect(() => MigrationHelper.applyEntityTransform({}, d)).toThrow(GeneralError);
+		await expect(MigrationHelper.applyEntityTransform({}, d)).rejects.toThrow(GeneralError);
 	});
 
-	test("modified property: missing source value on optional target is allowed through as undefined", () => {
+	test("modified property: missing source value on optional target is allowed through as undefined", async () => {
 		const d = diff({
 			modified: [
 				{
@@ -348,7 +423,10 @@ describe("MigrationHelper.applyEntityTransform", () => {
 				}
 			]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>({}, d);
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{},
+			d
+		);
 		expect(result.note).toBeUndefined();
 	});
 
@@ -356,52 +434,52 @@ describe("MigrationHelper.applyEntityTransform", () => {
 	// Issue #185 Bug 2 - "added" properties must preserve existing source values
 	// ---
 
-	test("added non-optional string property preserves existing source value over empty-string default", () => {
+	test("added non-optional string property preserves existing source value over empty-string default", async () => {
 		const d = diff({ added: [prop("organizationId", EntitySchemaPropertyType.String)] });
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ id: "1", organizationId: "org-abc" },
 			d
 		);
 		expect(result.organizationId).toBe("org-abc");
 	});
 
-	test("added non-optional string property preserves existing source value over provided defaultValue", () => {
+	test("added non-optional string property preserves existing source value over provided defaultValue", async () => {
 		const d = diff({
 			added: [prop("status", EntitySchemaPropertyType.String, { defaultValue: "active" })]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ status: "custom" },
 			d
 		);
 		expect(result.status).toBe("custom");
 	});
 
-	test("added non-optional boolean property preserves existing source value over boolean default", () => {
+	test("added non-optional boolean property preserves existing source value over boolean default", async () => {
 		const d = diff({ added: [prop("active", EntitySchemaPropertyType.Boolean)] });
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ active: true },
 			d
 		);
 		expect(result.active).toBe(true);
 	});
 
-	test("added non-optional number property preserves existing source value over zero default", () => {
+	test("added non-optional number property preserves existing source value over zero default", async () => {
 		const d = diff({ added: [prop("count", EntitySchemaPropertyType.Number)] });
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ count: 42 },
 			d
 		);
 		expect(result.count).toBe(42);
 	});
 
-	test("unchanged property absent from entity is copied as undefined", () => {
+	test("unchanged property absent from entity is copied as undefined", async () => {
 		const d = diff({
 			unchanged: [
 				prop("id", EntitySchemaPropertyType.String),
 				prop("optional", EntitySchemaPropertyType.String, { optional: true })
 			]
 		});
-		const result = MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
 			{ id: "1" },
 			d
 		);
@@ -424,13 +502,13 @@ describe("MigrationHelper.applyEntityChain", () => {
 		);
 	}
 
-	test("returns entity unchanged when steps list is empty", () => {
+	test("returns entity unchanged when steps list is empty", async () => {
 		const entity: { [key: string]: unknown } = { id: "1", name: "Alice" };
-		const result = MigrationHelper.applyEntityChain(entity, []);
+		const result = await MigrationHelper.applyEntityChain(entity, []);
 		expect(result).toEqual(entity);
 	});
 
-	test("applies a single step - adds a new optional field", () => {
+	test("applies a single step - adds a new optional field", async () => {
 		const step: IResolvedMigrationStep = {
 			fromProperties: makeProps(
 				["id", EntitySchemaPropertyType.String],
@@ -442,7 +520,7 @@ describe("MigrationHelper.applyEntityChain", () => {
 				["extra", EntitySchemaPropertyType.String, true]
 			)
 		};
-		const result = MigrationHelper.applyEntityChain({ id: "1", name: "Alice" }, [step]) as {
+		const result = (await MigrationHelper.applyEntityChain({ id: "1", name: "Alice" }, [step])) as {
 			[key: string]: unknown;
 		};
 		expect(result.id).toBe("1");
@@ -450,7 +528,7 @@ describe("MigrationHelper.applyEntityChain", () => {
 		expect(result.extra).toBeUndefined();
 	});
 
-	test("applies a single step - adds a new required string field with default", () => {
+	test("applies a single step - adds a new required string field with default", async () => {
 		const step: IResolvedMigrationStep = {
 			fromProperties: makeProps(["id", EntitySchemaPropertyType.String]),
 			toProperties: [
@@ -458,13 +536,13 @@ describe("MigrationHelper.applyEntityChain", () => {
 				{ property: "status", type: EntitySchemaPropertyType.String, defaultValue: "active" }
 			] as unknown as IEntitySchemaProperty[]
 		};
-		const result = MigrationHelper.applyEntityChain({ id: "x" }, [step]) as {
+		const result = (await MigrationHelper.applyEntityChain({ id: "x" }, [step])) as {
 			[key: string]: unknown;
 		};
 		expect(result.status).toBe("active");
 	});
 
-	test("applies multiple steps in sequence - each step's output feeds the next", () => {
+	test("applies multiple steps in sequence - each step's output feeds the next", async () => {
 		const step1: IResolvedMigrationStep = {
 			fromProperties: makeProps(["id", EntitySchemaPropertyType.String]),
 			toProperties: makeProps(
@@ -484,7 +562,7 @@ describe("MigrationHelper.applyEntityChain", () => {
 			)
 		};
 
-		const result = MigrationHelper.applyEntityChain({ id: "x" }, [step1, step2]) as {
+		const result = (await MigrationHelper.applyEntityChain({ id: "x" }, [step1, step2])) as {
 			[key: string]: unknown;
 		};
 
@@ -493,7 +571,7 @@ describe("MigrationHelper.applyEntityChain", () => {
 		expect(result.label).toBe("");
 	});
 
-	test("applies a rename via the renames option on the step", () => {
+	test("applies a rename via the renames option on the step", async () => {
 		const step: IResolvedMigrationStep = {
 			fromProperties: makeProps(
 				["id", EntitySchemaPropertyType.String],
@@ -505,7 +583,7 @@ describe("MigrationHelper.applyEntityChain", () => {
 			),
 			renames: [{ from: "qty", to: "quantity" }]
 		};
-		const result = MigrationHelper.applyEntityChain({ id: "1", qty: "5" }, [step]) as {
+		const result = (await MigrationHelper.applyEntityChain({ id: "1", qty: "5" }, [step])) as {
 			[key: string]: unknown;
 		};
 		expect(result.quantity).toBe("5");

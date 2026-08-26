@@ -11,4 +11,4 @@ export type EntityPropertyTransformer<T = unknown, U = unknown> = (
 	schema1Property: IEntitySchemaProperty<T>,
 	schemaProperty2: IEntitySchemaProperty<U>,
 	value: unknown
-) => unknown;
+) => unknown | Promise<unknown>;
