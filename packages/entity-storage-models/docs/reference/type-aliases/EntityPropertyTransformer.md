@@ -1,6 +1,6 @@
 # Type Alias: EntityPropertyTransformer\<T, U\>
 
-> **EntityPropertyTransformer**\<`T`, `U`\> = (`entity`, `schema1Property`, `schemaProperty2`, `value`) => `unknown`
+> **EntityPropertyTransformer**\<`T`, `U`\> = (`entity`, `schema1Property`, `schemaProperty2`, `value`) => `unknown` \| `Promise`\<`unknown`\>
 
 Type for the optional transformEntityProperty function.
 Used in migration steps for custom property transformations.
@@ -35,4 +35,4 @@ Used in migration steps for custom property transformations.
 
 ## Returns
 
-`unknown`
+`unknown` \| `Promise`\<`unknown`\>
