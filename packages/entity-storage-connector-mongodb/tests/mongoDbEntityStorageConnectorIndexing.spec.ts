@@ -9,6 +9,7 @@ import {
 	property
 } from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
+import { MongoClient } from "mongodb";
 import { TEST_MONGODB_CONFIG } from "./setupTestEnv.js";
 import { MongoDbEntityStorageConnector } from "../src/mongoDbEntityStorageConnector.js";
 
@@ -57,6 +58,11 @@ function createUnindexedConnector(): MongoDbEntityStorageConnector<UnindexedTest
 			collection: `${TEST_MONGODB_CONFIG.collection}_unindexed_${Date.now()}`
 		}
 	});
+}
+
+function buildConnectionUrl(): string {
+	const port = TEST_MONGODB_CONFIG.port ?? 27017;
+	return `mongodb://${TEST_MONGODB_CONFIG.host}:${port}/${TEST_MONGODB_CONFIG.database}`;
 }
 
 describe("MongoDbEntityStorageConnector", () => {
@@ -143,4 +149,76 @@ describe("MongoDbEntityStorageConnector", () => {
 		},
 		300_000
 	);
+
+	test("bootstrap returns true when a non-unique index already exists on the primary property", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_primary_conflict_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			// Seed a non-unique index on the primary property; bootstrap would normally create it unique.
+			await col.createIndex({ id: 1 });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			// The pre-existing non-unique index must not have been overwritten.
+			const indexes = await col.listIndexes().toArray();
+			const idIndex = indexes.find(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && key.id === 1;
+			});
+			expect(idIndex).toBeDefined();
+			expect(idIndex?.unique).toBeUndefined();
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
+
+	test("bootstrap returns true when a sparse index already exists on a secondary property", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_secondary_conflict_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			// Seed a sparse index on the secondary property; bootstrap would normally create a plain one.
+			await col.createIndex({ category: 1 }, { sparse: true });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			// The sparse index must not have been overwritten.
+			const indexes = await col.listIndexes().toArray();
+			const catIndex = indexes.find(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && key.category === 1;
+			});
+			expect(catIndex).toBeDefined();
+			expect(catIndex?.sparse).toBe(true);
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
 });

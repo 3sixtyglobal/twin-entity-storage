@@ -229,13 +229,66 @@ export class MongoDbEntityStorageConnector<T = unknown>
 				}
 			});
 
+			let existingIndexes: Document[] = [];
+			try {
+				existingIndexes = await collection.listIndexes().toArray();
+			} catch {
+				// Collection does not exist yet; all indexes will be created below.
+			}
+
+			let bootstrapSuccess = true;
+
 			for (const prop of this._entitySchema.properties ?? []) {
+				const propName = String(prop.property);
+				const existingOnKey = existingIndexes.find(idx => {
+					const key = idx.key as { [k: string]: number };
+					return Object.keys(key).length === 1 && key[propName] === 1;
+				});
+
 				if (prop.isPrimary === true) {
-					await collection.createIndex({ [String(prop.property)]: 1 }, { unique: true });
+					if (Is.empty(existingOnKey)) {
+						try {
+							await collection.createIndex({ [propName]: 1 }, { unique: true });
+						} catch (propError) {
+							await nodeLogging?.log({
+								level: "error",
+								source: MongoDbEntityStorageConnector.CLASS_NAME,
+								ts: Date.now(),
+								message: "indexCreateFailed",
+								error: BaseError.fromError(propError),
+								data: { property: propName }
+							});
+							bootstrapSuccess = false;
+						}
+					} else if (!existingOnKey.unique) {
+						await nodeLogging?.log({
+							level: "warn",
+							source: MongoDbEntityStorageConnector.CLASS_NAME,
+							ts: Date.now(),
+							message: "indexOptionsConflict",
+							data: { property: propName }
+						});
+					}
 				} else if (prop.isSecondary === true || !Is.empty(prop.sortDirection)) {
-					await collection.createIndex({ [String(prop.property)]: 1 });
+					if (Is.empty(existingOnKey)) {
+						try {
+							await collection.createIndex({ [propName]: 1 });
+						} catch (propError) {
+							await nodeLogging?.log({
+								level: "error",
+								source: MongoDbEntityStorageConnector.CLASS_NAME,
+								ts: Date.now(),
+								message: "indexCreateFailed",
+								error: BaseError.fromError(propError),
+								data: { property: propName }
+							});
+							bootstrapSuccess = false;
+						}
+					}
 				}
 			}
+
+			return bootstrapSuccess;
 		} catch (error) {
 			await nodeLogging?.log({
 				level: "error",
@@ -249,8 +302,6 @@ export class MongoDbEntityStorageConnector<T = unknown>
 			});
 			return false;
 		}
-
-		return true;
 	}
 
 	/**
