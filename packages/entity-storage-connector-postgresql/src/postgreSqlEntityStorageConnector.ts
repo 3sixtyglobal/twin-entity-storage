@@ -298,12 +298,15 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 						JOIN pg_class t ON t.oid = ix.indrelid
 						JOIN pg_namespace n ON n.oid = t.relnamespace
 						JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ix.indkey[0]
+						JOIN pg_class i ON i.oid = ix.indexrelid
+						JOIN pg_am am ON am.oid = i.relam
 						WHERE n.nspname = 'public'
 							AND t.relname = $1
 							AND a.attname = $2
 							AND ix.indisvalid
 							AND ix.indisready
 							AND ix.indpred IS NULL
+							AND am.amname = 'btree'
 						LIMIT 1`,
 						[this._config.tableName, columnName] as ParameterOrJSON<never>[]
 					);

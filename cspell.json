@@ -20,6 +20,7 @@
 	],
 	"words": [
 		"abbrev",
+		"amname",
 		"attname",
 		"attnum",
 		"attrelid",
@@ -33,6 +34,7 @@
 		"Firestore",
 		"hotfixes",
 		"ILIKE",
+		"indexrelid",
 		"indisready",
 		"indisvalid",
 		"indkey",
@@ -42,6 +44,7 @@
 		"nameof",
 		"nspname",
 		"regclass",
+		"relam",
 		"relname",
 		"relnamespace",
 		"scylladb",

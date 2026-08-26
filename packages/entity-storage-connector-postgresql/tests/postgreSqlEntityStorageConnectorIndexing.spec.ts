@@ -430,6 +430,45 @@ describe("PostgreSqlEntityStorageConnector", () => {
 	);
 
 	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only covered by a non-btree index",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_brinidx_${Date.now()}`;
+			const connector = new PostgreSqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			let sql: postgres.Sql | undefined;
+
+			try {
+				sql = openTestConnection();
+
+				await sql.unsafe(
+					`CREATE TABLE "${tableName}" ("id" VARCHAR(255) PRIMARY KEY, "category" VARCHAR(255), "value" INT)`
+				);
+				await sql.unsafe(
+					`CREATE INDEX "manual_brin_cat_idx" ON "${tableName}" USING brin ("category")`
+				);
+
+				await connector.bootstrap();
+
+				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+				expect(indexCount).toBe(2);
+			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
 		"does not create a duplicate index after an index naming-scheme change",
 		async () => {
 			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_oldscheme_${Date.now()}`;
