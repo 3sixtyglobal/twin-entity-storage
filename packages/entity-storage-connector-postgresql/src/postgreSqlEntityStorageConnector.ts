@@ -224,32 +224,37 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
 		try {
-			const dbConnection = await this.getClient();
-
-			const databaseExists = await this.databaseExists();
-			if (!databaseExists) {
-				await nodeLogging?.log({
-					level: "info",
-					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
-					ts: Date.now(),
-					message: "databaseCreating",
-					data: {
-						databaseName: this._config.database
-					}
-				});
-				await dbConnection.unsafe(`CREATE DATABASE "${this._config.database}";`);
-				await this.waitForDatabaseExists();
-			} else {
-				await nodeLogging?.log({
-					level: "info",
-					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
-					ts: Date.now(),
-					message: "databaseExists",
-					data: {
-						databaseName: this._config.database
-					}
-				});
+			const adminClient = postgres(this.createConnectionConfig(false));
+			try {
+				const databaseExists = await this.databaseExists(adminClient);
+				if (!databaseExists) {
+					await nodeLogging?.log({
+						level: "info",
+						source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+						ts: Date.now(),
+						message: "databaseCreating",
+						data: {
+							databaseName: this._config.database
+						}
+					});
+					await adminClient.unsafe(`CREATE DATABASE "${this._config.database}";`);
+					await this.waitForDatabaseExists(adminClient);
+				} else {
+					await nodeLogging?.log({
+						level: "info",
+						source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+						ts: Date.now(),
+						message: "databaseExists",
+						data: {
+							databaseName: this._config.database
+						}
+					});
+				}
+			} finally {
+				await adminClient.end();
 			}
+
+			const dbConnection = await this.getClient();
 
 			const tableExists = await this.tableExists();
 
@@ -355,7 +360,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	public async stop(): Promise<void> {
 		await ConnectionHelper.closeClient<postgres.Sql>(
 			"postgreSqlConnections",
-			`${this._config.host}|${this._config.port ?? 5432}|${this._config.user}`,
+			`${this._config.host}|${this._config.port ?? 5432}|${this._config.user}|${this._config.database}`,
 			this._instanceId,
 			this._mutexTimeoutMs,
 			async sql => sql.end()
@@ -1195,13 +1200,13 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 
 	/**
 	 * Check if the database exists.
+	 * @param adminClient The server-level connection to use for the check.
 	 * @returns True if the database exists, false otherwise.
 	 * @internal
 	 */
-	private async databaseExists(): Promise<boolean> {
+	private async databaseExists(adminClient: postgres.Sql): Promise<boolean> {
 		try {
-			const dbConnection = await this.getClient();
-			const res = await dbConnection.unsafe(
+			const res = await adminClient.unsafe(
 				"SELECT datname FROM pg_catalog.pg_database WHERE datname = $1",
 				[this._config.database] as postgres.ParameterOrJSON<never>[]
 			);
@@ -1213,12 +1218,13 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 
 	/**
 	 * Wait for a database to exist.
+	 * @param adminClient The server-level connection to use for the check.
 	 * @returns Nothing.
 	 * @internal
 	 */
-	private async waitForDatabaseExists(): Promise<void> {
+	private async waitForDatabaseExists(adminClient: postgres.Sql): Promise<void> {
 		for (let attempt = 0; attempt < 20; attempt++) {
-			const databaseExists = await this.databaseExists();
+			const databaseExists = await this.databaseExists(adminClient);
 			if (databaseExists) {
 				break;
 			}
@@ -1275,14 +1281,14 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Retrieve (or lazily create) the shared postgres connection for this endpoint.
+	 * Retrieve (or lazily create) the shared postgres connection for this endpoint and database.
 	 * @returns The shared connection.
 	 * @internal
 	 */
 	private async getClient(): Promise<postgres.Sql> {
 		return ConnectionHelper.openClient<postgres.Sql>(
 			"postgreSqlConnections",
-			`${this._config.host}|${this._config.port ?? 5432}|${this._config.user}`,
+			`${this._config.host}|${this._config.port ?? 5432}|${this._config.user}|${this._config.database}`,
 			this._instanceId,
 			this._mutexTimeoutMs,
 			async () => postgres(this.createConnectionConfig())
@@ -1291,10 +1297,13 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 
 	/**
 	 * Create a new DB connection configuration.
+	 * @param includeDatabase Whether to include the database name in the options.
 	 * @returns The PostgreSql connection configuration.
 	 * @internal
 	 */
-	private createConnectionConfig(): postgres.Options<{ [key: string]: postgres.PostgresType }> {
+	private createConnectionConfig(
+		includeDatabase: boolean = true
+	): postgres.Options<{ [key: string]: postgres.PostgresType }> {
 		const opts: { [key: string]: unknown } = {
 			host: this._config.host,
 			port: this._config.port ?? 5432,
@@ -1308,6 +1317,9 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			// eslint-disable-next-line camelcase
 			max_lifetime: this._config?.pool?.maxLifetime
 		};
+		if (includeDatabase) {
+			opts.database = this._config.database;
+		}
 		return opts;
 	}
 
