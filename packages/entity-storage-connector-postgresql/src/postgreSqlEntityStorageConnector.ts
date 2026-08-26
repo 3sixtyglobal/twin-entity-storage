@@ -292,9 +292,26 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				) {
 					const columnName = String(prop.property);
 					const indexName = IndexHelper.generateName(this._config.tableName, columnName);
-					await dbConnection.unsafe(
-						`CREATE INDEX IF NOT EXISTS "${indexName}" ON "${this._config.tableName}" ("${columnName}")`
+					const coveringIndexRows = await dbConnection.unsafe(
+						`SELECT 1
+						FROM pg_index ix
+						JOIN pg_class t ON t.oid = ix.indrelid
+						JOIN pg_namespace n ON n.oid = t.relnamespace
+						JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ix.indkey[0]
+						WHERE n.nspname = 'public'
+							AND t.relname = $1
+							AND a.attname = $2
+							AND ix.indisvalid
+							AND ix.indisready
+							AND ix.indpred IS NULL
+						LIMIT 1`,
+						[this._config.tableName, columnName] as ParameterOrJSON<never>[]
 					);
+					if (coveringIndexRows.length === 0) {
+						await dbConnection.unsafe(
+							`CREATE INDEX IF NOT EXISTS "${indexName}" ON "${this._config.tableName}" ("${columnName}")`
+						);
+					}
 				}
 			}
 		} catch (error) {

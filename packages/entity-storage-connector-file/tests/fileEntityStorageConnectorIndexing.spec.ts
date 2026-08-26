@@ -16,6 +16,9 @@ import { FileEntityStorageConnector } from "../src/fileEntityStorageConnector.js
 // File connector performs no indexing; all queries are full scans over the filesystem.
 const SUPPORT_SECONDARY_INDEXING = false;
 
+// Set to false for connectors that do not create named index objects in the database.
+const SUPPORT_NAMED_INDEX_OBJECTS = false;
+
 @entity()
 class IndexedTestType {
 	@property({ type: "string", isPrimary: true })
@@ -131,5 +134,151 @@ describe("FileEntityStorageConnector", () => {
 			}
 		},
 		300_000
+	);
+
+	test("bootstrap is idempotent when called multiple times", async () => {
+		const connector = createIndexedConnector();
+
+		try {
+			const firstResult = await connector.bootstrap();
+			const secondResult = await connector.bootstrap();
+
+			expect(firstResult).toBe(true);
+			expect(secondResult).toBe(true);
+
+			await connector.set({ id: "1", category: "catA", value: 1 });
+			const storedEntity = await connector.get("1");
+			expect(storedEntity?.category).toBe("catA");
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+		}
+	}, 60_000);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a differently named index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only a non-leading member of another index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when a same-named table in another schema has a covering index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only covered by an invalid or invisible index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only covered by a FULLTEXT or partial index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index after an index naming-scheme change",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
 	);
 });

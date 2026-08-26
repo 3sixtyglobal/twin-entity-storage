@@ -2,6 +2,8 @@
 
 This package provides a MySQL backend for relational persistence and SQL-based access patterns. It is designed to work with the wider storage ecosystem so applications can keep behaviour consistent across connectors and environments.
 
+Requires MySQL 8.0 or later; the index bootstrap relies on `INFORMATION_SCHEMA.STATISTICS.IS_VISIBLE`, which is not present on MySQL 5.7 or MariaDB.
+
 ## Installation
 
 ```shell

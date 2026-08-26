@@ -16,6 +16,9 @@ import { MongoDbEntityStorageConnector } from "../src/mongoDbEntityStorageConnec
 // Set to false for connectors that do not maintain secondary indexes (e.g. file, memory).
 const SUPPORT_SECONDARY_INDEXING = true;
 
+// Set to false for connectors that do not create named index objects in the database.
+const SUPPORT_NAMED_INDEX_OBJECTS = false;
+
 @entity()
 class IndexedTestType {
 	@property({ type: "string", isPrimary: true })
@@ -150,6 +153,29 @@ describe("MongoDbEntityStorageConnector", () => {
 		300_000
 	);
 
+	test("bootstrap is idempotent when called multiple times", async () => {
+		const connector = createIndexedConnector();
+
+		try {
+			const firstResult = await connector.bootstrap();
+			const secondResult = await connector.bootstrap();
+
+			expect(firstResult).toBe(true);
+			expect(secondResult).toBe(true);
+
+			await connector.set({ id: "1", category: "catA", value: 1 });
+			const storedEntity = await connector.get("1");
+			expect(storedEntity?.category).toBe("catA");
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+		}
+	}, 60_000);
+
 	test("bootstrap returns true when a non-unique index already exists on the primary property", async () => {
 		const collectionName = `${TEST_MONGODB_CONFIG.collection}_primary_conflict_${Date.now()}`;
 		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
@@ -221,4 +247,148 @@ describe("MongoDbEntityStorageConnector", () => {
 			await client.close();
 		}
 	});
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a differently named index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only a non-leading member of another index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when a same-named table in another schema has a covering index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only covered by an invalid or invisible index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only covered by a FULLTEXT or partial index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index after an index naming-scheme change",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
 });

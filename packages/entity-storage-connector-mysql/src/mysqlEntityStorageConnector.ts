@@ -355,8 +355,8 @@ export class MySqlEntityStorageConnector<T = unknown>
 					const indexCol = needsPrefix ? `\`${columnName}\`(255)` : `\`${columnName}\``;
 					const indexName = IndexHelper.generateName(this._config.tableName, columnName);
 					const [indexRows] = await pool.query(
-						"SELECT COUNT(1) AS indexExists FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND index_name = ?",
-						[this._config.database, this._config.tableName, indexName]
+						"SELECT COUNT(1) AS indexExists FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND column_name = ? AND seq_in_index = 1 AND is_visible = 'YES' AND index_type = 'BTREE'",
+						[this._config.database, this._config.tableName, columnName]
 					);
 					if (Is.array(indexRows) && ObjectHelper.propertyGet(indexRows[0], "indexExists") === 0) {
 						await pool.query(
