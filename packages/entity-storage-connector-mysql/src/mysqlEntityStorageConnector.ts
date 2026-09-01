@@ -348,21 +348,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 					prop.type !== EntitySchemaPropertyType.Object &&
 					prop.type !== EntitySchemaPropertyType.Array
 				) {
-					const columnName = String(prop.property);
-					const needsPrefix =
-						prop.type === EntitySchemaPropertyType.String &&
-						prop.format !== EntitySchemaPropertyFormat.Uuid;
-					const indexCol = needsPrefix ? `\`${columnName}\`(255)` : `\`${columnName}\``;
-					const indexName = IndexHelper.generateName(this._config.tableName, columnName);
-					const [indexRows] = await pool.query(
-						"SELECT COUNT(1) AS indexExists FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND column_name = ? AND seq_in_index = 1 AND is_visible = 'YES' AND index_type = 'BTREE'",
-						[this._config.database, this._config.tableName, columnName]
-					);
-					if (Is.array(indexRows) && ObjectHelper.propertyGet(indexRows[0], "indexExists") === 0) {
-						await pool.query(
-							`CREATE INDEX \`${indexName}\` ON \`${this._config.database}\`.\`${this._config.tableName}\` (${indexCol})`
-						);
-					}
+					await this.ensureIndex(pool, prop, nodeLogging);
 				}
 			}
 		} catch (error) {
@@ -1225,6 +1211,80 @@ export class MySqlEntityStorageConnector<T = unknown>
 			}
 			await new Promise(resolve => setTimeout(resolve, 250));
 		}
+	}
+
+	/**
+	 * Ensure the secondary index for a property exists, replacing a legacy-named index if present.
+	 * @param pool The pool to query with.
+	 * @param prop The indexed property.
+	 * @param nodeLogging Optional logging component.
+	 * @internal
+	 */
+	private async ensureIndex(
+		pool: Pool,
+		prop: IEntitySchemaProperty<T>,
+		nodeLogging?: ILoggingComponent
+	): Promise<void> {
+		const columnName = String(prop.property);
+		const needsPrefix =
+			prop.type === EntitySchemaPropertyType.String &&
+			prop.format !== EntitySchemaPropertyFormat.Uuid;
+		const indexCol = needsPrefix ? `\`${columnName}\`(255)` : `\`${columnName}\``;
+		const indexName = IndexHelper.generateName(this._config.tableName, columnName);
+		const qualifiedTable = `\`${this._config.database}\`.\`${this._config.tableName}\``;
+
+		const [indexRows] = await pool.query(
+			"SELECT DISTINCT index_name AS indexName FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND column_name = ? AND seq_in_index = 1 AND is_visible = 'YES' AND index_type = 'BTREE'",
+			[this._config.database, this._config.tableName, columnName]
+		);
+		const indexNames = Is.array(indexRows)
+			? indexRows.map(row => ObjectHelper.propertyGet<string>(row, "indexName"))
+			: [];
+
+		if (!Is.arrayValue(indexNames)) {
+			await pool.query(`CREATE INDEX \`${indexName}\` ON ${qualifiedTable} (${indexCol})`);
+			return;
+		}
+
+		// TODO: remove the legacy index handling once every installation has bootstrapped on a release that contains it
+		const legacyName = IndexHelper.generateLegacyName(this._config.tableName, columnName);
+		if (!indexNames.includes(legacyName)) {
+			return;
+		}
+
+		// The connector's own legacy indexes were always non-unique and single-column, anything else is an operator's
+		const [legacyRows] = await pool.query(
+			"SELECT MAX(non_unique) AS nonUnique, COUNT(1) AS keyColumnCount FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND index_name = ?",
+			[this._config.database, this._config.tableName, legacyName]
+		);
+		const legacyRow = Is.array(legacyRows) ? legacyRows[0] : undefined;
+		if (
+			!Is.object(legacyRow) ||
+			Coerce.integer(ObjectHelper.propertyGet(legacyRow, "nonUnique")) !== 1 ||
+			Coerce.integer(ObjectHelper.propertyGet(legacyRow, "keyColumnCount")) !== 1
+		) {
+			return;
+		}
+
+		const hasCurrent = indexNames.includes(indexName);
+		if (hasCurrent) {
+			await pool.query(`DROP INDEX \`${legacyName}\` ON ${qualifiedTable}`);
+		} else {
+			await pool.query(
+				`ALTER TABLE ${qualifiedTable} RENAME INDEX \`${legacyName}\` TO \`${indexName}\``
+			);
+		}
+		await nodeLogging?.log({
+			level: "info",
+			source: MySqlEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: hasCurrent ? "legacyIndexDropped" : "legacyIndexRenamed",
+			data: {
+				tableName: this._config.tableName,
+				indexName: legacyName,
+				newIndexName: indexName
+			}
+		});
 	}
 
 	/**

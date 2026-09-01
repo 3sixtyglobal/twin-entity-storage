@@ -60,6 +60,31 @@ async function countIndexesLeadingOnColumn(
 	return Coerce.number((rows as unknown as { indexCount: string }[])[0].indexCount) ?? 0;
 }
 
+/**
+ * List the names of the indexes that lead on the given column for a table.
+ * @param sql The connection to query with.
+ * @param tableName The table to inspect.
+ * @param columnName The column that must be the leading (first) key column of the index.
+ * @returns The names of the indexes whose leading column is columnName.
+ */
+async function indexNamesLeadingOnColumn(
+	sql: postgres.Sql,
+	tableName: string,
+	columnName: string
+): Promise<string[]> {
+	const rows = await sql.unsafe(
+		`SELECT DISTINCT i.relname AS "indexName"
+		FROM pg_index ix
+		JOIN pg_class t ON t.oid = ix.indrelid
+		JOIN pg_namespace n ON n.oid = t.relnamespace
+		JOIN pg_class i ON i.oid = ix.indexrelid
+		JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ix.indkey[0]
+		WHERE n.nspname = 'public' AND t.relname = $1 AND a.attname = $2`,
+		[tableName, columnName]
+	);
+	return (rows as unknown as { indexName: string }[]).map(row => row.indexName);
+}
+
 @entity()
 class IndexedTestType {
 	@property({ type: "string", isPrimary: true })
@@ -493,6 +518,260 @@ describe("PostgreSqlEntityStorageConnector", () => {
 
 				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
 				expect(indexCount).toBe(1);
+			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"renames its legacy index to the current name",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_legacyrename_${Date.now()}`;
+			const connector = new PostgreSqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			let sql: postgres.Sql | undefined;
+
+			try {
+				sql = openTestConnection();
+				const currentIndexName = IndexHelper.generateName(tableName, "category");
+				const legacyIndexName = IndexHelper.generateLegacyName(
+					tableName,
+					"category",
+					IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH
+				);
+
+				await connector.bootstrap();
+				await sql.unsafe(`DROP INDEX "${currentIndexName}"`);
+				await sql.unsafe(`CREATE INDEX "${legacyIndexName}" ON "${tableName}" ("category")`);
+
+				await connector.bootstrap();
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+					currentIndexName
+				]);
+
+				await connector.bootstrap();
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+					currentIndexName
+				]);
+			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"drops its legacy index when the current index already exists",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_legacydrop_${Date.now()}`;
+			const connector = new PostgreSqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			let sql: postgres.Sql | undefined;
+
+			try {
+				sql = openTestConnection();
+				const currentIndexName = IndexHelper.generateName(tableName, "category");
+				const legacyIndexName = IndexHelper.generateLegacyName(
+					tableName,
+					"category",
+					IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH
+				);
+
+				await connector.bootstrap();
+				await sql.unsafe(`CREATE INDEX "${legacyIndexName}" ON "${tableName}" ("category")`);
+				expect(await countIndexesLeadingOnColumn(sql, tableName, "category")).toBe(2);
+
+				await connector.bootstrap();
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+					currentIndexName
+				]);
+			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"never drops a manually created index",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_legacymanual_${Date.now()}`;
+			const connector = new PostgreSqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			let sql: postgres.Sql | undefined;
+
+			try {
+				sql = openTestConnection();
+				await sql.unsafe(
+					`CREATE TABLE "${tableName}" ("id" VARCHAR(255) PRIMARY KEY, "category" VARCHAR(255), "value" INT)`
+				);
+				await sql.unsafe(`CREATE INDEX "manual_cat_idx" ON "${tableName}" ("category")`);
+
+				await connector.bootstrap();
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+					"manual_cat_idx"
+				]);
+			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"renames a legacy index whose name was truncated to the identifier limit",
+		async () => {
+			const tableName = `legacytrunc_${Date.now()}_${"x".repeat(60)}`.slice(0, 58);
+			const connector = new PostgreSqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			let sql: postgres.Sql | undefined;
+
+			try {
+				sql = openTestConnection();
+				const currentIndexName = IndexHelper.generateName(tableName, "category");
+				const legacyIndexName = IndexHelper.generateLegacyName(
+					tableName,
+					"category",
+					IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH
+				);
+
+				await connector.bootstrap();
+				await sql.unsafe(`DROP INDEX "${currentIndexName}"`);
+				await sql.unsafe(`CREATE INDEX "idx_${tableName}_category" ON "${tableName}" ("category")`);
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+					legacyIndexName
+				]);
+
+				await connector.bootstrap();
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+					currentIndexName
+				]);
+			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"never drops an operator unique index that reuses the legacy name",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_legacyunique_${Date.now()}`;
+			const connector = new PostgreSqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			let sql: postgres.Sql | undefined;
+
+			try {
+				sql = openTestConnection();
+				const currentIndexName = IndexHelper.generateName(tableName, "category");
+				const legacyIndexName = IndexHelper.generateLegacyName(
+					tableName,
+					"category",
+					IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH
+				);
+
+				await connector.bootstrap();
+				await sql.unsafe(`CREATE UNIQUE INDEX "${legacyIndexName}" ON "${tableName}" ("category")`);
+
+				await connector.bootstrap();
+				expect((await indexNamesLeadingOnColumn(sql, tableName, "category")).sort()).toEqual(
+					[currentIndexName, legacyIndexName].sort()
+				);
+			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"never drops an operator composite index that reuses the legacy name",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_legacycomposite_${Date.now()}`;
+			const connector = new PostgreSqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			let sql: postgres.Sql | undefined;
+
+			try {
+				sql = openTestConnection();
+				const currentIndexName = IndexHelper.generateName(tableName, "category");
+				const legacyIndexName = IndexHelper.generateLegacyName(
+					tableName,
+					"category",
+					IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH
+				);
+
+				await connector.bootstrap();
+				await sql.unsafe(
+					`CREATE INDEX "${legacyIndexName}" ON "${tableName}" ("category", "value")`
+				);
+
+				await connector.bootstrap();
+				expect((await indexNamesLeadingOnColumn(sql, tableName, "category")).sort()).toEqual(
+					[currentIndexName, legacyIndexName].sort()
+				);
 			} finally {
 				try {
 					await sql?.end();

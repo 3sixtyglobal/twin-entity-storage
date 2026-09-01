@@ -47,3 +47,21 @@ describe("IndexHelper.generateName", () => {
 		expect(name.length).toBeLessThanOrEqual(63);
 	});
 });
+
+describe("IndexHelper.generateLegacyName", () => {
+	test("produces the pre-hash idx_table_column name", () => {
+		expect(IndexHelper.generateLegacyName("my_table", "my_column")).toBe("idx_my_table_my_column");
+	});
+
+	test("truncates to maxIdentifierLength when supplied", () => {
+		const table = "a".repeat(80);
+		const name = IndexHelper.generateLegacyName(table, "dateCreated", 63);
+		expect(name).toBe(`idx_${table}_dateCreated`.slice(0, 63));
+		expect(name.length).toBe(63);
+	});
+
+	test("does not truncate when maxIdentifierLength is omitted", () => {
+		const table = "a".repeat(80);
+		expect(IndexHelper.generateLegacyName(table, "dateCreated")).toBe(`idx_${table}_dateCreated`);
+	});
+});

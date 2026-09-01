@@ -40,6 +40,25 @@ async function countIndexesLeadingOnColumn(
 	return Coerce.number((rows as { indexCount: number }[])[0].indexCount) ?? 0;
 }
 
+/**
+ * List the names of the indexes that lead on the given column for a table.
+ * @param pool The pool to query with.
+ * @param tableName The table to inspect.
+ * @param columnName The column that must be the leading (first) key column of the index.
+ * @returns The names of the indexes whose leading column is columnName.
+ */
+async function indexNamesLeadingOnColumn(
+	pool: Pool,
+	tableName: string,
+	columnName: string
+): Promise<string[]> {
+	const [rows] = await pool.query(
+		"SELECT DISTINCT index_name AS indexName FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND column_name = ? AND seq_in_index = 1",
+		[TEST_MYSQL_CONFIG.database, tableName, columnName]
+	);
+	return (rows as { indexName: string }[]).map(row => row.indexName);
+}
+
 @entity()
 class IndexedTestType {
 	@property({ type: "string", isPrimary: true })
@@ -428,6 +447,239 @@ describe("MySqlEntityStorageConnector", () => {
 
 				const indexCount = await countIndexesLeadingOnColumn(pool, tableName, "category");
 				expect(indexCount).toBe(1);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"renames its legacy index to the current name",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_legacyrename_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const currentIndexName = IndexHelper.generateName(tableName, "category");
+				const legacyIndexName = IndexHelper.generateLegacyName(tableName, "category");
+
+				await connector.bootstrap();
+				await pool.query(
+					`DROP INDEX \`${currentIndexName}\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\``
+				);
+				await pool.query(
+					`CREATE INDEX \`${legacyIndexName}\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255))`
+				);
+
+				await connector.bootstrap();
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+					currentIndexName
+				]);
+
+				await connector.bootstrap();
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+					currentIndexName
+				]);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"drops its legacy index when the current index already exists",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_legacydrop_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const currentIndexName = IndexHelper.generateName(tableName, "category");
+				const legacyIndexName = IndexHelper.generateLegacyName(tableName, "category");
+
+				await connector.bootstrap();
+				await pool.query(
+					`CREATE INDEX \`${legacyIndexName}\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255))`
+				);
+				expect(await countIndexesLeadingOnColumn(pool, tableName, "category")).toBe(2);
+
+				await connector.bootstrap();
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+					currentIndexName
+				]);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"never drops a manually created index",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_legacymanual_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				await pool.query(
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`id\` VARCHAR(255) PRIMARY KEY, \`category\` VARCHAR(255), \`value\` INT)`
+				);
+				await pool.query(
+					`CREATE INDEX \`manual_cat_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255))`
+				);
+
+				await connector.bootstrap();
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+					"manual_cat_idx"
+				]);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"never drops an operator unique index that reuses the legacy name",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_legacyunique_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const currentIndexName = IndexHelper.generateName(tableName, "category");
+				const legacyIndexName = IndexHelper.generateLegacyName(tableName, "category");
+
+				await connector.bootstrap();
+				await pool.query(
+					`CREATE UNIQUE INDEX \`${legacyIndexName}\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255))`
+				);
+
+				await connector.bootstrap();
+				expect((await indexNamesLeadingOnColumn(pool, tableName, "category")).sort()).toEqual(
+					[currentIndexName, legacyIndexName].sort()
+				);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"never drops an operator composite index that reuses the legacy name",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_legacycomposite_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const currentIndexName = IndexHelper.generateName(tableName, "category");
+				const legacyIndexName = IndexHelper.generateLegacyName(tableName, "category");
+
+				await connector.bootstrap();
+				await pool.query(
+					`CREATE INDEX \`${legacyIndexName}\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255), \`value\`)`
+				);
+
+				await connector.bootstrap();
+				expect((await indexNamesLeadingOnColumn(pool, tableName, "category")).sort()).toEqual(
+					[currentIndexName, legacyIndexName].sort()
+				);
 			} finally {
 				try {
 					await pool?.end();

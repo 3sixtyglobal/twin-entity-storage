@@ -1,6 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { Converter } from "@twin.org/core";
+import { Converter, Is } from "@twin.org/core";
 import { Blake2b } from "@twin.org/crypto";
 
 /**
@@ -39,5 +39,22 @@ export class IndexHelper {
 		const hex = Converter.bytesToHex(hash);
 		const maxHashChars = maxIdentifierLength - IndexHelper._PREFIX.length;
 		return `${IndexHelper._PREFIX}${hex.slice(0, maxHashChars)}`;
+	}
+
+	/**
+	 * Generate the unbounded index name used before names were hashed, so connectors can recognise their own legacy indexes.
+	 * TODO: remove together with the connectors' legacy index handling.
+	 * @param tableName The fully-qualified table name, including any deployment prefix.
+	 * @param columnName The column being indexed.
+	 * @param maxIdentifierLength Optional length the database silently truncated identifiers to.
+	 * @returns The legacy index name, truncated to maxIdentifierLength when supplied.
+	 */
+	public static generateLegacyName(
+		tableName: string,
+		columnName: string,
+		maxIdentifierLength?: number
+	): string {
+		const name = `${IndexHelper._PREFIX}${tableName}_${columnName}`;
+		return Is.integer(maxIdentifierLength) ? name.slice(0, maxIdentifierLength) : name;
 	}
 }

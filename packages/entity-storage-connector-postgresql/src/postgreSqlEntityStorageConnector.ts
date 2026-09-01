@@ -290,31 +290,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 					prop.type !== EntitySchemaPropertyType.Object &&
 					prop.type !== EntitySchemaPropertyType.Array
 				) {
-					const columnName = String(prop.property);
-					const indexName = IndexHelper.generateName(this._config.tableName, columnName);
-					const coveringIndexRows = await dbConnection.unsafe(
-						`SELECT 1
-						FROM pg_index ix
-						JOIN pg_class t ON t.oid = ix.indrelid
-						JOIN pg_namespace n ON n.oid = t.relnamespace
-						JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ix.indkey[0]
-						JOIN pg_class i ON i.oid = ix.indexrelid
-						JOIN pg_am am ON am.oid = i.relam
-						WHERE n.nspname = 'public'
-							AND t.relname = $1
-							AND a.attname = $2
-							AND ix.indisvalid
-							AND ix.indisready
-							AND ix.indpred IS NULL
-							AND am.amname = 'btree'
-						LIMIT 1`,
-						[this._config.tableName, columnName] as ParameterOrJSON<never>[]
-					);
-					if (coveringIndexRows.length === 0) {
-						await dbConnection.unsafe(
-							`CREATE INDEX IF NOT EXISTS "${indexName}" ON "${this._config.tableName}" ("${columnName}")`
-						);
-					}
+					await this.ensureIndex(dbConnection, prop, nodeLogging);
 				}
 			}
 		} catch (error) {
@@ -1250,6 +1226,88 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			}
 			await new Promise(resolve => setTimeout(resolve, 250));
 		}
+	}
+
+	/**
+	 * Ensure the secondary index for a property exists, replacing a legacy-named index if present.
+	 * @param dbConnection The connection to query with.
+	 * @param prop The indexed property.
+	 * @param nodeLogging Optional logging component.
+	 * @internal
+	 */
+	private async ensureIndex(
+		dbConnection: postgres.Sql,
+		prop: IEntitySchemaProperty<T>,
+		nodeLogging?: ILoggingComponent
+	): Promise<void> {
+		const columnName = String(prop.property);
+		const indexName = IndexHelper.generateName(this._config.tableName, columnName);
+
+		const indexRows = await dbConnection.unsafe(
+			`SELECT i.relname AS "indexName", ix.indisunique AS "isUnique", ix.indnkeyatts AS "keyColumnCount"
+			FROM pg_index ix
+			JOIN pg_class t ON t.oid = ix.indrelid
+			JOIN pg_namespace n ON n.oid = t.relnamespace
+			JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ix.indkey[0]
+			JOIN pg_class i ON i.oid = ix.indexrelid
+			JOIN pg_am am ON am.oid = i.relam
+			WHERE n.nspname = 'public'
+				AND t.relname = $1
+				AND a.attname = $2
+				AND ix.indisvalid
+				AND ix.indisready
+				AND ix.indpred IS NULL
+				AND am.amname = 'btree'`,
+			[this._config.tableName, columnName] as ParameterOrJSON<never>[]
+		);
+		const indexNames = indexRows.map(row => ObjectHelper.propertyGet<string>(row, "indexName"));
+
+		if (!Is.arrayValue(indexNames)) {
+			await dbConnection.unsafe(
+				`CREATE INDEX IF NOT EXISTS "${indexName}" ON "${this._config.tableName}" ("${columnName}")`
+			);
+			return;
+		}
+
+		// TODO: remove the legacy index handling once every installation has bootstrapped on a release that contains it
+		const legacyName = IndexHelper.generateLegacyName(
+			this._config.tableName,
+			columnName,
+			IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH
+		);
+		if (!indexNames.includes(legacyName)) {
+			return;
+		}
+
+		// The connector's own legacy indexes were always non-unique and single-column, anything else is an operator's
+		const legacyRow = indexRows.find(
+			row => ObjectHelper.propertyGet(row, "indexName") === legacyName
+		);
+		if (
+			!Is.object(legacyRow) ||
+			ObjectHelper.propertyGet(legacyRow, "isUnique") !== false ||
+			Coerce.integer(ObjectHelper.propertyGet(legacyRow, "keyColumnCount")) !== 1
+		) {
+			return;
+		}
+
+		const hasCurrent = indexNames.includes(indexName);
+		if (hasCurrent) {
+			await dbConnection.unsafe(`DROP INDEX "${legacyName}"`);
+		} else {
+			await dbConnection.unsafe(`ALTER INDEX "${legacyName}" RENAME TO "${indexName}"`);
+		}
+		await nodeLogging?.log({
+			level: "info",
+			source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: hasCurrent ? "legacyIndexDropped" : "legacyIndexRenamed",
+			data: {
+				tableName: this._config.tableName,
+				indexName: legacyName,
+				newIndexName: indexName
+			}
+		});
 	}
 
 	/**
