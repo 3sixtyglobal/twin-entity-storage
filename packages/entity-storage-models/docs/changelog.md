@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3-next.2](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.3-next.1...entity-storage-models-v0.9.3-next.2) (2026-09-01)
+
+
+### Features
+
+* replace the connector's own legacy indexes on bootstrap ([#243](https://github.com/iotaledger/twin-entity-storage/issues/243)) ([55fd01d](https://github.com/iotaledger/twin-entity-storage/commit/55fd01d9f2ae4d9e8f523f9b8ce85dafb5a49316))
+
 ## [0.9.3-next.1](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.3-next.0...entity-storage-models-v0.9.3-next.1) (2026-08-26)
 
 
