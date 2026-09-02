@@ -76,16 +76,10 @@ function makeMigConnector(schemaName: string, version = 0): IEntityStorageMigrat
 		remove: vi.fn(),
 		removeBatch: vi.fn(),
 		setBatch: vi.fn(),
-		// Default to 1 so "no version record" tests exercise the pre-existing-data path
-		// (count > 0 → treat as v0 and run migration). Tests that need an empty table
-		// override this with mockResolvedValue(0).
 		count: vi.fn().mockResolvedValue(1),
 		empty: vi.fn(),
 		connectorVersion: vi.fn().mockReturnValue(0),
-		// Default to undefined ("not partitioned") so existing tests keep exercising the
-		// bare count() path they were written against. Tests exercising the partitioned
-		// contract override this explicitly to [] or a populated array -
-		// see the "partitioned-but-empty" / "partitioned with existing data" cases below.
+		// Default to undefined ("not partitioned"); partitioned tests override with [] or values.
 		getPartitionContextIds: vi.fn().mockResolvedValue(undefined),
 		createTargetConnector: vi.fn().mockResolvedValue(undefined),
 		finalizeMigration: vi.fn().mockResolvedValue(undefined),
@@ -183,16 +177,16 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// start() - fresh install: empty table seeds at current, no migration
+	// start() - no version record: always resolve as v0 and run the chain
 	// -------------------------------------------------------------------------
 
-	test("start() seeds version at current and skips migration when table is empty and no version record exists", async () => {
+	test("start() treats an empty table as v0 and runs migration when no version record exists", async () => {
 		const schemaName = "Widget";
 		const v0Schema = makeSchema(`${schemaName}V0`, 0);
 		const currentSchema = makeSchema(schemaName, 1);
 		const connector = makeMigConnector(schemaName, 1);
 
-		// Simulate empty table: count() returns 0
+		// Empty table: count() would return 0, but the decision no longer reads it.
 		(connector.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
 
 		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
@@ -214,9 +208,16 @@ describe("SchemaVersionService", () => {
 
 		await new SchemaVersionService().start();
 
-		// No migration should run: the table is empty, so we fast-path to current.
-		expect(migrateWithChainSpy).not.toHaveBeenCalled();
-		// Version record must be written at current (1), not 0.
+		expect(connector.count).not.toHaveBeenCalled();
+		expect(migrateWithChainSpy).toHaveBeenCalledWith(
+			connector,
+			schemaName,
+			undefined,
+			expect.any(Array) as IResolvedMigrationStep[],
+			expect.any(Object),
+			undefined
+		);
+		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 0 }));
 		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
 	});
 
@@ -516,8 +517,17 @@ describe("SchemaVersionService", () => {
 			version: currentVersion
 		};
 
-		schemaNamesSpy.mockReturnValue([schemaName]);
+		const reproV0Schema: IEntitySchema = {
+			...reproSchema,
+			type: `${schemaName}V0`,
+			version: 0
+		};
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
 		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return reproV0Schema;
+			}
 			if (name === schemaName) {
 				return reproSchema;
 			}
@@ -555,47 +565,16 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// processSchema - partition-aware fresh-vs-legacy contract
+	// processSchema - partitioned tables with no version record
 	// -------------------------------------------------------------------------
 
-	test("falls back to bare count() when getPartitionContextIds returns undefined (un-partitioned connector, unchanged path)", async () => {
+	test("runs the migration chain with no partitions when a partitioned table has no version record", async () => {
 		const schemaName = "Widget";
 		const v0Schema = makeSchema(`${schemaName}V0`, 0);
 		const currentSchema = makeSchema(schemaName, 1);
 		const connector = makeMigConnector(schemaName, 1);
-		(connector.getPartitionContextIds as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
-		(connector.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
-
-		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
-		schemaGetSpy.mockImplementation((name: string) => {
-			if (name === `${schemaName}V0`) {
-				return v0Schema;
-			}
-			return currentSchema;
-		});
-		connectorNamesSpy.mockReturnValue([schemaName]);
-
-		const vc = makeVersionConnector([]);
-		connectorGetSpy.mockImplementation((name: string) => {
-			if (name === "schema-version") {
-				return vc;
-			}
-			return connector;
-		});
-
-		await new SchemaVersionService().start();
-
-		expect(connector.count).toHaveBeenCalledTimes(1);
-		expect(migrateWithChainSpy).not.toHaveBeenCalled();
-		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
-	});
-
-	test("treats a partitioned-but-empty table as fresh bootstrap without calling count()", async () => {
-		const schemaName = "Widget";
-		const v0Schema = makeSchema(`${schemaName}V0`, 0);
-		const currentSchema = makeSchema(schemaName, 1);
-		const connector = makeMigConnector(schemaName, 1);
-		// Partitioned (unlike the stub's "not partitioned" default), but no partitions exist yet.
+		// Partitioned (unlike the stub's "not partitioned" default), with no matching partitions:
+		// an empty table and one whose rows all live in legacy-depth partitions look identical here.
 		(connector.getPartitionContextIds as ReturnType<typeof vi.fn>).mockResolvedValue([]);
 
 		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
@@ -618,7 +597,15 @@ describe("SchemaVersionService", () => {
 		await new SchemaVersionService().start();
 
 		expect(connector.count).not.toHaveBeenCalled();
-		expect(migrateWithChainSpy).not.toHaveBeenCalled();
+		expect(migrateWithChainSpy).toHaveBeenCalledWith(
+			connector,
+			schemaName,
+			[],
+			expect.any(Array) as IResolvedMigrationStep[],
+			expect.any(Object),
+			undefined
+		);
+		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 0 }));
 		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
 	});
 
@@ -662,10 +649,9 @@ describe("SchemaVersionService", () => {
 		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
 	});
 
-	test("falls back to bare count() for a base connector with no getPartitionContextIds capability", async () => {
+	test("throws for a non-migration-capable connector when a versioned schema has no version record", async () => {
 		const schemaName = "Widget";
 		const connector = makeNonMigConnector(schemaName, 1);
-		(connector.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
 
 		schemaNamesSpy.mockReturnValue([schemaName]);
 		schemaGetSpy.mockReturnValue(makeSchema(schemaName, 1));
@@ -679,10 +665,10 @@ describe("SchemaVersionService", () => {
 			return connector;
 		});
 
-		await new SchemaVersionService().start();
-
-		expect(connector.count).toHaveBeenCalledTimes(1);
-		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
+		await expect(new SchemaVersionService().start()).rejects.toMatchObject({
+			message: "schemaVersionService.connectorNotMigrationCapable"
+		});
+		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 0 }));
 	});
 
 	// -------------------------------------------------------------------------
@@ -849,11 +835,10 @@ describe("SchemaVersionService", () => {
 
 	test("start() stores connector version in a separate schema-version entry on fresh install", async () => {
 		const schemaName = "Widget";
-		const currentVersion = 1;
+		const currentVersion = 0;
 		const connectorVer = 2;
 		const connector = makeMigConnector(schemaName, currentVersion);
 		connector.connectorVersion = vi.fn().mockReturnValue(connectorVer);
-		(connector.count as ReturnType<typeof vi.fn>).mockResolvedValue(0);
 
 		schemaNamesSpy.mockReturnValue([schemaName]);
 		schemaGetSpy.mockReturnValue(makeSchema(schemaName, currentVersion));
@@ -869,7 +854,8 @@ describe("SchemaVersionService", () => {
 
 		await new SchemaVersionService().start();
 
-		expect(migrateWithChainSpy).not.toHaveBeenCalled();
+		// The changed connector version forces the chain even for a freshly-seeded schema.
+		expect(migrateWithChainSpy).toHaveBeenCalledTimes(1);
 		expect(vc.set).toHaveBeenCalledWith(
 			expect.objectContaining({
 				schemaName,
