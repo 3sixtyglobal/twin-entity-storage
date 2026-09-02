@@ -240,13 +240,10 @@ export class MongoDbEntityStorageConnector<T = unknown>
 
 			for (const prop of this._entitySchema.properties ?? []) {
 				const propName = String(prop.property);
-				const existingOnKey = existingIndexes.find(idx => {
-					const key = idx.key as { [k: string]: number };
-					return Object.keys(key).length === 1 && key[propName] === 1;
-				});
 
 				if (prop.isPrimary === true) {
-					if (Is.empty(existingOnKey)) {
+					const coveringIndex = this.findCoveringIndex(existingIndexes, propName, true);
+					if (Is.empty(coveringIndex)) {
 						try {
 							await collection.createIndex({ [propName]: 1 }, { unique: true });
 						} catch (propError) {
@@ -260,7 +257,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 							});
 							bootstrapSuccess = false;
 						}
-					} else if (!existingOnKey.unique) {
+					} else if (!coveringIndex.unique || this.hasRestrictiveOptions(coveringIndex)) {
 						await nodeLogging?.log({
 							level: "warn",
 							source: MongoDbEntityStorageConnector.CLASS_NAME,
@@ -270,7 +267,8 @@ export class MongoDbEntityStorageConnector<T = unknown>
 						});
 					}
 				} else if (prop.isSecondary === true || !Is.empty(prop.sortDirection)) {
-					if (Is.empty(existingOnKey)) {
+					const coveringIndex = this.findCoveringIndex(existingIndexes, propName, false);
+					if (Is.empty(coveringIndex)) {
 						try {
 							await collection.createIndex({ [propName]: 1 });
 						} catch (propError) {
@@ -284,6 +282,14 @@ export class MongoDbEntityStorageConnector<T = unknown>
 							});
 							bootstrapSuccess = false;
 						}
+					} else if (this.hasRestrictiveOptions(coveringIndex)) {
+						await nodeLogging?.log({
+							level: "warn",
+							source: MongoDbEntityStorageConnector.CLASS_NAME,
+							ts: Date.now(),
+							message: "indexOptionsConflict",
+							data: { property: propName }
+						});
 					}
 				}
 			}
@@ -1035,6 +1041,48 @@ export class MongoDbEntityStorageConnector<T = unknown>
 		const collectionName = await this.resolveCollectionName(this._config.collection);
 		const client = await this.getClient();
 		return client.db(this._config.database).collection(collectionName);
+	}
+
+	/**
+	 * Find an existing index that already covers a property so bootstrap can skip creating a redundant one.
+	 * An exact single-field ascending match always counts even if hidden, sparse or partial, since MongoDB refuses to recreate it under different options.
+	 * Otherwise an index counts when it leads on the property in either direction and is not hidden, sparse or partial; with requireUnique it must also be unique and single-field.
+	 * @param existingIndexes The indexes returned by listIndexes.
+	 * @param propName The property to check coverage for.
+	 * @param requireUnique Restrict coverage to single-field, unique indexes, for when the property must also enforce uniqueness (the primary key).
+	 * @returns The covering index if one exists.
+	 * @internal
+	 */
+	private findCoveringIndex(
+		existingIndexes: Document[],
+		propName: string,
+		requireUnique: boolean
+	): Document | undefined {
+		return existingIndexes.find(idx => {
+			const key = idx.key as { [k: string]: unknown };
+			const keys = Object.keys(key);
+			const direction = key[propName];
+			if (keys[0] !== propName || (direction !== 1 && direction !== -1)) {
+				return false;
+			}
+			if (keys.length === 1 && direction === 1) {
+				return true;
+			}
+			if (requireUnique && keys.length > 1) {
+				return false;
+			}
+			return (!requireUnique || idx.unique === true) && !this.hasRestrictiveOptions(idx);
+		});
+	}
+
+	/**
+	 * Determine whether an index is hidden, sparse or partial, meaning the query planner cannot rely on it to serve every document.
+	 * @param idx The index to check.
+	 * @returns True if the index is hidden, sparse or partial.
+	 * @internal
+	 */
+	private hasRestrictiveOptions(idx: Document): boolean {
+		return idx.hidden === true || idx.sparse === true || !Is.empty(idx.partialFilterExpression);
 	}
 
 	/**

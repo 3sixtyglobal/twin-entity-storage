@@ -694,4 +694,94 @@ describe("MySqlEntityStorageConnector", () => {
 		},
 		60_000
 	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a descending index",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_desc_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+
+				await pool.query(
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`id\` VARCHAR(255) PRIMARY KEY, \`category\` VARCHAR(255), \`value\` INT)`
+				);
+				await pool.query(
+					`CREATE INDEX \`manual_desc_cat_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255) DESC)`
+				);
+
+				await connector.bootstrap();
+
+				const indexCount = await countIndexesLeadingOnColumn(pool, tableName, "category");
+				expect(indexCount).toBe(1);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a compound index leading on it",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_compound_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+
+				await pool.query(
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`id\` VARCHAR(255) PRIMARY KEY, \`category\` VARCHAR(255), \`value\` INT)`
+				);
+				await pool.query(
+					`CREATE INDEX \`manual_cat_value_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255), \`value\`)`
+				);
+
+				await connector.bootstrap();
+
+				const indexCount = await countIndexesLeadingOnColumn(pool, tableName, "category");
+				expect(indexCount).toBe(1);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
 });

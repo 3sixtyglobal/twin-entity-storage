@@ -287,4 +287,46 @@ describe("CosmosDbEntityStorageConnector", () => {
 		},
 		60_000
 	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a descending index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a compound index leading on it",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
 });

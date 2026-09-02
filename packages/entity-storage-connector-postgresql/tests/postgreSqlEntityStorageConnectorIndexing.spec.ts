@@ -786,4 +786,80 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		},
 		60_000
 	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a descending index",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_desc_${Date.now()}`;
+			const connector = new PostgreSqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			let sql: postgres.Sql | undefined;
+
+			try {
+				sql = openTestConnection();
+
+				await sql.unsafe(
+					`CREATE TABLE "${tableName}" ("id" VARCHAR(255) PRIMARY KEY, "category" VARCHAR(255), "value" INT)`
+				);
+				await sql.unsafe(`CREATE INDEX "manual_desc_cat_idx" ON "${tableName}" ("category" DESC)`);
+
+				await connector.bootstrap();
+
+				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+				expect(indexCount).toBe(1);
+			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a compound index leading on it",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_compound_${Date.now()}`;
+			const connector = new PostgreSqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			let sql: postgres.Sql | undefined;
+
+			try {
+				sql = openTestConnection();
+
+				await sql.unsafe(
+					`CREATE TABLE "${tableName}" ("id" VARCHAR(255) PRIMARY KEY, "category" VARCHAR(255), "value" INT)`
+				);
+				await sql.unsafe(
+					`CREATE INDEX "manual_cat_value_idx" ON "${tableName}" ("category", "value")`
+				);
+
+				await connector.bootstrap();
+
+				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+				expect(indexCount).toBe(1);
+			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
 });
