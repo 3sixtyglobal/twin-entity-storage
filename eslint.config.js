@@ -263,6 +263,10 @@ const tsRestrictedSyntaxCommon = [
 			'Direct access to process.env is not allowed. Use environment variable helpers or configuration instead.'
 	},
 	{
+		selector: "MemberExpression[object.name='globalThis'][property.name='console']",
+		message: 'Do not use globalThis.console; use logging component..'
+	},
+	{
 		selector: 'BinaryExpression[operator="instanceof"]',
 		message:
 			'instanceof is disallowed. For checking Error types use the BaseError methods. Use type guards or other type checking methods instead.'
@@ -595,6 +599,7 @@ const jsDocRules = {
 				'FunctionDeclaration',
 				'FunctionExpression',
 				'MethodDefinition',
+				'PropertyDefinition',
 				'ExportNamedDeclaration > VariableDeclaration > VariableDeclarator > TSAsExpression[typeAnnotation.type="TSTypeReference"][typeAnnotation.typeName.name="const"] > ObjectExpression > Property',
 				'TSDeclareFunction',
 				'TSEnumDeclaration',
