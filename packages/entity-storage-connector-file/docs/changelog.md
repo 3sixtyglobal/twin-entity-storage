@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.3-next.3](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-file-v0.9.3-next.2...entity-storage-connector-file-v0.9.3-next.3) (2026-09-02)
+
+
+### Bug Fixes
+
+* recognise descending and compound-prefix index coverage on mongo bootstrap ([#253](https://github.com/iotaledger/twin-entity-storage/issues/253)) ([f92f72d](https://github.com/iotaledger/twin-entity-storage/commit/f92f72dec0bd81bb07b48ef6d159f5db6a17bd75))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.3-next.2 to 0.9.3-next.3
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.3-next.2 to 0.9.3-next.3
+
 ## [0.9.3-next.2](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-file-v0.9.3-next.1...entity-storage-connector-file-v0.9.3-next.2) (2026-09-01)
 
 
