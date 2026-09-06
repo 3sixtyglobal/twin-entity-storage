@@ -19,6 +19,9 @@ const SUPPORT_SECONDARY_INDEXING = true;
 // Set to false for connectors that do not create named index objects in the database.
 const SUPPORT_NAMED_INDEX_OBJECTS = false;
 
+// Set to false for connectors which cannot add an index to an already created store.
+const SUPPORT_INDEX_UPDATE = true;
+
 @entity()
 class IndexedTestType {
 	@property({ type: "string", isPrimary: true })
@@ -736,6 +739,65 @@ describe("MongoDbEntityStorageConnector", () => {
 				try {
 					await connector.stop?.();
 				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_INDEX_UPDATE)(
+		"bootstrap adds an index when an existing store gains one in its schema",
+		async () => {
+			const collectionName = `${TEST_MONGODB_CONFIG.collection}_index_update_${Date.now()}`;
+			const unindexed = new MongoDbEntityStorageConnector<UnindexedTestType>({
+				entitySchema: nameof<UnindexedTestType>(),
+				config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+			});
+			const indexed = new MongoDbEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+			});
+			const client = new MongoClient(buildConnectionUrl());
+
+			try {
+				await client.connect();
+				const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+				// Create the collection from a schema which does not index the category property.
+				expect(await unindexed.bootstrap()).toBe(true);
+				const before = await col.listIndexes().toArray();
+				expect(before.some(index => "category" in (index.key as { [k: string]: number }))).toBe(
+					false
+				);
+
+				// Bootstrapping the same collection from a schema which does index it must add the index.
+				expect(await indexed.bootstrap()).toBe(true);
+				const after = await col.listIndexes().toArray();
+				const categoryIndex = after.find(index => {
+					const key = index.key as { [k: string]: number };
+					return Object.keys(key).length === 1 && key.category === 1;
+				});
+				expect(categoryIndex).toBeDefined();
+
+				// The added index has to actually serve queries routed through it.
+				await indexed.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await indexed.get("catA", "category");
+				expect(storedEntity?.id).toBe("1");
+
+				// A further bootstrap must not create the index a second time.
+				expect(await indexed.bootstrap()).toBe(true);
+				const afterSecond = await col.listIndexes().toArray();
+				expect(afterSecond).toHaveLength(after.length);
+			} finally {
+				try {
+					await indexed.teardown?.();
+				} catch {}
+				try {
+					await indexed.stop?.();
+				} catch {}
+				try {
+					await unindexed.stop?.();
+				} catch {}
+				await client.close();
 			}
 		},
 		60_000

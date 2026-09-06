@@ -21,6 +21,9 @@ const SUPPORT_SECONDARY_INDEXING = true;
 // Set to false for connectors that do not create named index objects in the database.
 const SUPPORT_NAMED_INDEX_OBJECTS = true;
 
+// Set to false for connectors which cannot add an index to an already created store.
+const SUPPORT_INDEX_UPDATE = true;
+
 /**
  * Count how many indexes lead on the given column for a table.
  * @param pool The pool to query with.
@@ -779,6 +782,65 @@ describe("MySqlEntityStorageConnector", () => {
 				} catch {}
 				try {
 					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_INDEX_UPDATE)(
+		"bootstrap adds an index when an existing store gains one in its schema",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_index_update_${Date.now()}`;
+			const unindexed = new MySqlEntityStorageConnector<UnindexedTestType>({
+				entitySchema: nameof<UnindexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			const indexed = new MySqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+
+				// Create the table from a schema which does not index the category column.
+				expect(await unindexed.bootstrap()).toBe(true);
+				expect(await countIndexesLeadingOnColumn(pool, tableName, "category")).toBe(0);
+
+				// Bootstrapping the same table from a schema which does index it must add the index.
+				expect(await indexed.bootstrap()).toBe(true);
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toContain(
+					IndexHelper.generateName(tableName, "category")
+				);
+
+				// The added index has to actually serve queries routed through it.
+				await indexed.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await indexed.get("catA", "category");
+				expect(storedEntity?.id).toBe("1");
+
+				// A further bootstrap must not create the index a second time.
+				expect(await indexed.bootstrap()).toBe(true);
+				expect(await countIndexesLeadingOnColumn(pool, tableName, "category")).toBe(1);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await indexed.teardown?.();
+				} catch {}
+				try {
+					await indexed.stop?.();
+				} catch {}
+				try {
+					await unindexed.stop?.();
 				} catch {}
 			}
 		},

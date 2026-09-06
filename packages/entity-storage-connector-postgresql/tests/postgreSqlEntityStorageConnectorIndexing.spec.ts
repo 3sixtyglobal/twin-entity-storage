@@ -21,6 +21,9 @@ const SUPPORT_SECONDARY_INDEXING = true;
 // Set to false for connectors that do not create named index objects in the database.
 const SUPPORT_NAMED_INDEX_OBJECTS = true;
 
+// Set to false for connectors which cannot add an index to an already created store.
+const SUPPORT_INDEX_UPDATE = true;
+
 /**
  * Open a direct connection to the test database for catalog inspection and manual DDL.
  * @returns A new postgres.js connection.
@@ -857,6 +860,59 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				} catch {}
 				try {
 					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_INDEX_UPDATE)(
+		"bootstrap adds an index when an existing store gains one in its schema",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_index_update_${Date.now()}`;
+			const unindexed = new PostgreSqlEntityStorageConnector<UnindexedTestType>({
+				entitySchema: nameof<UnindexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			const indexed = new PostgreSqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			let sql: postgres.Sql | undefined;
+
+			try {
+				sql = openTestConnection();
+
+				// Create the table from a schema which does not index the category column.
+				expect(await unindexed.bootstrap()).toBe(true);
+				expect(await countIndexesLeadingOnColumn(sql, tableName, "category")).toBe(0);
+
+				// Bootstrapping the same table from a schema which does index it must add the index.
+				expect(await indexed.bootstrap()).toBe(true);
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toContain(
+					IndexHelper.generateName(tableName, "category")
+				);
+
+				// The added index has to actually serve queries routed through it.
+				await indexed.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await indexed.get("catA", "category");
+				expect(storedEntity?.id).toBe("1");
+
+				// A further bootstrap must not create the index a second time.
+				expect(await indexed.bootstrap()).toBe(true);
+				expect(await countIndexesLeadingOnColumn(sql, tableName, "category")).toBe(1);
+			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await indexed.teardown?.();
+				} catch {}
+				try {
+					await indexed.stop?.();
+				} catch {}
+				try {
+					await unindexed.stop?.();
 				} catch {}
 			}
 		},

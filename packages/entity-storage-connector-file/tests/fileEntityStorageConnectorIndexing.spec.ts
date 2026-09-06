@@ -19,6 +19,9 @@ const SUPPORT_SECONDARY_INDEXING = false;
 // Set to false for connectors that do not create named index objects in the database.
 const SUPPORT_NAMED_INDEX_OBJECTS = false;
 
+// The file connector holds no indexes, so a schema which gains one needs no bootstrap action.
+const SUPPORT_INDEX_UPDATE = false;
+
 @entity()
 class IndexedTestType {
 	@property({ type: "string", isPrimary: true })
@@ -318,6 +321,39 @@ describe("FileEntityStorageConnector", () => {
 			} finally {
 				try {
 					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_INDEX_UPDATE)(
+		"bootstrap adds an index when an existing store gains one in its schema",
+		async () => {
+			const directory = path.join(os.tmpdir(), `entity-storage-index-update-${Date.now()}`);
+			const unindexed = new FileEntityStorageConnector<UnindexedTestType>({
+				entitySchema: nameof<UnindexedTestType>(),
+				config: { directory }
+			});
+			const indexed = new FileEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { directory }
+			});
+
+			try {
+				// Create the store from a schema which does not index the category property.
+				expect(await unindexed.bootstrap()).toBe(true);
+
+				// Bootstrapping the same store from a schema which does index it must add the index.
+				expect(await indexed.bootstrap()).toBe(true);
+
+				// The added index has to actually serve queries routed through it.
+				await indexed.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await indexed.get("catA", "category");
+				expect(storedEntity?.id).toBe("1");
+			} finally {
+				try {
+					await indexed.teardown?.();
 				} catch {}
 			}
 		},

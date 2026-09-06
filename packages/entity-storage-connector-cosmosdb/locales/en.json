@@ -6,7 +6,9 @@
 			"containerCreating": "Container \"{containerId}\" creating",
 			"containerExists": "Container \"{containerId}\" created or it already exists",
 			"containerDeleting": "Deleting container \"{containerId}\"",
-			"containerDeleted": "Container \"{containerId}\" deleted"
+			"containerDeleted": "Container \"{containerId}\" deleted",
+			"indexPolicyUpdating": "Adding {count} missing composite indexes to container \"{containerId}\"",
+			"indexPolicyUpdated": "Added {count} missing composite indexes to container \"{containerId}\""
 		}
 	},
 	"warn": {
@@ -28,6 +30,7 @@
 			"containerCreateFailed": "The container couldn't be created \"{containerId}\"",
 			"databaseCreateFailed": "Unable to create database \"{databaseId}\"",
 			"containerDoesNotExist": "Container \"{containerId}\" does not exist",
+			"indexPolicyUpdateFailed": "Updating the indexing policy for container \"{containerId}\" failed",
 			"getPartitionContextIdsFailed": "Unable to get partition context ids",
 			"setBatchFailed": "Unable to set batch of entities",
 			"countFailed": "Unable to count entities",

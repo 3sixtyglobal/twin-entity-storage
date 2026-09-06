@@ -3,6 +3,7 @@
 
 // DynamoDB GSIs are required by the connector's query routing; deleting a GSI causes
 // the connector to throw rather than fall back to a scan.
+import { DynamoDB } from "@aws-sdk/client-dynamodb";
 import { ContextIdStore } from "@twin.org/context";
 import {
 	ComparisonOperator,
@@ -21,6 +22,9 @@ const SUPPORT_SECONDARY_INDEXING = false;
 
 // Set to false for connectors that do not create named index objects in the database.
 const SUPPORT_NAMED_INDEX_OBJECTS = false;
+
+// Set to false for connectors which cannot add an index to an already created store.
+const SUPPORT_INDEX_UPDATE = true;
 
 @entity()
 class IndexedTestType {
@@ -58,6 +62,32 @@ function createUnindexedConnector(): DynamoDbEntityStorageConnector<UnindexedTes
 		entitySchema: nameof<UnindexedTestType>(),
 		config: { ...TEST_DYNAMODB_CONFIG, tableName: `${TEST_DYNAMODB_CONFIG.tableName}_unindexed` }
 	});
+}
+
+/**
+ * Open a direct client to the test table for describing its indexes.
+ * @returns A new DynamoDB client.
+ */
+function openTestClient(): DynamoDB {
+	return new DynamoDB({
+		region: TEST_DYNAMODB_CONFIG.region,
+		endpoint: TEST_DYNAMODB_CONFIG.endpoint,
+		credentials: {
+			accessKeyId: TEST_DYNAMODB_CONFIG.accessKeyId as string,
+			secretAccessKey: TEST_DYNAMODB_CONFIG.secretAccessKey as string
+		}
+	});
+}
+
+/**
+ * List the names of the global secondary indexes on a table.
+ * @param client The client to describe the table with.
+ * @param tableName The table to inspect.
+ * @returns The index names.
+ */
+async function globalSecondaryIndexNames(client: DynamoDB, tableName: string): Promise<string[]> {
+	const description = await client.describeTable({ TableName: tableName });
+	return (description.Table?.GlobalSecondaryIndexes ?? []).map(index => index.IndexName as string);
 }
 
 describe("DynamoDbEntityStorageConnector", () => {
@@ -325,5 +355,55 @@ describe("DynamoDbEntityStorageConnector", () => {
 			}
 		},
 		60_000
+	);
+
+	test.skipIf(!SUPPORT_INDEX_UPDATE)(
+		"bootstrap adds an index when an existing store gains one in its schema",
+		async () => {
+			const tableName = `${TEST_DYNAMODB_CONFIG.tableName}_index_update_${Date.now()}`;
+			const unindexed = new DynamoDbEntityStorageConnector<UnindexedTestType>({
+				entitySchema: nameof<UnindexedTestType>(),
+				config: { ...TEST_DYNAMODB_CONFIG, tableName }
+			});
+			const indexed = new DynamoDbEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_DYNAMODB_CONFIG, tableName }
+			});
+			const client = openTestClient();
+
+			try {
+				// Create the table from a schema which does not index the category property.
+				expect(await unindexed.bootstrap()).toBe(true);
+				expect(await globalSecondaryIndexNames(client, tableName)).not.toContain("categoryIndex");
+
+				// Bootstrapping the same table from a schema which does index it must add the index.
+				expect(await indexed.bootstrap()).toBe(true);
+
+				const description = await client.describeTable({ TableName: tableName });
+				const categoryIndex = (description.Table?.GlobalSecondaryIndexes ?? []).find(
+					index => index.IndexName === "categoryIndex"
+				);
+				expect(categoryIndex).toBeDefined();
+				expect(categoryIndex?.KeySchema?.find(key => key.KeyType === "RANGE")?.AttributeName).toBe(
+					"category"
+				);
+
+				// The added index has to actually serve queries routed through it.
+				await indexed.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await indexed.get("catA", "category");
+				expect(storedEntity?.id).toBe("1");
+
+				// A further bootstrap must not attempt to add the index again.
+				expect(await indexed.bootstrap()).toBe(true);
+				const indexNames = await globalSecondaryIndexNames(client, tableName);
+				expect(indexNames.filter(name => name === "categoryIndex")).toHaveLength(1);
+			} finally {
+				try {
+					await indexed.teardown?.();
+				} catch {}
+				client.destroy();
+			}
+		},
+		120_000
 	);
 });

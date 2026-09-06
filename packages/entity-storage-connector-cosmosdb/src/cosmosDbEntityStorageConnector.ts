@@ -281,6 +281,24 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 						containerId: this._config.containerId
 					}
 				});
+
+				// The container predates the current schema, so any composite indexes it is
+				// missing have to be added to its indexing policy.
+				try {
+					await this.ensureIndexingPolicy(nodeLogging);
+				} catch (error) {
+					await nodeLogging?.log({
+						level: "error",
+						source: CosmosDbEntityStorageConnector.CLASS_NAME,
+						ts: Date.now(),
+						message: "indexPolicyUpdateFailed",
+						error: BaseError.fromError(error),
+						data: {
+							containerId: this._config.containerId
+						}
+					});
+					return false;
+				}
 			} else {
 				await nodeLogging?.log({
 					level: "info",
@@ -1608,6 +1626,82 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 					compositeIndexes
 				}
 			: undefined;
+	}
+
+	/**
+	 * Add any composite indexes the current schema needs which are missing from an existing
+	 * container, leaving the rest of its indexing policy untouched.
+	 * @param nodeLogging The logging component.
+	 * @returns Nothing.
+	 * @internal
+	 */
+	private async ensureIndexingPolicy(nodeLogging?: ILoggingComponent): Promise<void> {
+		const desiredCompositeIndexes = this.buildIndexingPolicy()?.compositeIndexes;
+
+		if (!Is.arrayValue(desiredCompositeIndexes)) {
+			return;
+		}
+
+		const container = await this.getContainer();
+		const { resource: containerDefinition } = await container.read();
+
+		if (Is.empty(containerDefinition)) {
+			return;
+		}
+
+		const existingPolicy = containerDefinition.indexingPolicy ?? {};
+		const existingCompositeIndexes = existingPolicy.compositeIndexes ?? [];
+		const existingKeys = existingCompositeIndexes.map(compositeIndex =>
+			this.compositeIndexKey(compositeIndex)
+		);
+
+		const missingCompositeIndexes = desiredCompositeIndexes.filter(
+			compositeIndex => !existingKeys.includes(this.compositeIndexKey(compositeIndex))
+		);
+
+		if (missingCompositeIndexes.length === 0) {
+			return;
+		}
+
+		await nodeLogging?.log({
+			level: "info",
+			source: CosmosDbEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "indexPolicyUpdating",
+			data: {
+				containerId: this._config.containerId,
+				count: missingCompositeIndexes.length
+			}
+		});
+
+		await container.replace({
+			...containerDefinition,
+			indexingPolicy: {
+				...existingPolicy,
+				compositeIndexes: [...existingCompositeIndexes, ...missingCompositeIndexes]
+			}
+		});
+
+		await nodeLogging?.log({
+			level: "info",
+			source: CosmosDbEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "indexPolicyUpdated",
+			data: {
+				containerId: this._config.containerId,
+				count: missingCompositeIndexes.length
+			}
+		});
+	}
+
+	/**
+	 * Build a comparable key for a composite index so existing ones can be matched.
+	 * @param compositeIndex The composite index paths.
+	 * @returns The comparable key.
+	 * @internal
+	 */
+	private compositeIndexKey(compositeIndex: CompositePath[]): string {
+		return compositeIndex.map(path => `${path.path}:${path.order ?? "ascending"}`).join("|");
 	}
 
 	/**

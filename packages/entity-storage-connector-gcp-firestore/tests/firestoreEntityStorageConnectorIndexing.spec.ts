@@ -22,6 +22,11 @@ const SUPPORT_SECONDARY_INDEXING = false;
 // Set to false for connectors that do not create named index objects in the database.
 const SUPPORT_NAMED_INDEX_OBJECTS = false;
 
+// Firestore indexes every single field automatically, so a schema which gains a secondary
+// index needs no bootstrap action; composite indexes are managed out-of-band via the admin
+// API, which this connector's client does not expose.
+const SUPPORT_INDEX_UPDATE = false;
+
 @entity()
 class IndexedTestType {
 	@property({ type: "string", isPrimary: true })
@@ -327,6 +332,39 @@ describe("FirestoreEntityStorageConnector", () => {
 			} finally {
 				try {
 					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_INDEX_UPDATE)(
+		"bootstrap adds an index when an existing store gains one in its schema",
+		async () => {
+			const collectionName = `${TEST_FIRESTORE_CONFIG.collectionName}_index_update_${Date.now()}`;
+			const unindexed = new FirestoreEntityStorageConnector<UnindexedTestType>({
+				entitySchema: nameof<UnindexedTestType>(),
+				config: { ...TEST_FIRESTORE_CONFIG, collectionName }
+			});
+			const indexed = new FirestoreEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_FIRESTORE_CONFIG, collectionName }
+			});
+
+			try {
+				// Create the collection from a schema which does not index the category property.
+				expect(await unindexed.bootstrap()).toBe(true);
+
+				// Bootstrapping the same collection from a schema which does index it must add the index.
+				expect(await indexed.bootstrap()).toBe(true);
+
+				// The added index has to actually serve queries routed through it.
+				await indexed.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await indexed.get("catA", "category");
+				expect(storedEntity?.id).toBe("1");
+			} finally {
+				try {
+					await indexed.teardown?.();
 				} catch {}
 			}
 		},

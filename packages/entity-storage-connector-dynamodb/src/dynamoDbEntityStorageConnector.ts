@@ -1,14 +1,20 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import {
+	type AttributeDefinition,
 	type AttributeValue,
 	BatchWriteItemCommand,
+	BillingMode,
 	type CreateTableCommandInput,
 	DynamoDB,
 	type DynamoDBClientConfig,
 	type GlobalSecondaryIndex,
+	IndexStatus,
+	KeyType,
+	ProjectionType,
 	QueryCommand,
 	ScanCommand as RawScanCommand,
+	ScalarAttributeType,
 	waitUntilTableExists,
 	waitUntilTableNotExists
 } from "@aws-sdk/client-dynamodb";
@@ -48,7 +54,7 @@ import {
 	type EntityCondition,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
-	type EntitySchemaPropertyType,
+	EntitySchemaPropertyType,
 	type IComparator,
 	type IEntitySchema,
 	type IEntitySchemaProperty,
@@ -107,6 +113,18 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _PARTITION_KEY_VALUE: string = "root";
+
+	/**
+	 * Milliseconds to wait for a global secondary index to finish building.
+	 * @internal
+	 */
+	private static readonly _INDEX_ACTIVE_MAX_WAIT_MS: number = 60000;
+
+	/**
+	 * Milliseconds between polls while waiting for a global secondary index to finish building.
+	 * @internal
+	 */
+	private static readonly _INDEX_ACTIVE_POLL_INTERVAL_MS: number = 500;
 
 	/**
 	 * The name for the schema.
@@ -310,60 +328,37 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 				// is always required when querying using sort parameters
 				tableParams.AttributeDefinitions?.push({
 					AttributeName: DynamoDbEntityStorageConnector._PARTITION_KEY,
-					AttributeType: "S"
+					AttributeType: ScalarAttributeType.S
 				});
 				tableParams.KeySchema?.push({
 					AttributeName: DynamoDbEntityStorageConnector._PARTITION_KEY,
-					KeyType: "HASH"
+					KeyType: KeyType.HASH
 				});
-
-				const gsi: GlobalSecondaryIndex[] = [];
 
 				if (Is.arrayValue(this._entitySchema.properties)) {
 					for (const prop of this._entitySchema.properties) {
 						if (prop.isPrimary) {
 							tableParams.AttributeDefinitions?.push({
 								AttributeName: prop.property as string,
-								AttributeType: prop.type === "integer" || prop.type === "number" ? "N" : "S"
+								AttributeType: this.attributeType(prop)
 							});
 							tableParams.KeySchema?.push({
 								AttributeName: prop.property as string,
-								KeyType: "RANGE"
-							});
-						} else if (Is.stringValue(prop.sortDirection) || prop.isSecondary) {
-							// You can only query and sort items if you have a secondary index
-							// defined for the property
-							tableParams.AttributeDefinitions?.push({
-								AttributeName: prop.property as string,
-								AttributeType: prop.type === "integer" || prop.type === "number" ? "N" : "S"
-							});
-
-							gsi.push({
-								IndexName: `${prop.property as string}Index`,
-								KeySchema: [
-									{
-										AttributeName: DynamoDbEntityStorageConnector._PARTITION_KEY,
-										KeyType: "HASH"
-									},
-									{
-										AttributeName: prop.property as string,
-										KeyType: "RANGE"
-									}
-								],
-								Projection: {
-									ProjectionType: "ALL"
-								},
-								ProvisionedThroughput: {
-									ReadCapacityUnits: 1,
-									WriteCapacityUnits: 1
-								}
+								KeyType: KeyType.RANGE
 							});
 						}
 					}
 				}
 
+				// You can only query and sort items if you have a secondary index
+				// defined for the property
+				const gsi = this.buildGlobalSecondaryIndexes();
+
 				if (gsi.length > 0) {
-					tableParams.GlobalSecondaryIndexes = gsi;
+					for (const secondaryIndex of gsi) {
+						tableParams.AttributeDefinitions?.push(secondaryIndex.attributeDefinition);
+					}
+					tableParams.GlobalSecondaryIndexes = gsi.map(secondaryIndex => secondaryIndex.index);
 				}
 
 				await dbConnection.createTable(tableParams);
@@ -423,6 +418,12 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 					tableName: this._config.tableName
 				}
 			});
+
+			// The table predates the current schema, so any indexes it is missing have to be
+			// added to it, as they can only be declared up front when the table is created.
+			if (!(await this.ensureGlobalSecondaryIndexes(nodeLogging))) {
+				return false;
+			}
 		}
 
 		return true;
@@ -1793,6 +1794,234 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Map an entity schema property to the scalar attribute type of its key schema entry.
+	 * @param prop The property to map.
+	 * @returns The scalar attribute type.
+	 * @internal
+	 */
+	private attributeType(prop: IEntitySchemaProperty<T>): ScalarAttributeType {
+		return prop.type === EntitySchemaPropertyType.Integer ||
+			prop.type === EntitySchemaPropertyType.Number
+			? ScalarAttributeType.N
+			: ScalarAttributeType.S;
+	}
+
+	/**
+	 * Build the global secondary indexes required by the entity schema.
+	 * @returns The indexes and the attribute definition each one's key schema requires.
+	 * @internal
+	 */
+	private buildGlobalSecondaryIndexes(): {
+		index: GlobalSecondaryIndex;
+		attributeDefinition: AttributeDefinition;
+	}[] {
+		const secondaryIndexes: {
+			index: GlobalSecondaryIndex;
+			attributeDefinition: AttributeDefinition;
+		}[] = [];
+
+		for (const prop of this._entitySchema.properties ?? []) {
+			if (!prop.isPrimary && (Is.stringValue(prop.sortDirection) || prop.isSecondary)) {
+				const propertyName = prop.property as string;
+
+				secondaryIndexes.push({
+					attributeDefinition: {
+						AttributeName: propertyName,
+						AttributeType: this.attributeType(prop)
+					},
+					index: {
+						IndexName: this.indexName(propertyName),
+						KeySchema: [
+							{
+								AttributeName: DynamoDbEntityStorageConnector._PARTITION_KEY,
+								KeyType: KeyType.HASH
+							},
+							{
+								AttributeName: propertyName,
+								KeyType: KeyType.RANGE
+							}
+						],
+						Projection: {
+							ProjectionType: ProjectionType.ALL
+						},
+						ProvisionedThroughput: {
+							ReadCapacityUnits: 1,
+							WriteCapacityUnits: 1
+						}
+					}
+				});
+			}
+		}
+
+		return secondaryIndexes;
+	}
+
+	/**
+	 * Add any global secondary indexes the current schema needs which are missing from the table.
+	 * @param nodeLogging The logging component.
+	 * @returns True if the table has all the indexes the schema requires.
+	 * @internal
+	 */
+	private async ensureGlobalSecondaryIndexes(nodeLogging?: ILoggingComponent): Promise<boolean> {
+		const secondaryIndexes = this.buildGlobalSecondaryIndexes();
+
+		if (secondaryIndexes.length === 0) {
+			return true;
+		}
+
+		try {
+			const dbConnection = await this.getClient();
+			const description = await dbConnection.describeTable({
+				TableName: this._config.tableName
+			});
+
+			const existingIndexNames = (description.Table?.GlobalSecondaryIndexes ?? []).map(
+				existingIndex => existingIndex.IndexName
+			);
+			const existingAttributes = description.Table?.AttributeDefinitions ?? [];
+
+			// An on demand table rejects a throughput on its indexes, so it has to be omitted.
+			const isOnDemand =
+				description.Table?.BillingModeSummary?.BillingMode === BillingMode.PAY_PER_REQUEST;
+
+			for (const secondaryIndex of secondaryIndexes) {
+				const indexName = secondaryIndex.index.IndexName as string;
+
+				// An index still building is reported by name, so it does not need requesting again.
+				if (!existingIndexNames.includes(indexName)) {
+					await nodeLogging?.log({
+						level: "info",
+						source: DynamoDbEntityStorageConnector.CLASS_NAME,
+						ts: Date.now(),
+						message: "indexCreating",
+						data: {
+							tableName: this._config.tableName,
+							indexName
+						}
+					});
+
+					// DynamoDB accepts only one index creation per update, and the index has to
+					// finish building before the next one can be requested.
+					await dbConnection.updateTable({
+						TableName: this._config.tableName,
+						AttributeDefinitions: this.mergeAttributeDefinitions(
+							existingAttributes,
+							secondaryIndex.attributeDefinition
+						),
+						GlobalSecondaryIndexUpdates: [
+							{
+								Create: {
+									IndexName: indexName,
+									KeySchema: secondaryIndex.index.KeySchema ?? [],
+									Projection: secondaryIndex.index.Projection ?? {},
+									ProvisionedThroughput: isOnDemand
+										? undefined
+										: secondaryIndex.index.ProvisionedThroughput
+								}
+							}
+						]
+					});
+
+					await this.waitForIndexActive(indexName);
+
+					existingIndexNames.push(indexName);
+					existingAttributes.push(secondaryIndex.attributeDefinition);
+
+					await nodeLogging?.log({
+						level: "info",
+						source: DynamoDbEntityStorageConnector.CLASS_NAME,
+						ts: Date.now(),
+						message: "indexCreated",
+						data: {
+							tableName: this._config.tableName,
+							indexName
+						}
+					});
+				}
+			}
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: DynamoDbEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "indexCreateFailed",
+				error: BaseError.fromError(err),
+				data: {
+					tableName: this._config.tableName
+				}
+			});
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Combine the table's attribute definitions with the one a new index needs.
+	 * @param existing The attribute definitions already on the table.
+	 * @param additional The attribute definition the new index key schema requires.
+	 * @returns The combined attribute definitions.
+	 * @internal
+	 */
+	private mergeAttributeDefinitions(
+		existing: AttributeDefinition[],
+		additional: AttributeDefinition
+	): AttributeDefinition[] {
+		const alreadyDefined = existing.some(
+			attribute => attribute.AttributeName === additional.AttributeName
+		);
+
+		return alreadyDefined ? [...existing] : [...existing, additional];
+	}
+
+	/**
+	 * Wait for a global secondary index to finish building.
+	 * @param indexName The index to wait for.
+	 * @returns Nothing.
+	 * @throws GeneralError if the index is still building when the wait expires.
+	 * @internal
+	 */
+	private async waitForIndexActive(indexName: string): Promise<void> {
+		const dbConnection = await this.getClient();
+		const attempts = Math.ceil(
+			DynamoDbEntityStorageConnector._INDEX_ACTIVE_MAX_WAIT_MS /
+				DynamoDbEntityStorageConnector._INDEX_ACTIVE_POLL_INTERVAL_MS
+		);
+
+		for (let attempt = 0; attempt < attempts; attempt++) {
+			const description = await dbConnection.describeTable({
+				TableName: this._config.tableName
+			});
+			const index = description.Table?.GlobalSecondaryIndexes?.find(
+				existingIndex => existingIndex.IndexName === indexName
+			);
+
+			if (index?.IndexStatus === IndexStatus.ACTIVE) {
+				return;
+			}
+
+			await new Promise(resolve =>
+				setTimeout(resolve, DynamoDbEntityStorageConnector._INDEX_ACTIVE_POLL_INTERVAL_MS)
+			);
+		}
+
+		throw new GeneralError(DynamoDbEntityStorageConnector.CLASS_NAME, "indexCreateTimeout", {
+			tableName: this._config.tableName,
+			indexName
+		});
+	}
+
+	/**
+	 * Build the name of the global secondary index for a property.
+	 * @param propertyName The property the index is for.
+	 * @returns The index name.
+	 * @internal
+	 */
+	private indexName(propertyName: string): string {
+		return `${propertyName}Index`;
+	}
+
+	/**
 	 * Find all the entities which match the conditions.
 	 * @param conditions The conditions to match for the entities.
 	 * @param sortProperties The optional sort order.
@@ -1925,7 +2154,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		scanAscending: boolean;
 	} {
 		let indexName: string | undefined = Is.stringValue(secondaryIndex)
-			? `${secondaryIndex}Index`
+			? this.indexName(secondaryIndex)
 			: undefined;
 		let gsiAttribute: string | undefined = secondaryIndex;
 		let scanAscending = true;
@@ -1939,7 +2168,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 				indexName = undefined;
 				gsiAttribute = undefined;
 			} else {
-				indexName = `${primarySort.property as string}Index`;
+				indexName = this.indexName(primarySort.property as string);
 				gsiAttribute = primarySort.property as string;
 			}
 			scanAscending = primarySort.sortDirection === SortDirection.Ascending;
