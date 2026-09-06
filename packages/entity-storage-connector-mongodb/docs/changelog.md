@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.3-next.4](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mongodb-v0.9.3-next.3...entity-storage-connector-mongodb-v0.9.3-next.4) (2026-09-06)
+
+
+### Features
+
+* dynamic index addition ([65a501b](https://github.com/iotaledger/twin-entity-storage/commit/65a501b670673c245c137d6d5139f8e23a70c789))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.3-next.3 to 0.9.3-next.4
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.3-next.3 to 0.9.3-next.4
+
 ## [0.9.3-next.3](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mongodb-v0.9.3-next.2...entity-storage-connector-mongodb-v0.9.3-next.3) (2026-09-02)
 
 
