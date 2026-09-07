@@ -88,9 +88,9 @@ jobs:
       - name: Install dependencies
         run: |
           for i in {1..5}; do
-            npm ci && break || {
+            npm ci --no-audit --no-fund && break || {
               if [ $i -eq 5 ]; then
-                echo "npm ci failed after 3 attempts"
+                echo "npm ci failed after 5 attempts"
                 exit 1
               fi
               echo "npm ci failed, retrying in 30 seconds (attempt $i/3)..."

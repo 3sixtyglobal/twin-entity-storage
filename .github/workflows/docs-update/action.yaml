@@ -71,9 +71,9 @@ runs:
       run: |
         cd "$TARGET_DIR"
         for i in {1..5}; do
-          npm ci && break || {
+          npm ci --no-audit --no-fund && break || {
             if [ $i -eq 5 ]; then
-              echo "npm ci failed after 3 attempts"
+              echo "npm ci failed after 5 attempts"
               exit 1
             fi
             echo "npm ci failed, retrying in 30 seconds (attempt $i/3)..."
@@ -117,7 +117,11 @@ runs:
         echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
 
         git add -- ':(glob)**/docs/**'
-        git commit -S -m "docs: regenerate package documentation" --signoff
+        # [skip ci] stops GitHub creating the pull_request runs for this branch at
+        # all. They are opened by GITHUB_TOKEN, so GitHub parks them as
+        # action_required with no jobs and then relabels them as failures when the
+        # PR merges. Nothing is lost: lint, build and docs already ran above.
+        git commit -S -m "docs: regenerate package documentation [skip ci]" --signoff
         git push origin "$BRANCH_NAME"
 
     # Open PR back to the target branch so the docs commit goes through normal review gates.
@@ -147,23 +151,38 @@ runs:
       env:
         GH_TOKEN: ${{ inputs.release_token }}
 
-    # Merge immediately when checks have already passed; fall back to auto-merge otherwise.
-    - name: Merge or enable auto-merge for docs update PR
+    # Poll until the PR is mergeable, then merge directly.
+    # Auto-merge is not used because it requires a repository-level setting.
+    #
+    # UNSTABLE is accepted alongside CLEAN. This PR is opened by GITHUB_TOKEN, so
+    # GitHub parks the workflow runs it triggers as action_required and they never
+    # execute, which leaves the PR permanently UNSTABLE rather than CLEAN. The
+    # next branch has no required status checks, so a non-required check that is
+    # not successful must not block the merge. Only genuinely unmergeable states
+    # (BLOCKED, DIRTY, BEHIND) keep this loop waiting.
+    - name: Merge docs update PR
       if: ${{ steps.create-pr.outputs.pr_number != '' }}
       shell: bash
       run: |
         PR_NUMBER="${{ steps.create-pr.outputs.pr_number }}"
-        MERGE_STATE=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json mergeStateStatus --jq '.mergeStateStatus')
 
-        echo "PR #$PR_NUMBER mergeStateStatus: $MERGE_STATE"
+        for i in {1..30}; do
+          MERGE_STATE=$(gh pr view "$PR_NUMBER" --repo "${{ github.repository }}" --json mergeStateStatus --jq '.mergeStateStatus')
+          echo "PR #$PR_NUMBER mergeStateStatus: $MERGE_STATE (attempt $i/30)"
 
-        if [ "$MERGE_STATE" = "CLEAN" ]; then
-          echo "PR is mergeable now; merging immediately."
-          gh pr merge "$PR_NUMBER" --squash
-        else
-          echo "PR is not mergeable yet; enabling auto-merge."
-          gh pr merge "$PR_NUMBER" --auto --squash
-        fi
+          if [ "$MERGE_STATE" = "CLEAN" ] || [ "$MERGE_STATE" = "UNSTABLE" ]; then
+            echo "PR is mergeable; merging now."
+            gh pr merge "$PR_NUMBER" --squash
+            exit 0
+          fi
+
+          if [ "$i" -eq 30 ]; then
+            echo "::error::Timed out waiting for PR #$PR_NUMBER to become mergeable (last state: $MERGE_STATE)."
+            exit 1
+          fi
+
+          sleep 10
+        done
       env:
         GH_TOKEN: ${{ inputs.release_token }}
 

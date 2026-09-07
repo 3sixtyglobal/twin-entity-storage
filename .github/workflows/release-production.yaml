@@ -204,7 +204,13 @@ jobs:
           # Correctly handles all cases: adds, modifies, deletes, and renames.
           git diff --binary origin/main "origin/$SOURCE_BRANCH" | git apply --index
 
-          git commit -S -m "chore: merge $SOURCE_BRANCH into main for production release"
+          # [skip ci] stops GitHub creating the pull_request runs for this branch.
+          # They are opened by GITHUB_TOKEN, so GitHub parks them as
+          # action_required with no jobs and relabels them as failures when the PR
+          # merges. Closing this PR starts no release job: process-workspaces
+          # requires the 'autorelease: pending' label, which only the release PR
+          # has. Covers both the next and hotfix source branches.
+          git commit -S -m "chore: merge $SOURCE_BRANCH into main for production release [skip ci]"
           git push origin "$BRANCH_NAME"
           echo "branch_name=$BRANCH_NAME" >> "$GITHUB_OUTPUT"
 
@@ -663,8 +669,14 @@ jobs:
 
       - name: Load Test Environment Variables
         shell: bash
+        env:
+          TEST_ENV_VARS: ${{ secrets.TWIN_TEST_ENV_VARS }}
         run: |
-          printf '%s\n' "${{ secrets.TWIN_TEST_ENV_VARS }}" >> "$GITHUB_ENV"
+          while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            echo "::add-mask::${line#*=}"
+            printf '%s\n' "$line" >> "$GITHUB_ENV"
+          done <<< "$TEST_ENV_VARS"
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -688,7 +700,7 @@ jobs:
         run: |
           cd ${{ matrix.package }}
           for i in {1..5}; do
-            npm install && break || {
+            npm install --no-audit --no-fund && break || {
               if [ $i -eq 5 ]; then
                 echo "npm install failed after 5 attempts"
                 exit 1
