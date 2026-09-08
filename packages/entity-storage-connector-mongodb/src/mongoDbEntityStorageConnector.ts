@@ -34,6 +34,7 @@ import {
 import {
 	ConnectionHelper,
 	EntityStorageHelper,
+	MigrationHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -66,6 +67,13 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
+	 * Maximum base collection name length, leaving room in the 255-byte namespace limit for the
+	 * database name and the partition suffix.
+	 * @internal
+	 */
+	private static readonly _MAX_IDENTIFIER_LENGTH: number = 120;
 
 	/**
 	 * The name for the schema.
@@ -900,7 +908,10 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	public async createTargetConnector<U>(
 		newEntitySchema: string
 	): Promise<IEntityStorageConnector<U>> {
-		const migrationCollectionName = `${this._config.collection}Migration${Date.now()}`;
+		const migrationCollectionName = MigrationHelper.generateTargetName(
+			this._config.collection,
+			MongoDbEntityStorageConnector._MAX_IDENTIFIER_LENGTH
+		);
 		return new MongoDbEntityStorageConnector<U>({
 			entitySchema: newEntitySchema,
 			config: {

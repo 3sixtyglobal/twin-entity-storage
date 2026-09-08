@@ -39,6 +39,7 @@ import {
 	ConnectionHelper,
 	EntityStorageHelper,
 	IndexHelper,
+	MigrationHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -83,6 +84,12 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
+	 * MySQL's maximum identifier length in characters.
+	 * @internal
+	 */
+	private static readonly _MAX_IDENTIFIER_LENGTH: number = 64;
 
 	/**
 	 * The name for the schema.
@@ -284,8 +291,9 @@ export class MySqlEntityStorageConnector<T = unknown>
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
+		let pool: Pool;
 		try {
-			const pool = await this.getPool();
+			pool = await this.getPool();
 
 			const databaseExists = await this.databaseExists();
 			if (!databaseExists) {
@@ -312,7 +320,21 @@ export class MySqlEntityStorageConnector<T = unknown>
 					}
 				});
 			}
+		} catch (error) {
+			await nodeLogging?.log({
+				level: "error",
+				source: MySqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "databaseCreateFailed",
+				error: BaseError.fromError(error),
+				data: {
+					databaseName: this._config.database
+				}
+			});
+			return false;
+		}
 
+		try {
 			const tableExists = await this.tableExists();
 			if (!tableExists) {
 				await nodeLogging?.log({
@@ -356,10 +378,10 @@ export class MySqlEntityStorageConnector<T = unknown>
 				level: "error",
 				source: MySqlEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
-				message: "databaseCreateFailed",
+				message: "tableCreateFailed",
 				error: BaseError.fromError(error),
 				data: {
-					databaseName: this._config.database
+					tableName: this._config.tableName
 				}
 			});
 			return false;
@@ -1101,7 +1123,10 @@ export class MySqlEntityStorageConnector<T = unknown>
 	public async createTargetConnector<U>(
 		newEntitySchema: string
 	): Promise<IEntityStorageConnector<U>> {
-		const migrationTableName = `${this._config.tableName}Migration${Date.now()}`;
+		const migrationTableName = MigrationHelper.generateTargetName(
+			this._config.tableName,
+			MySqlEntityStorageConnector._MAX_IDENTIFIER_LENGTH
+		);
 		return new MySqlEntityStorageConnector<U>({
 			entitySchema: newEntitySchema,
 			config: {

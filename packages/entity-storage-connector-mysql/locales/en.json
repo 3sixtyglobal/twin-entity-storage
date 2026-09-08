@@ -28,6 +28,7 @@
 			"conditionalNotSupported": "Conditional operator \"{operator}\" is not supported",
 			"entitySchemaPropertiesUndefined": "The entity schema properties are undefined",
 			"databaseCreateFailed": "Unable to create database \"{databaseName}\"",
+			"tableCreateFailed": "Unable to create table \"{tableName}\"",
 			"setBatchFailed": "Unable to set batch of entities",
 			"countFailed": "Unable to count entities",
 			"emptyFailed": "Unable to empty entity storage",

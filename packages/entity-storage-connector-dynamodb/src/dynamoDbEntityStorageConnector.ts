@@ -64,6 +64,7 @@ import {
 import {
 	ConnectionHelper,
 	EntityStorageHelper,
+	MigrationHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -95,6 +96,12 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _BATCH_CHUNK_SIZE: number = 25;
+
+	/**
+	 * DynamoDB's maximum table name length in characters.
+	 * @internal
+	 */
+	private static readonly _MAX_IDENTIFIER_LENGTH: number = 255;
 
 	/**
 	 * Number of BatchWriteCommand calls to dispatch concurrently in setBatch.
@@ -1204,9 +1211,10 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	public async createTargetConnector<U>(
 		newEntitySchema: string
 	): Promise<IEntityStorageConnector<U>> {
-		// We create a new table for the migration with a unique name to avoid conflicts with the existing table
-		// This table will be swapped with the existing table once the migration is finalized.
-		const migrationTableName = `${this._config.tableName}Migration${Date.now()}`;
+		const migrationTableName = MigrationHelper.generateTargetName(
+			this._config.tableName,
+			DynamoDbEntityStorageConnector._MAX_IDENTIFIER_LENGTH
+		);
 		return new DynamoDbEntityStorageConnector<U>({
 			entitySchema: newEntitySchema,
 			config: {

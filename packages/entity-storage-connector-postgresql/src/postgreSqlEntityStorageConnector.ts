@@ -38,6 +38,7 @@ import {
 	ConnectionHelper,
 	EntityStorageHelper,
 	IndexHelper,
+	MigrationHelper,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
 } from "@twin.org/entity-storage-models";
@@ -81,6 +82,12 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
+	 * PostgreSQL's maximum identifier length in characters; longer names are silently truncated.
+	 * @internal
+	 */
+	private static readonly _MAX_IDENTIFIER_LENGTH: number = 63;
 
 	/**
 	 * The name for the schema.
@@ -223,6 +230,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
+		let dbConnection: postgres.Sql;
 		try {
 			const adminClient = postgres(this.createConnectionConfig(false));
 			try {
@@ -254,8 +262,22 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				await adminClient.end();
 			}
 
-			const dbConnection = await this.getClient();
+			dbConnection = await this.getClient();
+		} catch (error) {
+			await nodeLogging?.log({
+				level: "error",
+				source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "databaseCreateFailed",
+				error: BaseError.fromError(error),
+				data: {
+					databaseName: this._config.database
+				}
+			});
+			return false;
+		}
 
+		try {
 			const tableExists = await this.tableExists();
 
 			if (!tableExists) {
@@ -298,10 +320,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				level: "error",
 				source: PostgreSqlEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
-				message: "databaseCreateFailed",
+				message: "tableCreateFailed",
 				error: BaseError.fromError(error),
 				data: {
-					databaseName: this._config.database
+					tableName: this._config.tableName
 				}
 			});
 			return false;
@@ -929,7 +951,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			entitySchema: entitySchemaName,
 			config: {
 				...this._config,
-				tableName: `${this._config.tableName}Migration${Date.now()}`
+				tableName: MigrationHelper.generateTargetName(
+					this._config.tableName,
+					PostgreSqlEntityStorageConnector._MAX_IDENTIFIER_LENGTH
+				)
 			},
 			partitionContextIds: this._partitionContextIds
 		});

@@ -196,6 +196,9 @@ let createConnector: (
 	storageId?: string
 ) => Promise<IEntityStorageMigrationConnector>;
 
+// Legal as a source name, but over the backend's limit once a migration suffix is appended.
+const LONG_NAME_STORAGE_ID = "a".repeat(1460);
+
 describe("FirestoreEntityStorageConnector - partitioning and migration", () => {
 	beforeAll(async () => {
 		EntitySchemaFactory.register(nameof<MigV1>(), () => EntitySchemaHelper.getSchema(MigV1));
@@ -1009,6 +1012,28 @@ describe("FirestoreEntityStorageConnector - partitioning and migration", () => {
 			currentUser = "bob";
 			expect(((await finalConnector.get("1")) as MigV2).newField).toBe("b1");
 			expect(((await finalConnector.get("2")) as MigV2).newField).toBe("b2");
+		});
+
+		test("migrates a table whose prefixed name leaves no room for the migration suffix", async () => {
+			const source = (await createConnector(
+				nameof<MigV1>(),
+				undefined,
+				LONG_NAME_STORAGE_ID
+			)) as IEntityStorageMigrationConnector<MigV1>;
+			await source.set({ id: "1", legacyField: "a" });
+			await source.set({ id: "2", legacyField: "b" });
+
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigV2>(),
+				await source.getPartitionContextIds(),
+				[makeStep(source, nameof<MigV2>())]
+			);
+
+			expect(migrated).toBe(2);
+			expect(await finalConnector.count()).toBe(2);
+			expect(await finalConnector.get("1")).toBeDefined();
+			expect(await finalConnector.get("2")).toBeDefined();
 		});
 	});
 });

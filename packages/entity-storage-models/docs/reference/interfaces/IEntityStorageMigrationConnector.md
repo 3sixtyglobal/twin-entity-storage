@@ -339,6 +339,8 @@ The list of unique context ids, undefined if not partitioned, or [] if partition
 > **createTargetConnector**\<`U`\>(`newEntitySchema`): `Promise`\<[`IEntityStorageConnector`](IEntityStorageConnector.md)\<`U`\>\>
 
 Create the target connector for performing the migration it will use a temporary storage location.
+Backends with a bounded identifier length should name it with MigrationHelper.generateTargetName
+and their own limit.
 
 #### Type Parameters
 

@@ -43,6 +43,7 @@ import {
 import {
 	ConnectionHelper,
 	EntityStorageHelper,
+	MigrationHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -75,6 +76,12 @@ export class FirestoreEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _BATCH_CHUNK_SIZE: number = 500;
+
+	/**
+	 * Maximum base collection name length, leaving room in the 1500-byte id limit for the partition suffix.
+	 * @internal
+	 */
+	private static readonly _MAX_IDENTIFIER_LENGTH: number = 1024;
 
 	/**
 	 * Separator used between context ID parts in Firestore collection names.
@@ -802,7 +809,10 @@ export class FirestoreEntityStorageConnector<T = unknown>
 	public async createTargetConnector<U>(
 		newEntitySchema: string
 	): Promise<IEntityStorageConnector<U>> {
-		const migrationCollectionName = `${this._config.collectionName}Migration${Date.now()}`;
+		const migrationCollectionName = MigrationHelper.generateTargetName(
+			this._config.collectionName,
+			FirestoreEntityStorageConnector._MAX_IDENTIFIER_LENGTH
+		);
 		return new FirestoreEntityStorageConnector<U>({
 			entitySchema: newEntitySchema,
 			config: { ...this._config, collectionName: migrationCollectionName },

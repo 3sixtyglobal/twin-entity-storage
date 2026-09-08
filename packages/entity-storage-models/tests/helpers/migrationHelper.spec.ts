@@ -7,7 +7,7 @@ import {
 	ContextIdStore,
 	type IContextIds
 } from "@twin.org/context";
-import { GeneralError } from "@twin.org/core";
+import { GeneralError, Is } from "@twin.org/core";
 import {
 	EntitySchemaPropertyType,
 	type IEntitySchemaDiff,
@@ -592,6 +592,63 @@ describe("MigrationHelper.applyEntityChain", () => {
 });
 
 // ---------------------------------------------------------------------------
+// generateTargetName tests
+// ---------------------------------------------------------------------------
+
+describe("MigrationHelper.generateTargetName", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	test("bounds the result to maxIdentifierLength using the head of a long base name", () => {
+		const base = "a".repeat(200);
+		const name = MigrationHelper.generateTargetName(base, 64);
+		expect(name.length).toBe(64);
+		expect(name.startsWith(base.slice(0, 43))).toBe(true);
+	});
+
+	test("still appends the marker and hash when the base name already fits", () => {
+		const name = MigrationHelper.generateTargetName("t", 64);
+		expect(name.startsWith("tMigration")).toBe(true);
+		expect(name.length).toBe(22);
+	});
+
+	test("ends with the marker followed by a 12-character hex hash", () => {
+		const name = MigrationHelper.generateTargetName("some-table", 64);
+		expect(name).toMatch(/Migration[\da-f]{12}$/);
+	});
+
+	test("is deterministic for the same base name and clock, differs when the clock advances", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(1_700_000_000_000);
+		const a = MigrationHelper.generateTargetName("my-table", 64);
+		const b = MigrationHelper.generateTargetName("my-table", 64);
+		expect(a).toBe(b);
+
+		vi.setSystemTime(1_700_000_000_001);
+		const c = MigrationHelper.generateTargetName("my-table", 64);
+		expect(c).not.toBe(a);
+	});
+
+	test("never equals the base name it was derived from", () => {
+		const base = "short";
+		const name = MigrationHelper.generateTargetName(base, 64);
+		expect(name).not.toBe(base);
+	});
+
+	test("rejects an empty base name, a non-integer max length, and a max length too small for the suffix", () => {
+		expect(() => MigrationHelper.generateTargetName("", 64)).toThrow();
+		expect(() => MigrationHelper.generateTargetName("table", 63.5)).toThrow();
+		expect(() => MigrationHelper.generateTargetName("table", 21)).toThrow(
+			expect.objectContaining({
+				name: "GeneralError",
+				message: "migrationHelper.maxIdentifierLengthTooSmall"
+			})
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // migrateWithChain tests
 // ---------------------------------------------------------------------------
 
@@ -616,7 +673,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 		return {
 			className: () => "TargetStub",
 			getSchema: vi.fn().mockReturnValue({ type: "TargetSchema", properties: v1Props }),
-			bootstrap: vi.fn().mockResolvedValue(undefined),
+			bootstrap: vi.fn().mockResolvedValue(true),
 			start: vi.fn().mockResolvedValue(undefined),
 			setBatch: vi.fn().mockImplementation(async (batch: { [key: string]: unknown }[]) => {
 				written.push(...batch);
@@ -639,7 +696,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 			className: () => "SourceStub",
 			connectorVersion: vi.fn().mockReturnValue(1),
 			getSchema: vi.fn().mockReturnValue({ type: "SourceSchema", properties: v0Props }),
-			bootstrap: vi.fn().mockResolvedValue(undefined),
+			bootstrap: vi.fn().mockResolvedValue(true),
 			start: vi.fn().mockResolvedValue(undefined),
 			query: vi.fn().mockResolvedValue({ entities }),
 			count: vi.fn().mockResolvedValue(entities.length),
@@ -742,6 +799,46 @@ describe("MigrationHelper.migrateWithChain", () => {
 			)
 		).rejects.toThrow();
 
+		expect(source.cleanupMigration).toHaveBeenCalledWith(target, undefined, undefined);
+	});
+
+	test("aborts and cleans up when the target connector fails to bootstrap", async () => {
+		const target = makeTargetConnector();
+		if (Is.function(target.bootstrap)) {
+			vi.mocked(target.bootstrap).mockResolvedValue(false);
+		}
+		const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+
+		await expect(
+			MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				await source.getPartitionContextIds(),
+				[singleStep]
+			)
+		).rejects.toThrow(GeneralError);
+
+		expect(target.setBatch).not.toHaveBeenCalled();
+		expect(source.cleanupMigration).toHaveBeenCalledWith(target, undefined, undefined);
+	});
+
+	test("aborts when the source connector fails to bootstrap", async () => {
+		const target = makeTargetConnector();
+		const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+		if (Is.function(source.bootstrap)) {
+			vi.mocked(source.bootstrap).mockResolvedValue(false);
+		}
+
+		await expect(
+			MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				await source.getPartitionContextIds(),
+				[singleStep]
+			)
+		).rejects.toThrow(GeneralError);
+
+		expect(target.setBatch).not.toHaveBeenCalled();
 		expect(source.cleanupMigration).toHaveBeenCalledWith(target, undefined, undefined);
 	});
 

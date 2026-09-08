@@ -5,10 +5,13 @@ import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	Converter,
 	GeneralError,
+	Guards,
 	Is,
 	ObjectHelper
 } from "@twin.org/core";
+import { Blake2b } from "@twin.org/crypto";
 import {
 	EntitySchemaDiffHelper,
 	EntitySchemaPropertyType,
@@ -33,6 +36,18 @@ export class MigrationHelper {
 	 * Runtime name for the class.
 	 */
 	public static readonly CLASS_NAME: string = nameof<MigrationHelper>();
+
+	/**
+	 * Marker between the base name and the hash in a generated target name.
+	 * @internal
+	 */
+	private static readonly _TARGET_MARKER: string = "Migration";
+
+	/**
+	 * Hex characters of the hash kept in a generated target name.
+	 * @internal
+	 */
+	private static readonly _TARGET_HASH_LENGTH: number = 12;
 
 	/**
 	 * Performs a chain migration in a single connector swap, regardless of how many version
@@ -73,8 +88,16 @@ export class MigrationHelper {
 
 			targetConnector = await sourceConnector.createTargetConnector(targetSchemaName);
 
-			await MigrationHelper.startupConnector(sourceConnector, loggingComponentType);
-			await MigrationHelper.startupConnector(targetConnector, loggingComponentType);
+			await MigrationHelper.startupConnector(
+				sourceConnector,
+				sourceConnector.getSchema().type ?? "",
+				loggingComponentType
+			);
+			await MigrationHelper.startupConnector(
+				targetConnector,
+				targetSchemaName,
+				loggingComponentType
+			);
 
 			// undefined → not partitioned: run one pass with empty context.
 			// []        → partitioned but table is empty: skip all passes (count() never called).
@@ -346,18 +369,55 @@ export class MigrationHelper {
 	}
 
 	/**
+	 * Generate a length-bounded name for a migration's temporary target storage. The marker and
+	 * hash are always appended, as finalizeMigration swaps the target into the source name.
+	 * @param baseName The name of the source storage.
+	 * @param maxIdentifierLength The maximum identifier length allowed by the backend.
+	 * @returns The target name, at most maxIdentifierLength characters.
+	 * @throws GeneralError if maxIdentifierLength cannot fit the marker and hash.
+	 */
+	public static generateTargetName(baseName: string, maxIdentifierLength: number): string {
+		Guards.stringValue(MigrationHelper.CLASS_NAME, nameof(baseName), baseName);
+		Guards.integer(MigrationHelper.CLASS_NAME, nameof(maxIdentifierLength), maxIdentifierLength);
+
+		const suffixLength =
+			MigrationHelper._TARGET_MARKER.length + MigrationHelper._TARGET_HASH_LENGTH;
+		if (maxIdentifierLength <= suffixLength) {
+			throw new GeneralError(MigrationHelper.CLASS_NAME, "maxIdentifierLengthTooSmall", {
+				maxIdentifierLength,
+				minimum: suffixLength + 1
+			});
+		}
+
+		const hash = Blake2b.sum256(Converter.utf8ToBytes(`${baseName}_${Date.now()}`));
+		const hex = Converter.bytesToHex(hash);
+		const headLength = maxIdentifierLength - suffixLength;
+
+		return `${baseName.slice(0, headLength)}${MigrationHelper._TARGET_MARKER}${hex.slice(0, MigrationHelper._TARGET_HASH_LENGTH)}`;
+	}
+
+	/**
 	 * Starts the connector by calling bootstrap and start if they are defined.
 	 * @param connector The connector to start.
+	 * @param schemaName The schema name reported if bootstrap fails.
 	 * @param loggingComponentType The optional component type to use for logging the migration progress.
+	 * @throws GeneralError if the connector's bootstrap reports failure.
 	 * @internal
 	 */
 	private static async startupConnector<T>(
 		connector: IEntityStorageConnector<T>,
+		schemaName: string,
 		loggingComponentType?: string
 	): Promise<void> {
 		const bootstrap = connector.bootstrap?.bind(connector);
 		if (Is.function(bootstrap)) {
-			await bootstrap(loggingComponentType);
+			const bootstrapped = await bootstrap(loggingComponentType);
+			if (!bootstrapped) {
+				throw new GeneralError(MigrationHelper.CLASS_NAME, "connectorBootstrapFailed", {
+					schemaName,
+					className: connector.className()
+				});
+			}
 		}
 		const start = connector.start?.bind(connector);
 		if (Is.function(start)) {

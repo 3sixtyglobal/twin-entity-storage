@@ -32,6 +32,8 @@ export interface IEntityStorageMigrationConnector<T = unknown> extends IEntitySt
 
 	/**
 	 * Create the target connector for performing the migration it will use a temporary storage location.
+	 * Backends with a bounded identifier length should name it with MigrationHelper.generateTargetName
+	 * and their own limit.
 	 * @param newEntitySchema The name of the new entity schema to create the connector for.
 	 * @returns Connector for performing the migration.
 	 */

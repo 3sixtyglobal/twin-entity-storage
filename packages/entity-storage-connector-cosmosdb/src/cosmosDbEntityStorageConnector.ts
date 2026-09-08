@@ -51,6 +51,7 @@ import {
 import {
 	ConnectionHelper,
 	EntityStorageHelper,
+	MigrationHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -94,6 +95,12 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
+	 * Cosmos DB's maximum container id length in characters.
+	 * @internal
+	 */
+	private static readonly _MAX_IDENTIFIER_LENGTH: number = 255;
 
 	/**
 	 * Number of bulk operation chunks to dispatch concurrently in setBatch.
@@ -1097,7 +1104,10 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	public async createTargetConnector<U>(
 		newEntitySchema: string
 	): Promise<IEntityStorageConnector<U>> {
-		const migrationContainerId = `${this._config.containerId}Migration${Date.now()}`;
+		const migrationContainerId = MigrationHelper.generateTargetName(
+			this._config.containerId,
+			CosmosDbEntityStorageConnector._MAX_IDENTIFIER_LENGTH
+		);
 		return new CosmosDbEntityStorageConnector<U>({
 			entitySchema: newEntitySchema,
 			config: { ...this._config, containerId: migrationContainerId },
