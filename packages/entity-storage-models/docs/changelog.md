@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3-next.5](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.3-next.4...entity-storage-models-v0.9.3-next.5) (2026-09-08)
+
+
+### Bug Fixes
+
+* bound schema-migration target storage names to each backend's identifier limit ([#257](https://github.com/iotaledger/twin-entity-storage/issues/257)) ([cbf6303](https://github.com/iotaledger/twin-entity-storage/commit/cbf6303a73ac6384cfc309fbbc59ea101a82d76c))
+
 ## [0.9.3-next.4](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.9.3-next.3...entity-storage-models-v0.9.3-next.4) (2026-09-06)
 
 

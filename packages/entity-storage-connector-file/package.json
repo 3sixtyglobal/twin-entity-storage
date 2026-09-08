@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-file",
-	"version": "0.9.3-next.4",
+	"version": "0.9.3-next.5",
 	"description": "File-based connector that stores entities on disk for straightforward deployments.",
 	"repository": {
 		"type": "git",
@@ -34,10 +34,10 @@
 		"@twin.org/api-models": "next",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.9.3-next.4"
+		"@twin.org/entity-storage-models": "0.9.3-next.5"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.9.3-next.4",
+		"@twin.org/entity-storage-connector-memory": "0.9.3-next.5",
 		"@twin.org/logging-connector-entity-storage": "next",
 		"@twin.org/logging-service": "next",
 		"@twin.org/nameof-transformer": "next",
