@@ -26,8 +26,8 @@ import {
 	ComparisonOperator,
 	type EntityCondition,
 	EntitySchemaFactory,
-	EntitySchemaPropertyFormat,
 	EntitySchemaHelper,
+	EntitySchemaPropertyFormat,
 	EntitySchemaPropertyType,
 	type IComparator,
 	type IEntitySchema,
@@ -90,6 +90,19 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _MAX_IDENTIFIER_LENGTH: number = 64;
+
+	/**
+	 * The largest length which can be expressed as VARCHAR(N), anything above this is stored as LONGTEXT.
+	 * A row is limited to 65535 bytes and utf8mb4 uses up to 4 bytes per character.
+	 * @internal
+	 */
+	private static readonly _MAX_VARCHAR_LENGTH: number = 16383;
+
+	/**
+	 * The prefix length used when indexing a column which is too long to index in full.
+	 * @internal
+	 */
+	private static readonly _INDEX_PREFIX_LENGTH: number = 255;
 
 	/**
 	 * The name for the schema.
@@ -1112,7 +1125,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @returns The connector implementation version.
 	 */
 	public connectorVersion(): number {
-		return 0;
+		return 1;
 	}
 
 	/**
@@ -1251,10 +1264,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 		nodeLogging?: ILoggingComponent
 	): Promise<void> {
 		const columnName = String(prop.property);
-		const needsPrefix =
-			prop.type === EntitySchemaPropertyType.String &&
-			prop.format !== EntitySchemaPropertyFormat.Uuid;
-		const indexCol = needsPrefix ? `\`${columnName}\`(255)` : `\`${columnName}\``;
+		const indexCol = this.indexColumn(columnName, this.mapSqlColumn(prop).indexPrefixLength);
 		const indexName = IndexHelper.generateName(this._config.tableName, columnName);
 		const qualifiedTable = `\`${this._config.database}\`.\`${this._config.tableName}\``;
 
@@ -1700,15 +1710,6 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private mapMySqlProperties(schema?: IEntitySchema<T>): string {
 		const entitySchema = schema ?? this._entitySchema;
 
-		const sqlTypeMap: { [key in EntitySchemaPropertyType]: string } = {
-			[EntitySchemaPropertyType.String]: "LONGTEXT",
-			[EntitySchemaPropertyType.Number]: "FLOAT",
-			[EntitySchemaPropertyType.Integer]: "INT",
-			[EntitySchemaPropertyType.Object]: "JSON",
-			[EntitySchemaPropertyType.Array]: "JSON",
-			[EntitySchemaPropertyType.Boolean]: "TINYINT(1)"
-		};
-
 		if (!entitySchema.properties) {
 			throw new GeneralError(
 				MySqlEntityStorageConnector.CLASS_NAME,
@@ -1728,64 +1729,12 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		const columnDefinitions = props
 			.map(prop => {
-				let sqlType = sqlTypeMap[prop.type] || "TEXT";
-				if (prop.format) {
-					switch (prop.type) {
-						case EntitySchemaPropertyType.String:
-							sqlType = "LONGTEXT";
-							switch (prop.format) {
-								case "uuid":
-									sqlType = "CHAR(36)";
-									break;
-								case "date":
-								case "date-time":
-									sqlType = "LONGTEXT";
-									break;
-							}
-							break;
-						case EntitySchemaPropertyType.Number:
-							sqlType = "FLOAT";
-							switch (prop.format) {
-								case "float":
-									sqlType = "FLOAT";
-									break;
-								case "double":
-									sqlType = "DOUBLE";
-									break;
-							}
-							break;
-						case EntitySchemaPropertyType.Integer:
-							sqlType = "INT";
-							switch (prop.format) {
-								case "int8":
-								case "uint8":
-									sqlType = "TINYINT";
-									break;
-								case "int16":
-								case "uint16":
-									sqlType = "SMALLINT";
-									break;
-								case "int32":
-								case "uint32":
-									sqlType = "INT";
-									break;
-								case "int64":
-								case "uint64":
-									sqlType = "BIGINT";
-									break;
-							}
-							break;
-					}
-				}
+				const { sqlType, indexPrefixLength } = this.mapSqlColumn(prop);
 				const columnName = String(prop.property);
 				const nullable = prop.optional ? " NULL" : " NOT NULL";
 
 				if (prop.isPrimary) {
-					if (sqlType === "LONGTEXT" || sqlType === "TEXT") {
-						primaryKeys.push(`\`${columnName}\`(255)`);
-					} else {
-						primaryKeys.push(`\`${columnName}\``);
-					}
+					primaryKeys.push(this.indexColumn(columnName, indexPrefixLength));
 				}
 				return `\`${columnName}\` ${sqlType}${nullable}`;
 			})
@@ -1794,5 +1743,124 @@ export class MySqlEntityStorageConnector<T = unknown>
 		const primaryKeyDefinition =
 			primaryKeys.length > 0 ? `, PRIMARY KEY (${primaryKeys.join(", ")})` : "";
 		return columnDefinitions + primaryKeyDefinition;
+	}
+
+	/**
+	 * Map an entity schema property to its MySQL column definition.
+	 * A string property with an explicit maxLength is stored as VARCHAR(N), which takes precedence
+	 * over the format mapping. A format which has a default length in EntitySchemaHelper.FORMAT_MAX_LENGTHS
+	 * and no dedicated column type is also bounded to that length.
+	 * @param prop The property to map.
+	 * @returns The MySQL column type, and the prefix length needed to index it, if any.
+	 * @internal
+	 */
+	private mapSqlColumn<U>(prop: IEntitySchemaProperty<U>): {
+		sqlType: string;
+		indexPrefixLength?: number;
+	} {
+		const sqlTypeMap: { [key in EntitySchemaPropertyType]: string } = {
+			[EntitySchemaPropertyType.String]: "LONGTEXT",
+			[EntitySchemaPropertyType.Number]: "FLOAT",
+			[EntitySchemaPropertyType.Integer]: "INT",
+			[EntitySchemaPropertyType.Object]: "JSON",
+			[EntitySchemaPropertyType.Array]: "JSON",
+			[EntitySchemaPropertyType.Boolean]: "TINYINT(1)"
+		};
+
+		let sqlType = sqlTypeMap[prop.type] || "TEXT";
+		let columnLength: number | undefined;
+
+		if (prop.format) {
+			switch (prop.type) {
+				case EntitySchemaPropertyType.String:
+					sqlType = "LONGTEXT";
+					switch (prop.format) {
+						case "uuid":
+							columnLength = EntitySchemaHelper.FORMAT_MAX_LENGTHS[EntitySchemaPropertyFormat.Uuid];
+							sqlType = `CHAR(${columnLength})`;
+							break;
+						case "date":
+						case "date-time":
+							sqlType = "LONGTEXT";
+							break;
+					}
+					break;
+				case EntitySchemaPropertyType.Number:
+					sqlType = "FLOAT";
+					switch (prop.format) {
+						case "float":
+							sqlType = "FLOAT";
+							break;
+						case "double":
+							sqlType = "DOUBLE";
+							break;
+					}
+					break;
+				case EntitySchemaPropertyType.Integer:
+					sqlType = "INT";
+					switch (prop.format) {
+						case "int8":
+						case "uint8":
+							sqlType = "TINYINT";
+							break;
+						case "int16":
+						case "uint16":
+							sqlType = "SMALLINT";
+							break;
+						case "int32":
+						case "uint32":
+							sqlType = "INT";
+							break;
+						case "int64":
+						case "uint64":
+							sqlType = "BIGINT";
+							break;
+					}
+					break;
+			}
+		}
+
+		// An explicit maxLength always wins, otherwise a format default only applies when the
+		// format did not already map to a dedicated column type such as CHAR for a uuid.
+		const isUnboundedText = sqlType === "LONGTEXT" || sqlType === "TEXT";
+		const formatMaxLength =
+			isUnboundedText && Is.stringValue(prop.format)
+				? EntitySchemaHelper.FORMAT_MAX_LENGTHS[prop.format]
+				: undefined;
+		const maxLength = prop.maxLength ?? formatMaxLength;
+
+		if (
+			prop.type === EntitySchemaPropertyType.String &&
+			Is.integer(maxLength) &&
+			maxLength > 0 &&
+			maxLength <= MySqlEntityStorageConnector._MAX_VARCHAR_LENGTH
+		) {
+			columnLength = maxLength;
+			sqlType = `VARCHAR(${columnLength})`;
+		}
+
+		// A column which cannot be indexed in full needs a prefix, anything which is not text
+		// is always indexable in full.
+		const needsPrefix = Is.integer(columnLength)
+			? columnLength > MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH
+			: isUnboundedText;
+
+		return {
+			sqlType,
+			indexPrefixLength: needsPrefix ? MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH : undefined
+		};
+	}
+
+	/**
+	 * Build the column reference for an index or primary key.
+	 * @param columnName The name of the column.
+	 * @param indexPrefixLength The prefix length to index, or undefined to index the column in full.
+	 * @returns The quoted column reference.
+	 * @internal
+	 */
+	private indexColumn(columnName: string, indexPrefixLength?: number): string {
+		return Is.integer(indexPrefixLength)
+			? `\`${columnName}\`(${indexPrefixLength})`
+			: `\`${columnName}\``;
 	}
 }

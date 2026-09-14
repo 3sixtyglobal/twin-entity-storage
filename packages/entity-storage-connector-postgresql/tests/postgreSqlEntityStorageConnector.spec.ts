@@ -155,6 +155,27 @@ class AnnotationTestType {
 	public label?: string;
 }
 
+@entity()
+class MaxLengthTestType {
+	@property({ type: "string", isPrimary: true, maxLength: 64 })
+	public id!: string;
+
+	@property({ type: "string", maxLength: 10 })
+	public shortValue!: string;
+
+	@property({ type: "string", isSecondary: true, maxLength: 20 })
+	public indexedValue!: string;
+
+	@property({ type: "string", isSecondary: true, maxLength: 300 })
+	public longIndexedValue!: string;
+
+	@property({ type: "string", optional: true })
+	public unboundedValue?: string;
+
+	@property({ type: "string", format: "uri", optional: true })
+	public uriValue?: string;
+}
+
 let currentUser = "user";
 let currentConnector: IEntityStorageConnector | undefined;
 
@@ -187,6 +208,9 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<AnnotationTestType>(), () =>
 			EntitySchemaHelper.getSchema(AnnotationTestType)
+		);
+		EntitySchemaFactory.register(nameof<MaxLengthTestType>(), () =>
+			EntitySchemaHelper.getSchema(MaxLengthTestType)
 		);
 
 		createConnector = async <T>(entitySchema: string, partitionContextIds?: string[]) => {
@@ -2765,6 +2789,109 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				expect(result.cursor).toBeUndefined();
 			}
 		);
+	});
+
+	describe("maxLength", () => {
+		const atLimit = {
+			id: "a".repeat(64),
+			shortValue: "b".repeat(10),
+			indexedValue: "c".repeat(20),
+			longIndexedValue: "d".repeat(300)
+		};
+
+		test("can set an item with string properties at their maximum length", async () => {
+			const connector = await createConnector<MaxLengthTestType>(nameof<MaxLengthTestType>());
+			await connector.set({ ...atLimit });
+			const item = await connector.get(atLimit.id);
+			expect(item?.id).toEqual(atLimit.id);
+			expect(item?.shortValue).toEqual(atLimit.shortValue);
+			expect(item?.indexedValue).toEqual(atLimit.indexedValue);
+			expect(item?.longIndexedValue).toEqual(atLimit.longIndexedValue);
+		});
+
+		test("can set an item with a string property which has no maximum length", async () => {
+			const connector = await createConnector<MaxLengthTestType>(nameof<MaxLengthTestType>());
+			const unboundedValue = "e".repeat(2000);
+			await connector.set({ ...atLimit, unboundedValue });
+			const item = await connector.get(atLimit.id);
+			expect(item?.unboundedValue).toEqual(unboundedValue);
+		});
+
+		test("can get an item by a secondary index which has a maximum length", async () => {
+			const connector = await createConnector<MaxLengthTestType>(nameof<MaxLengthTestType>());
+			await connector.set({ ...atLimit });
+			const item = await connector.get(atLimit.indexedValue, "indexedValue");
+			expect(item?.id).toEqual(atLimit.id);
+		});
+
+		test("can fail to set an item with a string property over its maximum length", async () => {
+			const connector = await createConnector<MaxLengthTestType>(nameof<MaxLengthTestType>());
+			await expect(connector.set({ ...atLimit, shortValue: "b".repeat(11) })).rejects.toMatchObject(
+				{
+					name: "GeneralError",
+					message: "entitySchemaHelper.maxLengthExceeded",
+					properties: { property: "shortValue", maxLength: 10, length: 11 }
+				}
+			);
+			expect(await connector.get(atLimit.id)).toBeUndefined();
+		});
+
+		test("can fail to set an item with a primary key over its maximum length", async () => {
+			const connector = await createConnector<MaxLengthTestType>(nameof<MaxLengthTestType>());
+			await expect(connector.set({ ...atLimit, id: "a".repeat(65) })).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entitySchemaHelper.maxLengthExceeded",
+				properties: { property: "id", maxLength: 64, length: 65 }
+			});
+		});
+
+		test("can fail to set an item with a secondary index over its maximum length", async () => {
+			const connector = await createConnector<MaxLengthTestType>(nameof<MaxLengthTestType>());
+			await expect(
+				connector.set({ ...atLimit, indexedValue: "c".repeat(21) })
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entitySchemaHelper.maxLengthExceeded",
+				properties: { property: "indexedValue", maxLength: 20, length: 21 }
+			});
+		});
+
+		test("can set an item with a formatted property within its default maximum length", async () => {
+			const connector = await createConnector<MaxLengthTestType>(nameof<MaxLengthTestType>());
+			const uriValue = "https://example.com/a/path";
+			await connector.set({ ...atLimit, uriValue });
+			const item = await connector.get(atLimit.id);
+			expect(item?.uriValue).toEqual(uriValue);
+		});
+
+		test("can fail to set an item with a formatted property over its default maximum length", async () => {
+			const connector = await createConnector<MaxLengthTestType>(nameof<MaxLengthTestType>());
+			const uriValue = `https://example.com/${"p".repeat(EntitySchemaHelper.FORMAT_MAX_LENGTHS.uri)}`;
+			await expect(connector.set({ ...atLimit, uriValue })).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entitySchemaHelper.maxLengthExceeded",
+				properties: {
+					property: "uriValue",
+					maxLength: EntitySchemaHelper.FORMAT_MAX_LENGTHS.uri,
+					length: uriValue.length
+				}
+			});
+		});
+
+		test("can fail to set a batch when an item is over its maximum length", async () => {
+			const connector = await createConnector<MaxLengthTestType>(nameof<MaxLengthTestType>());
+			await expect(
+				connector.setBatch([
+					{ ...atLimit, id: "1" },
+					{ ...atLimit, id: "2", shortValue: "b".repeat(11) }
+				])
+			).rejects.toMatchObject({
+				name: "GeneralError",
+				message: "entitySchemaHelper.maxLengthExceeded",
+				properties: { property: "shortValue", maxLength: 10, length: 11 }
+			});
+			expect(await connector.get("1")).toBeUndefined();
+		});
 	});
 
 	describe("property validation", () => {

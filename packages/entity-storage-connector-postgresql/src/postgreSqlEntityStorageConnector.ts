@@ -90,6 +90,12 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	private static readonly _MAX_IDENTIFIER_LENGTH: number = 63;
 
 	/**
+	 * The largest length which can be expressed as VARCHAR(N), anything above this is stored as TEXT.
+	 * @internal
+	 */
+	private static readonly _MAX_VARCHAR_LENGTH: number = 10485760;
+
+	/**
 	 * The name for the schema.
 	 * @internal
 	 */
@@ -1836,6 +1842,24 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 							break;
 					}
 				}
+
+				// An explicit maxLength always wins, otherwise a format default only applies when the
+				// format did not already map to a dedicated column type such as UUID.
+				const formatMaxLength =
+					sqlType === "TEXT" && Is.stringValue(prop.format)
+						? EntitySchemaHelper.FORMAT_MAX_LENGTHS[prop.format]
+						: undefined;
+				const maxLength = prop.maxLength ?? formatMaxLength;
+
+				if (
+					prop.type === EntitySchemaPropertyType.String &&
+					Is.integer(maxLength) &&
+					maxLength > 0 &&
+					maxLength <= PostgreSqlEntityStorageConnector._MAX_VARCHAR_LENGTH
+				) {
+					sqlType = `VARCHAR(${maxLength})`;
+				}
+
 				const columnName = String(prop.property);
 				const nullable = prop.optional ? " NULL" : " NOT NULL";
 
