@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.3-next.6](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.9.3-next.5...entity-storage-connector-mysql-v0.9.3-next.6) (2026-09-14)
+
+
+### Features
+
+* string lengths ([#260](https://github.com/iotaledger/twin-entity-storage/issues/260)) ([7138ffd](https://github.com/iotaledger/twin-entity-storage/commit/7138ffd3341c514c851991ad33d4d4d2439a8469))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.3-next.5 to 0.9.3-next.6
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.3-next.5 to 0.9.3-next.6
+
 ## [0.9.3-next.5](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.9.3-next.4...entity-storage-connector-mysql-v0.9.3-next.5) (2026-09-08)
 
 
