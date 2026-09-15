@@ -176,6 +176,18 @@ class MaxLengthTestType {
 	public uriValue?: string;
 }
 
+@entity()
+class BigIntTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "integer", format: "int64" })
+	public signedValue!: number;
+
+	@property({ type: "integer", format: "uint64", optional: true })
+	public unsignedValue?: number;
+}
+
 let currentUser = "user";
 let currentConnector: IEntityStorageConnector | undefined;
 
@@ -211,6 +223,9 @@ describe("ScyllaDBTableConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<MaxLengthTestType>(), () =>
 			EntitySchemaHelper.getSchema(MaxLengthTestType)
+		);
+		EntitySchemaFactory.register(nameof<BigIntTestType>(), () =>
+			EntitySchemaHelper.getSchema(BigIntTestType)
 		);
 
 		createConnector = async <T>(entitySchema: string, partitionContextIds?: string[]) => {
@@ -2420,6 +2435,43 @@ describe("ScyllaDBTableConnector", () => {
 		});
 		expect(result.entities.length).toEqual(2);
 		expect(result.entities.every((e: Partial<TestType>) => (e.counter ?? 0) > 200)).toBe(true);
+	});
+
+	test("can set and get int64 and uint64 properties as numbers", async () => {
+		const connector = await createConnector<BigIntTestType>(nameof<BigIntTestType>());
+		await connector.set({
+			id: "1",
+			signedValue: Number.MIN_SAFE_INTEGER,
+			unsignedValue: Number.MAX_SAFE_INTEGER
+		});
+		const item = await connector.get("1");
+		expect(item?.signedValue).toBe(Number.MIN_SAFE_INTEGER);
+		expect(item?.unsignedValue).toBe(Number.MAX_SAFE_INTEGER);
+	});
+
+	test("can leave an optional uint64 property undefined", async () => {
+		const connector = await createConnector<BigIntTestType>(nameof<BigIntTestType>());
+		await connector.set({ id: "1", signedValue: 1 });
+		const item = await connector.get("1");
+		expect(item?.signedValue).toBe(1);
+		expect(item?.unsignedValue).toBeUndefined();
+	});
+
+	test("can query by int64 property", async () => {
+		const connector = await createConnector<BigIntTestType>(nameof<BigIntTestType>());
+		const base = Date.now();
+		for (let i = 0; i < 3; i++) {
+			await connector.set({ id: (i + 1).toString(), signedValue: base + i });
+		}
+		const result = await connector.query({
+			property: "signedValue",
+			value: base,
+			comparison: ComparisonOperator.GreaterThan
+		});
+		expect(result.entities.length).toEqual(2);
+		for (const item of result.entities) {
+			expect(item.signedValue).toBeGreaterThan(base);
+		}
 	});
 
 	test("can set data with a partition key", async () => {

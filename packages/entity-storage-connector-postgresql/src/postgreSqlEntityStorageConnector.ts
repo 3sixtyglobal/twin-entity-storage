@@ -1424,7 +1424,16 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			// eslint-disable-next-line camelcase
 			connect_timeout: this._config?.pool?.connectTimeout,
 			// eslint-disable-next-line camelcase
-			max_lifetime: this._config?.pool?.maxLifetime
+			max_lifetime: this._config?.pool?.maxLifetime,
+			// The driver returns BIGINT (int64/uint64 properties) as a string, the schema expects a number.
+			types: {
+				bigint: {
+					to: 20,
+					from: [20],
+					serialize: (value: number | bigint): string => value.toString(),
+					parse: (value: string): number => Number(value)
+				}
+			}
 		};
 		if (includeDatabase) {
 			opts.database = this._config.database;
