@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.9.3-next.7](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-gcp-firestore-v0.9.3-next.6...entity-storage-connector-gcp-firestore-v0.9.3-next.7) (2026-09-15)
+
+
+### Bug Fixes
+
+* return int64 and uint64 properties as numbers on every connector ([#262](https://github.com/iotaledger/twin-entity-storage/issues/262)) ([ac85288](https://github.com/iotaledger/twin-entity-storage/commit/ac852883f4dbe97b0e844e3d094cf609e8cafbcc))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.9.3-next.6 to 0.9.3-next.7
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.9.3-next.6 to 0.9.3-next.7
+
 ## [0.9.3-next.6](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-gcp-firestore-v0.9.3-next.5...entity-storage-connector-gcp-firestore-v0.9.3-next.6) (2026-09-14)
 
 
