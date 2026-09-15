@@ -1410,7 +1410,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private createClientId(): string {
-		return this.createClientId();
+		return `${this._config.host}|${this._config.port ?? 5432}|${this._config.user}|${this._config.database}`;
 	}
 
 	/**
