@@ -384,7 +384,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	public async stop(): Promise<void> {
 		await ConnectionHelper.closeClient<postgres.Sql>(
 			"postgreSqlConnections",
-			`${this._config.host}|${this._config.port ?? 5432}|${this._config.user}|${this._config.database}`,
+			this.createClientId(),
 			this._instanceId,
 			this._mutexTimeoutMs,
 			async sql => sql.end()
@@ -1397,11 +1397,20 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	private async getClient(): Promise<postgres.Sql> {
 		return ConnectionHelper.openClient<postgres.Sql>(
 			"postgreSqlConnections",
-			`${this._config.host}|${this._config.port ?? 5432}|${this._config.user}|${this._config.database}`,
+			this.createClientId(),
 			this._instanceId,
 			this._mutexTimeoutMs,
 			async () => postgres(this.createConnectionConfig())
 		);
+	}
+
+	/**
+	 * Build a stable cache key for the shared client based on connection parameters.
+	 * @returns The cache key.
+	 * @internal
+	 */
+	private createClientId(): string {
+		return this.createClientId();
 	}
 
 	/**
