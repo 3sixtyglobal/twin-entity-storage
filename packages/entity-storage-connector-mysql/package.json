@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-mysql",
-	"version": "0.9.3-next.7",
+	"version": "0.10.0",
 	"description": "MySQL connector for relational persistence with SQL querying.",
 	"repository": {
 		"type": "git",
@@ -28,23 +28,23 @@
 		"dist:no-test": "npm run clean && npm run build && npm run test:build"
 	},
 	"dependencies": {
-		"@twin.org/context": "next",
-		"@twin.org/data-json-ld": "next",
-		"@twin.org/logging-models": "next",
-		"@twin.org/nameof": "next",
+		"@twin.org/context": "^0.10.0",
+		"@twin.org/data-json-ld": "^0.10.0",
+		"@twin.org/logging-models": "^0.9.2",
+		"@twin.org/nameof": "^0.10.0",
 		"mysql2": "3.23.2",
-		"@twin.org/api-models": "next",
-		"@twin.org/core": "next",
-		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.9.3-next.7"
+		"@twin.org/api-models": "^0.10.0",
+		"@twin.org/core": "^0.10.0",
+		"@twin.org/entity": "^0.10.0",
+		"@twin.org/entity-storage-models": "^0.10.0"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.9.3-next.7",
-		"@twin.org/logging-connector-entity-storage": "next",
-		"@twin.org/logging-service": "next",
-		"@twin.org/nameof-transformer": "next",
-		"@twin.org/nameof-vitest-plugin": "next",
-		"@twin.org/validate-locales": "next",
+		"@twin.org/entity-storage-connector-memory": "^0.10.0",
+		"@twin.org/logging-connector-entity-storage": "^0.9.2",
+		"@twin.org/logging-service": "^0.9.2",
+		"@twin.org/nameof-transformer": "^0.10.0",
+		"@twin.org/nameof-vitest-plugin": "^0.10.0",
+		"@twin.org/validate-locales": "^0.10.0",
 		"@types/node": "26.1.2",
 		"@vitest/coverage-v8": "4.1.10",
 		"copyfiles": "2.4.1",
