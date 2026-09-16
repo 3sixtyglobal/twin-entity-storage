@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.10.0](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mongodb-v0.10.0...entity-storage-connector-mongodb-v0.10.0) (2026-09-16)
+
+
+### Features
+
+* add production release automation ([1eb4c8e](https://github.com/iotaledger/twin-entity-storage/commit/1eb4c8ee3eb099defdfc2d063ae44935276dcae8))
+* release to production ([a309051](https://github.com/iotaledger/twin-entity-storage/commit/a3090519adebf7943232b4df12e4c6bd5afe7eed))
+* release to production ([#150](https://github.com/iotaledger/twin-entity-storage/issues/150)) ([4275601](https://github.com/iotaledger/twin-entity-storage/commit/42756015e853a837240f8aafdb0a8ebce2d836c1))
+* release to production ([#176](https://github.com/iotaledger/twin-entity-storage/issues/176)) ([475d899](https://github.com/iotaledger/twin-entity-storage/commit/475d89965931d62cd3ed42f134fb567fc7972705))
+* release to production ([#227](https://github.com/iotaledger/twin-entity-storage/issues/227)) ([c935228](https://github.com/iotaledger/twin-entity-storage/commit/c935228c14b7f0e8880088a102a76fcbecd5bf5a))
+* release to production [skip ci] ([#268](https://github.com/iotaledger/twin-entity-storage/issues/268)) ([c63c37e](https://github.com/iotaledger/twin-entity-storage/commit/c63c37ef96281f7543cc1dddc80ab7deed4d91d4))
+* update dependencies ([7ccc0c4](https://github.com/iotaledger/twin-entity-storage/commit/7ccc0c429125d073dc60b3de6cf101abc8cc6cba))
+* use shared store mechanism ([#34](https://github.com/iotaledger/twin-entity-storage/issues/34)) ([68b6b71](https://github.com/iotaledger/twin-entity-storage/commit/68b6b71e7a96d7d016cd57bfff36775b56bf3f93))
+
+
+### Bug Fixes
+
+* query params force coercion ([dd6aa87](https://github.com/iotaledger/twin-entity-storage/commit/dd6aa87efdfb60bab7d6756a86888863c45c51a7))
+
 ## [0.9.3-next.7](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mongodb-v0.9.3-next.6...entity-storage-connector-mongodb-v0.9.3-next.7) (2026-09-15)
 
 
