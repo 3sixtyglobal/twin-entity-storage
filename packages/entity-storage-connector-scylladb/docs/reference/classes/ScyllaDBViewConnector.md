@@ -285,7 +285,7 @@ The class name of the component.
 
 > **bootstrap**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
 
-Bootstrap the component by creating and initializing any resources it needs.
+Bootstrap the component by creating the materialized view over the base table.
 
 #### Parameters
 
@@ -423,7 +423,7 @@ The ids of the entities to remove.
 
 > **teardown**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
 
-Teardown the entity storage (not supported for views).
+Teardown the entity storage by dropping the view.
 
 #### Parameters
 

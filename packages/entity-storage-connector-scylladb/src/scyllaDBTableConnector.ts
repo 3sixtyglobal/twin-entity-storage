@@ -1057,7 +1057,6 @@ export class ScyllaDBTableConnector<T = unknown>
 	 */
 	private buildSchemaColumns(schema: IEntitySchema<T>): string {
 		const fields: string[] = [];
-		const clusteringKeys: string[] = [];
 
 		// partitionId is always the sole partition key so that WHERE "partitionId" = ?
 		// allows ORDER BY on the subsequent clustering keys.
@@ -1065,10 +1064,9 @@ export class ScyllaDBTableConnector<T = unknown>
 
 		for (const field of schema.properties ?? []) {
 			fields.push(`"${String(field.property)}" ${this.toDbField(field)}`);
-			if (field.isPrimary || field.isSecondary) {
-				clusteringKeys.push(`"${field.property as string}"`);
-			}
 		}
+
+		const clusteringKeys = this.keyProperties(schema).map(key => `"${key}"`);
 
 		if (clusteringKeys.length > 0) {
 			fields.push(

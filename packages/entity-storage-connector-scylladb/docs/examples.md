@@ -94,6 +94,7 @@ const options: IScyllaDBViewConnectorConstructorOptions = {
     hosts: ['127.0.0.1'],
     localDataCenter: 'datacenter1',
     keyspace: 'entity_storage',
+    tableName: 'profiles',
     viewName: 'profiles_by_status'
   }
 };
@@ -120,4 +121,6 @@ try {
 } catch (error) {
   void error;
 }
+
+await viewConnector.teardown();
 ```

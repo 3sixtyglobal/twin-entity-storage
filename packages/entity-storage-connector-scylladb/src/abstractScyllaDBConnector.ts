@@ -816,6 +816,18 @@ export abstract class AbstractScyllaDBConnector<T> {
 	}
 
 	/**
+	 * Get the properties which form the table key after the partition key.
+	 * @param schema The entity schema to read.
+	 * @returns The property names in schema order.
+	 * @internal
+	 */
+	protected keyProperties<U>(schema: IEntitySchema<U>): string[] {
+		return (schema.properties ?? [])
+			.filter(property => property.isPrimary === true || property.isSecondary === true)
+			.map(property => String(property.property));
+	}
+
+	/**
 	 * Retrieve (or lazily create) the shared ScyllaDB client for this endpoint.
 	 * @returns The shared client.
 	 * @internal

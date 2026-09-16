@@ -3,12 +3,11 @@
 import {
 	BaseError,
 	ComponentFactory,
-	Is,
+	Guards,
 	NotSupportedError,
-	StringHelper,
 	type IError
 } from "@twin.org/core";
-import { EntitySchemaHelper, type IEntitySchema } from "@twin.org/entity";
+import { EntitySchemaFactory, type IEntitySchema } from "@twin.org/entity";
 import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
@@ -28,38 +27,55 @@ export class ScyllaDBViewConnector<T>
 	public static readonly CLASS_NAME: string = nameof<ScyllaDBViewConnector<unknown>>();
 
 	/**
-	 * The view descriptor.
+	 * The schema of the base table the view is built from.
 	 * @internal
 	 */
-	private readonly _viewSchema: IEntitySchema<T>;
+	private readonly _baseSchema: IEntitySchema;
 
 	/**
-	 * The name of the database table.
+	 * The name of the base table the view is built from.
 	 * @internal
 	 */
-	private readonly _originalFullTableName: string;
+	private readonly _baseTableName: string;
 
 	/**
 	 * Create a new instance of ScyllaDBViewConnector.
 	 * @param options The options for the connector.
 	 */
 	constructor(options: IScyllaDBViewConnectorConstructorOptions) {
-		// We need this conversion so that types can match in the superclass and reuse the get method
+		Guards.object<IScyllaDBViewConnectorConstructorOptions>(
+			ScyllaDBViewConnector.CLASS_NAME,
+			nameof(options),
+			options
+		);
+		Guards.stringValue(
+			ScyllaDBViewConnector.CLASS_NAME,
+			nameof(options.viewSchema),
+			options.viewSchema
+		);
+
+		// The view schema is the superclass entity schema so that reads go through the view
 		super({
 			loggingComponentType: options.loggingComponentType,
 			entitySchema: options.viewSchema,
+			partitionContextIds: options.partitionContextIds,
 			config: options.config
 		});
 
-		this._viewSchema = EntitySchemaHelper.getSchema<T>(options.viewSchema);
-
-		// We need the underlying class to use the view name for lookups
-		// so substitute the view name for the entity name
-		// but store the original table name to use when bootstrapping the view
-		this._originalFullTableName = this._fullTableName;
-		this._fullTableName = StringHelper.camelCase(
-			Is.stringValue(options.config.viewName) ? options.config.viewName : options.entitySchema
+		Guards.stringValue(
+			ScyllaDBViewConnector.CLASS_NAME,
+			nameof(options.entitySchema),
+			options.entitySchema
 		);
+		Guards.stringValue(
+			ScyllaDBViewConnector.CLASS_NAME,
+			nameof(options.config.viewName),
+			options.config.viewName
+		);
+
+		this._baseSchema = EntitySchemaFactory.get(options.entitySchema);
+		this._baseTableName = this._fullTableName;
+		this._fullTableName = options.config.viewName;
 	}
 
 	/**
@@ -71,19 +87,20 @@ export class ScyllaDBViewConnector<T>
 	}
 
 	/**
-	 * Bootstrap the component by creating and initializing any resources it needs.
+	 * Bootstrap the component by creating the materialized view over the base table.
 	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the bootstrapping process was successful.
 	 */
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+		const viewName = this.safeTableName(this._fullTableName);
 
 		await nodeLogging?.log({
 			level: "info",
 			source: ScyllaDBViewConnector.CLASS_NAME,
 			ts: Date.now(),
 			message: "viewCreating",
-			data: { view: super.safeTableName(this._fullTableName) }
+			data: { view: viewName }
 		});
 
 		try {
@@ -91,20 +108,8 @@ export class ScyllaDBViewConnector<T>
 			try {
 				await this.createKeyspace(dbConnection, this._config.keyspace);
 
-				const fields: string[] = [];
-				const primaryKeys: string[] = [];
-
-				for (const field of this._viewSchema.properties ?? []) {
-					fields.push(`"${String(field.property)}" IS NOT NULL `);
-					if (field.isPrimary) {
-						primaryKeys.push(field.property as string);
-					}
-				}
-				fields.push(`PRIMARY KEY (${primaryKeys.join(",")})`);
-
-				const sql = `CREATE MATERIALIZED VIEW IF NOT EXISTS ${this._config.keyspace}.${this._fullTableName}
-            AS SELECT * FROM ${this._config.keyspace}.${this._originalFullTableName} WHERE
-            ${this._fullTableName} (${fields.join(" AND ")})`;
+				const keyColumns = this.buildViewKeyColumns().map(column => `"${column}"`);
+				const sql = `CREATE MATERIALIZED VIEW IF NOT EXISTS "${this._config.keyspace}"."${viewName}" AS SELECT * FROM "${this._config.keyspace}"."${this.safeTableName(this._baseTableName)}" WHERE ${keyColumns.map(column => `${column} IS NOT NULL`).join(" AND ")} PRIMARY KEY (${keyColumns.join(", ")})`;
 
 				await this.execute(dbConnection, sql);
 
@@ -113,7 +118,7 @@ export class ScyllaDBViewConnector<T>
 					source: ScyllaDBViewConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "viewCreated",
-					data: { view: super.safeTableName(this._fullTableName) }
+					data: { view: viewName }
 				});
 			} finally {
 				await this.closeConnectionNoKeyspace(dbConnection);
@@ -125,7 +130,7 @@ export class ScyllaDBViewConnector<T>
 					source: ScyllaDBViewConnector.CLASS_NAME,
 					ts: Date.now(),
 					message: "viewExists",
-					data: { view: super.safeTableName(this._fullTableName) }
+					data: { view: viewName }
 				});
 			} else {
 				await nodeLogging?.log({
@@ -134,7 +139,7 @@ export class ScyllaDBViewConnector<T>
 					ts: Date.now(),
 					message: "viewCreateFailed",
 					error: err as IError,
-					data: { view: this._fullTableName }
+					data: { view: viewName }
 				});
 			}
 			return false;
@@ -192,13 +197,61 @@ export class ScyllaDBViewConnector<T>
 	}
 
 	/**
-	 * Teardown the entity storage (not supported for views).
+	 * Teardown the entity storage by dropping the view.
 	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the teardown process was successful.
 	 */
 	public async teardown(nodeLoggingComponentType?: string): Promise<boolean> {
-		throw new NotSupportedError(ScyllaDBViewConnector.CLASS_NAME, "notSupported", {
-			methodName: "teardown"
+		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
+		const viewName = this.safeTableName(this._fullTableName);
+
+		await nodeLogging?.log({
+			level: "info",
+			source: ScyllaDBViewConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: "viewDropping",
+			data: { view: viewName }
 		});
+
+		try {
+			const connection = await this.getClient();
+			await connection.execute(`DROP MATERIALIZED VIEW IF EXISTS "${viewName}"`);
+
+			await nodeLogging?.log({
+				level: "info",
+				source: ScyllaDBViewConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "viewDropped",
+				data: { view: viewName }
+			});
+
+			return true;
+		} catch (err) {
+			await nodeLogging?.log({
+				level: "error",
+				source: ScyllaDBViewConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "teardownFailed",
+				error: BaseError.fromError(err)
+			});
+			return false;
+		} finally {
+			await this.closePersistentClient();
+		}
+	}
+
+	/**
+	 * Build the view key: the partition key, the view primary property, then the rest of the base table key.
+	 * @returns The key column names in order.
+	 * @internal
+	 */
+	private buildViewKeyColumns(): string[] {
+		const keyColumns = [AbstractScyllaDBConnector.PARTITION_KEY, String(this._primaryKey.property)];
+		for (const key of this.keyProperties(this._baseSchema)) {
+			if (!keyColumns.includes(key)) {
+				keyColumns.push(key);
+			}
+		}
+		return keyColumns;
 	}
 }

@@ -12,7 +12,7 @@ export interface IScyllaDBViewConnectorConstructorOptions {
 	loggingComponentType?: string;
 
 	/**
-	 * The name of the entity schema.
+	 * The name of the base table entity schema.
 	 */
 	entitySchema: string;
 
@@ -22,7 +22,7 @@ export interface IScyllaDBViewConnectorConstructorOptions {
 	partitionContextIds?: string[];
 
 	/**
-	 * The name of the view schema.
+	 * The name of the view schema, a subset of the base entity properties whose isPrimary property keys the view.
 	 */
 	viewSchema: string;
 

@@ -13,7 +13,9 @@
 		"scyllaDBViewConnector": {
 			"viewCreating": "Creating view \"{view}\"",
 			"viewCreated": "Created view \"{view}\"",
-			"viewExists": "Skipping create view \"{view}\" as it already exists"
+			"viewExists": "Skipping create view \"{view}\" as it already exists",
+			"viewDropping": "Dropping view \"{view}\"",
+			"viewDropped": "View \"{view}\" dropped"
 		},
 		"abstractScyllaDBConnector": {
 			"sql": "SQL: \"{sql}\""
@@ -40,7 +42,8 @@
 		},
 		"scyllaDBViewConnector": {
 			"viewCreateFailed": "Creating view \"{view}\" failed",
-			"notSupported": "The operation is not supported \"{methodName}\""
+			"notSupported": "The operation is not supported \"{methodName}\"",
+			"teardownFailed": "Teardown entity storage failed"
 		},
 		"abstractScyllaDBConnector": {
 			"getFailed": "Getting item with \"{id}\" failed",
