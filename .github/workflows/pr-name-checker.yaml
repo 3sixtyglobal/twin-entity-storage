@@ -25,7 +25,7 @@ jobs:
       # Install commitlint globally
       - name: Install dependencies
         run: |
-          npm install @commitlint/config-conventional @commitlint/cli -g
+          npm install --no-audit --no-fund @commitlint/config-conventional @commitlint/cli -g
 
       # Lint the PR title using commitlint
       - name: Lint PR title

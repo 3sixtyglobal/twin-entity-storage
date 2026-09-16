@@ -10,7 +10,9 @@
 		"migrationHelper": {
 			"migrateSchemaFailed": "Migration failed for schema \"{schemaName}\".",
 			"transformRequiredForProperty": "A transformation function is required to migrate property \"{from}\" to \"{to}\" of type \"{type}\"",
-			"coercionProducedUndefined": "Coercion of property \"{property}\" to type \"{type}\" produced undefined but the property is not optional"
+			"coercionProducedUndefined": "Coercion of property \"{property}\" to type \"{type}\" produced undefined but the property is not optional",
+			"connectorBootstrapFailed": "Connector \"{className}\" failed to bootstrap storage for schema \"{schemaName}\"",
+			"maxIdentifierLengthTooSmall": "The maximum identifier length {maxIdentifierLength} must be at least {minimum} to fit the migration name suffix"
 		}
 	},
 	"info": {

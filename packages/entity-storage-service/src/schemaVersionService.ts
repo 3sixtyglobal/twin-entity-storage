@@ -281,39 +281,10 @@ export class SchemaVersionService implements IComponent {
 		// Resolve the stored version, applying the backwards-compat baseline when no record exists.
 		let resolvedStoredVersion: number;
 
-		// Captured when the fresh-vs-legacy check below already resolved the connector's
-		// partitions, so migrateWithChain can reuse them instead of fetching them again.
-		let partitions: IContextIds[] | undefined;
-
-		const migrationConnector = connector as IEntityStorageMigrationConnector;
-
-		const boundGetPartitionContextIds =
-			migrationConnector.getPartitionContextIds?.bind(migrationConnector);
-		if (Is.function(boundGetPartitionContextIds)) {
-			partitions = await boundGetPartitionContextIds(loggingComponentType);
-		}
-
 		if (storedVersion === undefined) {
-			// No version record: check whether the table has any data.
-			// Empty table → this is a fresh bootstrap; seed at the current version so the
-			// migration chain never runs over an already-current-shape (or empty) table.
-			// Non-empty table → pre-existing data from before version tracking was introduced;
-			// treat as v0 and run the migration chain. applyEntityTransform preserves existing
-			// property values so current-shape rows are not degraded.
-			let hasExistingData: boolean;
-			if (Is.undefined(partitions)) {
-				// Connector does not have partitioning, so we can safely call count.
-				hasExistingData = (await connector.count()) > 0;
-			} else {
-				// Connector has partitioning, if there are partition keys
-				// then it must have data, otherwise the table is empty.
-				hasExistingData = partitions.length > 0;
-			}
-
-			if (!hasExistingData) {
-				await this.writeVersion(schemaName, currentVersion);
-				return;
-			}
+			// No version record: treat the schema as v0, with or without data. The physical
+			// shape cannot be verified, so for any current version above 0 the migration chain
+			// rebuilds the storage; empty and legacy-partitioned tables included.
 			resolvedStoredVersion = 0;
 			await this.writeVersion(schemaName, 0);
 		} else {
@@ -413,6 +384,17 @@ export class SchemaVersionService implements IComponent {
 			});
 		}
 
+		// Captured when the fresh-vs-legacy check below already resolved the connector's
+		// partitions, so migrateWithChain can reuse them instead of fetching them again.
+		let partitions: IContextIds[] | undefined;
+
+		const migrationConnector = connector as IEntityStorageMigrationConnector;
+
+		const boundGetPartitionContextIds =
+			migrationConnector.getPartitionContextIds?.bind(migrationConnector);
+		if (Is.function(boundGetPartitionContextIds)) {
+			partitions = await boundGetPartitionContextIds(loggingComponentType);
+		}
 		const { finalConnector } = await MigrationHelper.migrateWithChain(
 			migrationConnector,
 			schemaName,

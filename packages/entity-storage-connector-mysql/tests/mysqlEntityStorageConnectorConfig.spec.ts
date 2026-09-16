@@ -1,7 +1,9 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { HealthStatus } from "@twin.org/api-models";
+import { ComponentFactory } from "@twin.org/core";
 import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
+import type { ILogEntry } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import { TEST_MYSQL_CONFIG } from "./setupTestEnv.js";
 import type { IMySqlEntityStorageConnectorConfig } from "../src/models/IMySqlEntityStorageConnectorConfig.js";
@@ -219,5 +221,40 @@ describe("MySqlEntityStorageConnector - long identifier bootstrap", () => {
 		expect(bootstrapped).toBe(true);
 		await connector.teardown();
 		await connector.stop?.();
+	});
+
+	test("reports a table creation failure against the table name", async () => {
+		const tooLongTableName = "x".repeat(65);
+		const logEntries: ILogEntry[] = [];
+		ComponentFactory.register("test-logging-long-table", () => ({
+			className: () => "TestLogging",
+			log: async (entry: ILogEntry) => {
+				logEntries.push(entry);
+			}
+		}));
+
+		const connector = new MySqlEntityStorageConnector<LongNameTestType>({
+			entitySchema: nameof<LongNameTestType>(),
+			config: {
+				...TEST_MYSQL_CONFIG,
+				tableName: tooLongTableName
+			}
+		});
+
+		try {
+			const bootstrapped = await connector.bootstrap("test-logging-long-table");
+			expect(bootstrapped).toBe(false);
+
+			const errorEntries = logEntries.filter(entry => entry.level === "error");
+			expect(errorEntries).toHaveLength(1);
+			expect(errorEntries[0].source).toEqual(MySqlEntityStorageConnector.CLASS_NAME);
+			expect(errorEntries[0].message).toEqual("tableCreateFailed");
+			expect(errorEntries[0].data).toEqual({ tableName: tooLongTableName });
+			expect(errorEntries[0].error?.message).toContain("is too long");
+		} finally {
+			ComponentFactory.unregister("test-logging-long-table");
+			await connector.teardown();
+			await connector.stop?.();
+		}
 	});
 });

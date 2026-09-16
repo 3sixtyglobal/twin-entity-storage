@@ -1,8 +1,11 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { HealthStatus } from "@twin.org/api-models";
+import { ComponentFactory } from "@twin.org/core";
 import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
+import type { ILogEntry } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
+import postgres from "postgres";
 import { TEST_POSTGRESQL_CONFIG } from "./setupTestEnv.js";
 import type { IPostgreSqlEntityStorageConnectorConfig } from "../src/models/IPostgreSqlEntityStorageConnectorConfig.js";
 import { PostgreSqlEntityStorageConnector } from "../src/postgreSqlEntityStorageConnector.js";
@@ -205,6 +208,51 @@ describe("PostgreSqlEntityStorageConnector - long identifier bootstrap", () => {
 		EntitySchemaFactory.register(nameof<LongNameTestType>(), () =>
 			EntitySchemaHelper.getSchema(LongNameTestType)
 		);
+	});
+
+	test("reports a table creation failure against the table name", async () => {
+		const tableName = "relation-name-already-taken-by-a-sequence";
+		const sql = postgres({
+			host: TEST_POSTGRESQL_CONFIG.host,
+			port: TEST_POSTGRESQL_CONFIG.port,
+			user: TEST_POSTGRESQL_CONFIG.user,
+			password: TEST_POSTGRESQL_CONFIG.password,
+			database: TEST_POSTGRESQL_CONFIG.database
+		});
+		const logEntries: ILogEntry[] = [];
+		ComponentFactory.register("test-logging-table-failure", () => ({
+			className: () => "TestLogging",
+			log: async (entry: ILogEntry) => {
+				logEntries.push(entry);
+			}
+		}));
+
+		const connector = new PostgreSqlEntityStorageConnector<LongNameTestType>({
+			entitySchema: nameof<LongNameTestType>(),
+			config: {
+				...TEST_POSTGRESQL_CONFIG,
+				tableName
+			}
+		});
+
+		try {
+			await sql.unsafe(`CREATE SEQUENCE "${tableName}"`);
+
+			const bootstrapped = await connector.bootstrap("test-logging-table-failure");
+			expect(bootstrapped).toBe(false);
+
+			const errorEntries = logEntries.filter(entry => entry.level === "error");
+			expect(errorEntries).toHaveLength(1);
+			expect(errorEntries[0].source).toEqual(PostgreSqlEntityStorageConnector.CLASS_NAME);
+			expect(errorEntries[0].message).toEqual("tableCreateFailed");
+			expect(errorEntries[0].data).toEqual({ tableName });
+			expect(errorEntries[0].error?.message).toContain("already exists");
+		} finally {
+			ComponentFactory.unregister("test-logging-table-failure");
+			await sql.unsafe(`DROP SEQUENCE IF EXISTS "${tableName}"`);
+			await sql.end();
+			await connector.stop?.();
+		}
 	});
 
 	test("can bootstrap with a long identifier name", async () => {

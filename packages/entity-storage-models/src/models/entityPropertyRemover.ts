@@ -10,4 +10,4 @@ import type { IEntitySchemaProperty } from "@twin.org/entity";
 export type EntityPropertyRemover<T = unknown> = (
 	entity: T,
 	removedProperties: IEntitySchemaProperty<T>[]
-) => void;
+) => void | Promise<void>;

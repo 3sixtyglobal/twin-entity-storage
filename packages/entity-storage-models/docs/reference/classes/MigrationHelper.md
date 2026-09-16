@@ -122,7 +122,7 @@ The number of entities migrated.
 
 ### applyEntityChain() {#applyentitychain}
 
-> `static` **applyEntityChain**(`entity`, `steps`): `unknown`
+> `static` **applyEntityChain**(`entity`, `steps`): `Promise`\<`unknown`\>
 
 Transforms a single entity through an ordered chain of fully-resolved migration steps.
 For each step the method diffs fromProperties against toProperties, then applies
@@ -146,7 +146,7 @@ Each step's fromProperties and toProperties are resolved by the caller before in
 
 #### Returns
 
-`unknown`
+`Promise`\<`unknown`\>
 
 The entity transformed to the shape described by steps[last].toProperties.
 
@@ -154,7 +154,7 @@ The entity transformed to the shape described by steps[last].toProperties.
 
 ### applyEntityTransform() {#applyentitytransform}
 
-> `static` **applyEntityTransform**\<`T`, `U`\>(`entity`, `schemaDiff`, `transformEntityProperty?`, `removeEntityProperty?`): `U`
+> `static` **applyEntityTransform**\<`T`, `U`\>(`entity`, `schemaDiff`, `transformEntityProperty?`, `removeEntityProperty?`): `Promise`\<`U`\>
 
 Applies the entity transformation for a single diff, handling added, removed, and
 modified properties according to the provided schema diff and optional transform hook.
@@ -197,7 +197,7 @@ Optional hook called with the original entity and dropped property schemas.
 
 #### Returns
 
-`U`
+`Promise`\<`U`\>
 
 The transformed entity ready to be written to the new schema.
 
@@ -208,3 +208,36 @@ GeneralError if a transformation is required for an object or array property but
 #### Throws
 
 GeneralError if coercion of a modified property results in undefined for a non-optional target property.
+
+***
+
+### generateTargetName() {#generatetargetname}
+
+> `static` **generateTargetName**(`baseName`, `maxIdentifierLength`): `string`
+
+Generate a length-bounded name for a migration's temporary target storage. The marker and
+hash are always appended, as finalizeMigration swaps the target into the source name.
+
+#### Parameters
+
+##### baseName
+
+`string`
+
+The name of the source storage.
+
+##### maxIdentifierLength
+
+`number`
+
+The maximum identifier length allowed by the backend.
+
+#### Returns
+
+`string`
+
+The target name, at most maxIdentifierLength characters.
+
+#### Throws
+
+GeneralError if maxIdentifierLength cannot fit the marker and hash.

@@ -9,11 +9,18 @@ import {
 	property
 } from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
+import { MongoClient } from "mongodb";
 import { TEST_MONGODB_CONFIG } from "./setupTestEnv.js";
 import { MongoDbEntityStorageConnector } from "../src/mongoDbEntityStorageConnector.js";
 
 // Set to false for connectors that do not maintain secondary indexes (e.g. file, memory).
 const SUPPORT_SECONDARY_INDEXING = true;
+
+// Set to false for connectors that do not create named index objects in the database.
+const SUPPORT_NAMED_INDEX_OBJECTS = false;
+
+// Set to false for connectors which cannot add an index to an already created store.
+const SUPPORT_INDEX_UPDATE = true;
 
 @entity()
 class IndexedTestType {
@@ -57,6 +64,11 @@ function createUnindexedConnector(): MongoDbEntityStorageConnector<UnindexedTest
 			collection: `${TEST_MONGODB_CONFIG.collection}_unindexed_${Date.now()}`
 		}
 	});
+}
+
+function buildConnectionUrl(): string {
+	const port = TEST_MONGODB_CONFIG.port ?? 27017;
+	return `mongodb://${TEST_MONGODB_CONFIG.host}:${port}/${TEST_MONGODB_CONFIG.database}`;
 }
 
 describe("MongoDbEntityStorageConnector", () => {
@@ -142,5 +154,652 @@ describe("MongoDbEntityStorageConnector", () => {
 			}
 		},
 		300_000
+	);
+
+	test("bootstrap is idempotent when called multiple times", async () => {
+		const connector = createIndexedConnector();
+
+		try {
+			const firstResult = await connector.bootstrap();
+			const secondResult = await connector.bootstrap();
+
+			expect(firstResult).toBe(true);
+			expect(secondResult).toBe(true);
+
+			await connector.set({ id: "1", category: "catA", value: 1 });
+			const storedEntity = await connector.get("1");
+			expect(storedEntity?.category).toBe("catA");
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+		}
+	}, 60_000);
+
+	test("bootstrap returns true when a non-unique index already exists on the primary property", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_primary_conflict_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			// Seed a non-unique index on the primary property; bootstrap would normally create it unique.
+			await col.createIndex({ id: 1 });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			// The pre-existing non-unique index must not have been overwritten.
+			const indexes = await col.listIndexes().toArray();
+			const idIndex = indexes.find(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && key.id === 1;
+			});
+			expect(idIndex).toBeDefined();
+			expect(idIndex?.unique).toBeUndefined();
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
+
+	test("bootstrap returns true when a sparse index already exists on a secondary property", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_secondary_conflict_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			// Seed a sparse index on the secondary property; bootstrap would normally create a plain one.
+			await col.createIndex({ category: 1 }, { sparse: true });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			// The sparse index must not have been overwritten.
+			const indexes = await col.listIndexes().toArray();
+			const catIndex = indexes.find(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && key.category === 1;
+			});
+			expect(catIndex).toBeDefined();
+			expect(catIndex?.sparse).toBe(true);
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
+
+	test("does not create a duplicate index when a descending index already covers a secondary property", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_desc_secondary_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			await col.createIndex({ category: -1 });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			const indexes = await col.listIndexes().toArray();
+			const categoryIndexes = indexes.filter(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && Object.keys(key)[0] === "category";
+			});
+			expect(categoryIndexes).toHaveLength(1);
+			expect(categoryIndexes[0].key.category).toBe(-1);
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
+
+	test("does not create a duplicate index when a compound index leads on a secondary property", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_compound_secondary_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			await col.createIndex({ category: 1, value: 1 });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			const indexes = await col.listIndexes().toArray();
+			const singleFieldCategoryIndex = indexes.find(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && key.category === 1;
+			});
+			expect(singleFieldCategoryIndex).toBeUndefined();
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
+
+	test("does not create a duplicate unique index when a descending unique index exists on the primary property", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_desc_primary_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			await col.createIndex({ id: -1 }, { unique: true });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			const indexes = await col.listIndexes().toArray();
+			const idIndexes = indexes.filter(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && Object.keys(key)[0] === "id";
+			});
+			expect(idIndexes).toHaveLength(1);
+			expect(idIndexes[0].key.id).toBe(-1);
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
+
+	test("still creates a unique index when a non-unique descending index exists on the primary property", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_desc_primary_nonunique_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			await col.createIndex({ id: -1 });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			const indexes = await col.listIndexes().toArray();
+			const uniqueIdIndex = indexes.find(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && key.id === 1;
+			});
+			expect(uniqueIdIndex).toBeDefined();
+			expect(uniqueIdIndex?.unique).toBe(true);
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
+
+	test("still creates its own index when a secondary property is only a non-leading member of a compound index", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_non_leading_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			await col.createIndex({ value: 1, category: 1 });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			const indexes = await col.listIndexes().toArray();
+			const categoryIndex = indexes.find(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && key.category === 1;
+			});
+			expect(categoryIndex).toBeDefined();
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
+
+	test("still creates its own index when a secondary property is only covered by a hidden index", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_hidden_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			await col.createIndex({ category: -1 }, { hidden: true });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			const indexes = await col.listIndexes().toArray();
+			const categoryIndex = indexes.find(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && key.category === 1;
+			});
+			expect(categoryIndex).toBeDefined();
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
+
+	test("still creates its own index when a secondary property is only covered by a sparse descending index", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_sparse_desc_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			await col.createIndex({ category: -1 }, { sparse: true });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			const indexes = await col.listIndexes().toArray();
+			const categoryIndex = indexes.find(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && key.category === 1;
+			});
+			expect(categoryIndex).toBeDefined();
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
+
+	test("still creates its own index when a secondary property is only covered by a partial index", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_partial_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			await col.createIndex({ category: -1 }, { partialFilterExpression: { value: { $gt: 0 } } });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			const indexes = await col.listIndexes().toArray();
+			const categoryIndex = indexes.find(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && key.category === 1;
+			});
+			expect(categoryIndex).toBeDefined();
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
+
+	test("still creates the unique primary index when the primary property only leads a compound index", async () => {
+		const collectionName = `${TEST_MONGODB_CONFIG.collection}_compound_primary_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+			entitySchema: nameof<IndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+		});
+		const client = new MongoClient(buildConnectionUrl());
+		try {
+			await client.connect();
+			const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+			await col.createIndex({ id: 1, value: 1 });
+
+			const result = await connector.bootstrap();
+			expect(result).toBe(true);
+
+			const indexes = await col.listIndexes().toArray();
+			const idIndex = indexes.find(idx => {
+				const key = idx.key as { [k: string]: number };
+				return Object.keys(key).length === 1 && key.id === 1;
+			});
+			expect(idIndex).toBeDefined();
+			expect(idIndex?.unique).toBe(true);
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+			await client.close();
+		}
+	});
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a differently named index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only a non-leading member of another index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when a same-named table in another schema has a covering index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only covered by an invalid or invisible index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only covered by a FULLTEXT or partial index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index after an index naming-scheme change",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a descending index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a compound index leading on it",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_INDEX_UPDATE)(
+		"bootstrap adds an index when an existing store gains one in its schema",
+		async () => {
+			const collectionName = `${TEST_MONGODB_CONFIG.collection}_index_update_${Date.now()}`;
+			const unindexed = new MongoDbEntityStorageConnector<UnindexedTestType>({
+				entitySchema: nameof<UnindexedTestType>(),
+				config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+			});
+			const indexed = new MongoDbEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+			});
+			const client = new MongoClient(buildConnectionUrl());
+
+			try {
+				await client.connect();
+				const col = client.db(TEST_MONGODB_CONFIG.database).collection(collectionName);
+
+				// Create the collection from a schema which does not index the category property.
+				expect(await unindexed.bootstrap()).toBe(true);
+				const before = await col.listIndexes().toArray();
+				expect(before.some(index => "category" in (index.key as { [k: string]: number }))).toBe(
+					false
+				);
+
+				// Bootstrapping the same collection from a schema which does index it must add the index.
+				expect(await indexed.bootstrap()).toBe(true);
+				const after = await col.listIndexes().toArray();
+				const categoryIndex = after.find(index => {
+					const key = index.key as { [k: string]: number };
+					return Object.keys(key).length === 1 && key.category === 1;
+				});
+				expect(categoryIndex).toBeDefined();
+
+				// The added index has to actually serve queries routed through it.
+				await indexed.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await indexed.get("catA", "category");
+				expect(storedEntity?.id).toBe("1");
+
+				// A further bootstrap must not create the index a second time.
+				expect(await indexed.bootstrap()).toBe(true);
+				const afterSecond = await col.listIndexes().toArray();
+				expect(afterSecond).toHaveLength(after.length);
+			} finally {
+				try {
+					await indexed.teardown?.();
+				} catch {}
+				try {
+					await indexed.stop?.();
+				} catch {}
+				try {
+					await unindexed.stop?.();
+				} catch {}
+				await client.close();
+			}
+		},
+		60_000
 	);
 });

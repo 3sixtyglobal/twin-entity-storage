@@ -27,6 +27,7 @@ import {
 } from "@twin.org/entity";
 import {
 	EntityStorageHelper,
+	MigrationHelper,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
 } from "@twin.org/entity-storage-models";
@@ -52,6 +53,12 @@ export class ScyllaDBTableConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
+	 * ScyllaDB's maximum table name length in characters.
+	 * @internal
+	 */
+	private static readonly _MAX_IDENTIFIER_LENGTH: number = 48;
 
 	/**
 	 * The name for the schema.
@@ -821,9 +828,10 @@ export class ScyllaDBTableConnector<T = unknown>
 	public async createTargetConnector<U>(
 		entitySchemaName: string
 	): Promise<ScyllaDBTableConnector<U>> {
-		// We create a new table for the migration with a unique name to avoid conflicts with the existing table
-		// This table will be swapped with the existing table once the migration is finalized.
-		const migrationTableName = `${this._config.tableName}Migration${Date.now()}`;
+		const migrationTableName = MigrationHelper.generateTargetName(
+			this._config.tableName,
+			ScyllaDBTableConnector._MAX_IDENTIFIER_LENGTH
+		);
 
 		return new ScyllaDBTableConnector<U>({
 			entitySchema: entitySchemaName,

@@ -5,10 +5,13 @@ import {
 	BaseError,
 	Coerce,
 	ComponentFactory,
+	Converter,
 	GeneralError,
+	Guards,
 	Is,
 	ObjectHelper
 } from "@twin.org/core";
+import { Blake2b } from "@twin.org/crypto";
 import {
 	EntitySchemaDiffHelper,
 	EntitySchemaPropertyType,
@@ -33,6 +36,18 @@ export class MigrationHelper {
 	 * Runtime name for the class.
 	 */
 	public static readonly CLASS_NAME: string = nameof<MigrationHelper>();
+
+	/**
+	 * Marker between the base name and the hash in a generated target name.
+	 * @internal
+	 */
+	private static readonly _TARGET_MARKER: string = "Migration";
+
+	/**
+	 * Hex characters of the hash kept in a generated target name.
+	 * @internal
+	 */
+	private static readonly _TARGET_HASH_LENGTH: number = 12;
 
 	/**
 	 * Performs a chain migration in a single connector swap, regardless of how many version
@@ -73,8 +88,16 @@ export class MigrationHelper {
 
 			targetConnector = await sourceConnector.createTargetConnector(targetSchemaName);
 
-			await MigrationHelper.startupConnector(sourceConnector, loggingComponentType);
-			await MigrationHelper.startupConnector(targetConnector, loggingComponentType);
+			await MigrationHelper.startupConnector(
+				sourceConnector,
+				sourceConnector.getSchema().type ?? "",
+				loggingComponentType
+			);
+			await MigrationHelper.startupConnector(
+				targetConnector,
+				targetSchemaName,
+				loggingComponentType
+			);
 
 			// undefined → not partitioned: run one pass with empty context.
 			// []        → partitioned but table is empty: skip all passes (count() never called).
@@ -191,9 +214,12 @@ export class MigrationHelper {
 				cursor = page.cursor;
 
 				if (Is.arrayValue(page.entities)) {
-					const transformedBatch: unknown[] = page.entities.map(entity =>
-						MigrationHelper.applyEntityChain(entity, steps)
-					);
+					const transformedBatch: unknown[] = [];
+
+					for (const entity of page.entities) {
+						transformedBatch.push(await MigrationHelper.applyEntityChain(entity, steps));
+					}
+
 					await target.setBatch(transformedBatch);
 					migrated += transformedBatch.length;
 				}
@@ -217,7 +243,10 @@ export class MigrationHelper {
 	 * Each step's fromProperties and toProperties are resolved by the caller before invocation.
 	 * @returns The entity transformed to the shape described by steps[last].toProperties.
 	 */
-	public static applyEntityChain(entity: unknown, steps: IResolvedMigrationStep[]): unknown {
+	public static async applyEntityChain(
+		entity: unknown,
+		steps: IResolvedMigrationStep[]
+	): Promise<unknown> {
 		let current: unknown = entity;
 		for (const step of steps) {
 			const diff = EntitySchemaDiffHelper.diff(
@@ -225,7 +254,7 @@ export class MigrationHelper {
 				step.toProperties,
 				step.renames
 			);
-			current = MigrationHelper.applyEntityTransform(
+			current = await MigrationHelper.applyEntityTransform(
 				current as Partial<unknown>,
 				diff,
 				step.transformEntityProperty,
@@ -246,12 +275,12 @@ export class MigrationHelper {
 	 * @throws GeneralError if a transformation is required for an object or array property but no transformEntityProperty function is provided.
 	 * @throws GeneralError if coercion of a modified property results in undefined for a non-optional target property.
 	 */
-	public static applyEntityTransform<T = unknown, U = unknown>(
+	public static async applyEntityTransform<T = unknown, U = unknown>(
 		entity: Partial<T>,
 		schemaDiff: IEntitySchemaDiff<T, U>,
 		transformEntityProperty?: EntityPropertyTransformer<T, U>,
 		removeEntityProperty?: EntityPropertyRemover<T>
-	): U {
+	): Promise<U> {
 		const newEntity = {} as U;
 
 		for (const property of schemaDiff.unchanged) {
@@ -317,7 +346,7 @@ export class MigrationHelper {
 					});
 				}
 
-				newValue = transformEntityProperty(entity as T, change.from, change.to, currentValue);
+				newValue = await transformEntityProperty(entity as T, change.from, change.to, currentValue);
 			}
 
 			if (newValue === undefined && !(change.to.optional ?? false)) {
@@ -333,25 +362,62 @@ export class MigrationHelper {
 		}
 
 		if (Is.arrayValue(schemaDiff.removed) && Is.function(removeEntityProperty)) {
-			removeEntityProperty(entity as T, schemaDiff.removed);
+			await removeEntityProperty(entity as T, schemaDiff.removed);
 		}
 
 		return newEntity;
 	}
 
 	/**
+	 * Generate a length-bounded name for a migration's temporary target storage. The marker and
+	 * hash are always appended, as finalizeMigration swaps the target into the source name.
+	 * @param baseName The name of the source storage.
+	 * @param maxIdentifierLength The maximum identifier length allowed by the backend.
+	 * @returns The target name, at most maxIdentifierLength characters.
+	 * @throws GeneralError if maxIdentifierLength cannot fit the marker and hash.
+	 */
+	public static generateTargetName(baseName: string, maxIdentifierLength: number): string {
+		Guards.stringValue(MigrationHelper.CLASS_NAME, nameof(baseName), baseName);
+		Guards.integer(MigrationHelper.CLASS_NAME, nameof(maxIdentifierLength), maxIdentifierLength);
+
+		const suffixLength =
+			MigrationHelper._TARGET_MARKER.length + MigrationHelper._TARGET_HASH_LENGTH;
+		if (maxIdentifierLength <= suffixLength) {
+			throw new GeneralError(MigrationHelper.CLASS_NAME, "maxIdentifierLengthTooSmall", {
+				maxIdentifierLength,
+				minimum: suffixLength + 1
+			});
+		}
+
+		const hash = Blake2b.sum256(Converter.utf8ToBytes(`${baseName}_${Date.now()}`));
+		const hex = Converter.bytesToHex(hash);
+		const headLength = maxIdentifierLength - suffixLength;
+
+		return `${baseName.slice(0, headLength)}${MigrationHelper._TARGET_MARKER}${hex.slice(0, MigrationHelper._TARGET_HASH_LENGTH)}`;
+	}
+
+	/**
 	 * Starts the connector by calling bootstrap and start if they are defined.
 	 * @param connector The connector to start.
+	 * @param schemaName The schema name reported if bootstrap fails.
 	 * @param loggingComponentType The optional component type to use for logging the migration progress.
+	 * @throws GeneralError if the connector's bootstrap reports failure.
 	 * @internal
 	 */
 	private static async startupConnector<T>(
 		connector: IEntityStorageConnector<T>,
+		schemaName: string,
 		loggingComponentType?: string
 	): Promise<void> {
 		const bootstrap = connector.bootstrap?.bind(connector);
 		if (Is.function(bootstrap)) {
-			await bootstrap(loggingComponentType);
+			const bootstrapped = await bootstrap(loggingComponentType);
+			if (!bootstrapped) {
+				throw new GeneralError(MigrationHelper.CLASS_NAME, "connectorBootstrapFailed", {
+					schemaName,
+					className: connector.className()
+				});
+			}
 		}
 		const start = connector.start?.bind(connector);
 		if (Is.function(start)) {

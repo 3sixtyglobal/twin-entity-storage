@@ -38,6 +38,7 @@ import {
 	ConnectionHelper,
 	EntityStorageHelper,
 	IndexHelper,
+	MigrationHelper,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
 } from "@twin.org/entity-storage-models";
@@ -81,6 +82,18 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
+	 * PostgreSQL's maximum identifier length in characters; longer names are silently truncated.
+	 * @internal
+	 */
+	private static readonly _MAX_IDENTIFIER_LENGTH: number = 63;
+
+	/**
+	 * The largest length which can be expressed as VARCHAR(N), anything above this is stored as TEXT.
+	 * @internal
+	 */
+	private static readonly _MAX_VARCHAR_LENGTH: number = 10485760;
 
 	/**
 	 * The name for the schema.
@@ -223,34 +236,54 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
+		let dbConnection: postgres.Sql;
 		try {
-			const dbConnection = await this.getClient();
-
-			const databaseExists = await this.databaseExists();
-			if (!databaseExists) {
-				await nodeLogging?.log({
-					level: "info",
-					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
-					ts: Date.now(),
-					message: "databaseCreating",
-					data: {
-						databaseName: this._config.database
-					}
-				});
-				await dbConnection.unsafe(`CREATE DATABASE "${this._config.database}";`);
-				await this.waitForDatabaseExists();
-			} else {
-				await nodeLogging?.log({
-					level: "info",
-					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
-					ts: Date.now(),
-					message: "databaseExists",
-					data: {
-						databaseName: this._config.database
-					}
-				});
+			const adminClient = postgres(this.createConnectionConfig(false));
+			try {
+				const databaseExists = await this.databaseExists(adminClient);
+				if (!databaseExists) {
+					await nodeLogging?.log({
+						level: "info",
+						source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+						ts: Date.now(),
+						message: "databaseCreating",
+						data: {
+							databaseName: this._config.database
+						}
+					});
+					await adminClient.unsafe(`CREATE DATABASE "${this._config.database}";`);
+					await this.waitForDatabaseExists(adminClient);
+				} else {
+					await nodeLogging?.log({
+						level: "info",
+						source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+						ts: Date.now(),
+						message: "databaseExists",
+						data: {
+							databaseName: this._config.database
+						}
+					});
+				}
+			} finally {
+				await adminClient.end();
 			}
 
+			dbConnection = await this.getClient();
+		} catch (error) {
+			await nodeLogging?.log({
+				level: "error",
+				source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "databaseCreateFailed",
+				error: BaseError.fromError(error),
+				data: {
+					databaseName: this._config.database
+				}
+			});
+			return false;
+		}
+
+		try {
 			const tableExists = await this.tableExists();
 
 			if (!tableExists) {
@@ -285,11 +318,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 					prop.type !== EntitySchemaPropertyType.Object &&
 					prop.type !== EntitySchemaPropertyType.Array
 				) {
-					const columnName = String(prop.property);
-					const indexName = IndexHelper.generateName(this._config.tableName, columnName);
-					await dbConnection.unsafe(
-						`CREATE INDEX IF NOT EXISTS "${indexName}" ON "${this._config.tableName}" ("${columnName}")`
-					);
+					await this.ensureIndex(dbConnection, prop, nodeLogging);
 				}
 			}
 		} catch (error) {
@@ -297,10 +326,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				level: "error",
 				source: PostgreSqlEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
-				message: "databaseCreateFailed",
+				message: "tableCreateFailed",
 				error: BaseError.fromError(error),
 				data: {
-					databaseName: this._config.database
+					tableName: this._config.tableName
 				}
 			});
 			return false;
@@ -355,7 +384,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	public async stop(): Promise<void> {
 		await ConnectionHelper.closeClient<postgres.Sql>(
 			"postgreSqlConnections",
-			`${this._config.host}|${this._config.port ?? 5432}|${this._config.user}`,
+			this.createClientId(),
 			this._instanceId,
 			this._mutexTimeoutMs,
 			async sql => sql.end()
@@ -928,7 +957,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			entitySchema: entitySchemaName,
 			config: {
 				...this._config,
-				tableName: `${this._config.tableName}Migration${Date.now()}`
+				tableName: MigrationHelper.generateTargetName(
+					this._config.tableName,
+					PostgreSqlEntityStorageConnector._MAX_IDENTIFIER_LENGTH
+				)
 			},
 			partitionContextIds: this._partitionContextIds
 		});
@@ -1195,13 +1227,13 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 
 	/**
 	 * Check if the database exists.
+	 * @param adminClient The server-level connection to use for the check.
 	 * @returns True if the database exists, false otherwise.
 	 * @internal
 	 */
-	private async databaseExists(): Promise<boolean> {
+	private async databaseExists(adminClient: postgres.Sql): Promise<boolean> {
 		try {
-			const dbConnection = await this.getClient();
-			const res = await dbConnection.unsafe(
+			const res = await adminClient.unsafe(
 				"SELECT datname FROM pg_catalog.pg_database WHERE datname = $1",
 				[this._config.database] as postgres.ParameterOrJSON<never>[]
 			);
@@ -1213,17 +1245,100 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 
 	/**
 	 * Wait for a database to exist.
+	 * @param adminClient The server-level connection to use for the check.
 	 * @returns Nothing.
 	 * @internal
 	 */
-	private async waitForDatabaseExists(): Promise<void> {
+	private async waitForDatabaseExists(adminClient: postgres.Sql): Promise<void> {
 		for (let attempt = 0; attempt < 20; attempt++) {
-			const databaseExists = await this.databaseExists();
+			const databaseExists = await this.databaseExists(adminClient);
 			if (databaseExists) {
 				break;
 			}
 			await new Promise(resolve => setTimeout(resolve, 250));
 		}
+	}
+
+	/**
+	 * Ensure the secondary index for a property exists, replacing a legacy-named index if present.
+	 * @param dbConnection The connection to query with.
+	 * @param prop The indexed property.
+	 * @param nodeLogging Optional logging component.
+	 * @internal
+	 */
+	private async ensureIndex(
+		dbConnection: postgres.Sql,
+		prop: IEntitySchemaProperty<T>,
+		nodeLogging?: ILoggingComponent
+	): Promise<void> {
+		const columnName = String(prop.property);
+		const indexName = IndexHelper.generateName(this._config.tableName, columnName);
+
+		const indexRows = await dbConnection.unsafe(
+			`SELECT i.relname AS "indexName", ix.indisunique AS "isUnique", ix.indnkeyatts AS "keyColumnCount"
+			FROM pg_index ix
+			JOIN pg_class t ON t.oid = ix.indrelid
+			JOIN pg_namespace n ON n.oid = t.relnamespace
+			JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ix.indkey[0]
+			JOIN pg_class i ON i.oid = ix.indexrelid
+			JOIN pg_am am ON am.oid = i.relam
+			WHERE n.nspname = 'public'
+				AND t.relname = $1
+				AND a.attname = $2
+				AND ix.indisvalid
+				AND ix.indisready
+				AND ix.indpred IS NULL
+				AND am.amname = 'btree'`,
+			[this._config.tableName, columnName] as ParameterOrJSON<never>[]
+		);
+		const indexNames = indexRows.map(row => ObjectHelper.propertyGet<string>(row, "indexName"));
+
+		if (!Is.arrayValue(indexNames)) {
+			await dbConnection.unsafe(
+				`CREATE INDEX IF NOT EXISTS "${indexName}" ON "${this._config.tableName}" ("${columnName}")`
+			);
+			return;
+		}
+
+		// TODO: remove the legacy index handling once every installation has bootstrapped on a release that contains it
+		const legacyName = IndexHelper.generateLegacyName(
+			this._config.tableName,
+			columnName,
+			IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH
+		);
+		if (!indexNames.includes(legacyName)) {
+			return;
+		}
+
+		// The connector's own legacy indexes were always non-unique and single-column, anything else is an operator's
+		const legacyRow = indexRows.find(
+			row => ObjectHelper.propertyGet(row, "indexName") === legacyName
+		);
+		if (
+			!Is.object(legacyRow) ||
+			ObjectHelper.propertyGet(legacyRow, "isUnique") !== false ||
+			Coerce.integer(ObjectHelper.propertyGet(legacyRow, "keyColumnCount")) !== 1
+		) {
+			return;
+		}
+
+		const hasCurrent = indexNames.includes(indexName);
+		if (hasCurrent) {
+			await dbConnection.unsafe(`DROP INDEX "${legacyName}"`);
+		} else {
+			await dbConnection.unsafe(`ALTER INDEX "${legacyName}" RENAME TO "${indexName}"`);
+		}
+		await nodeLogging?.log({
+			level: "info",
+			source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: hasCurrent ? "legacyIndexDropped" : "legacyIndexRenamed",
+			data: {
+				tableName: this._config.tableName,
+				indexName: legacyName,
+				newIndexName: indexName
+			}
+		});
 	}
 
 	/**
@@ -1275,14 +1390,14 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Retrieve (or lazily create) the shared postgres connection for this endpoint.
+	 * Retrieve (or lazily create) the shared postgres connection for this endpoint and database.
 	 * @returns The shared connection.
 	 * @internal
 	 */
 	private async getClient(): Promise<postgres.Sql> {
 		return ConnectionHelper.openClient<postgres.Sql>(
 			"postgreSqlConnections",
-			`${this._config.host}|${this._config.port ?? 5432}|${this._config.user}`,
+			this.createClientId(),
 			this._instanceId,
 			this._mutexTimeoutMs,
 			async () => postgres(this.createConnectionConfig())
@@ -1290,11 +1405,23 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Build a stable cache key for the shared client based on connection parameters.
+	 * @returns The cache key.
+	 * @internal
+	 */
+	private createClientId(): string {
+		return `${this._config.host}|${this._config.port ?? 5432}|${this._config.user}|${this._config.database}`;
+	}
+
+	/**
 	 * Create a new DB connection configuration.
+	 * @param includeDatabase Whether to include the database name in the options.
 	 * @returns The PostgreSql connection configuration.
 	 * @internal
 	 */
-	private createConnectionConfig(): postgres.Options<{ [key: string]: postgres.PostgresType }> {
+	private createConnectionConfig(
+		includeDatabase: boolean = true
+	): postgres.Options<{ [key: string]: postgres.PostgresType }> {
 		const opts: { [key: string]: unknown } = {
 			host: this._config.host,
 			port: this._config.port ?? 5432,
@@ -1306,8 +1433,20 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			// eslint-disable-next-line camelcase
 			connect_timeout: this._config?.pool?.connectTimeout,
 			// eslint-disable-next-line camelcase
-			max_lifetime: this._config?.pool?.maxLifetime
+			max_lifetime: this._config?.pool?.maxLifetime,
+			// The driver returns BIGINT (int64/uint64 properties) as a string, the schema expects a number.
+			types: {
+				bigint: {
+					to: 20,
+					from: [20],
+					serialize: (value: number | bigint): string => value.toString(),
+					parse: (value: string): number => Number(value)
+				}
+			}
 		};
+		if (includeDatabase) {
+			opts.database = this._config.database;
+		}
 		return opts;
 	}
 
@@ -1721,6 +1860,24 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 							break;
 					}
 				}
+
+				// An explicit maxLength always wins, otherwise a format default only applies when the
+				// format did not already map to a dedicated column type such as UUID.
+				const formatMaxLength =
+					sqlType === "TEXT" && Is.stringValue(prop.format)
+						? EntitySchemaHelper.FORMAT_MAX_LENGTHS[prop.format]
+						: undefined;
+				const maxLength = prop.maxLength ?? formatMaxLength;
+
+				if (
+					prop.type === EntitySchemaPropertyType.String &&
+					Is.integer(maxLength) &&
+					maxLength > 0 &&
+					maxLength <= PostgreSqlEntityStorageConnector._MAX_VARCHAR_LENGTH
+				) {
+					sqlType = `VARCHAR(${maxLength})`;
+				}
+
 				const columnName = String(prop.property);
 				const nullable = prop.optional ? " NULL" : " NOT NULL";
 

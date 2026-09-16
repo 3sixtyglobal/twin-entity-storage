@@ -57,3 +57,38 @@ The maximum identifier length allowed by the target database.
 `string`
 
 A deterministic index name no longer than maxIdentifierLength characters.
+
+***
+
+### generateLegacyName() {#generatelegacyname}
+
+> `static` **generateLegacyName**(`tableName`, `columnName`, `maxIdentifierLength?`): `string`
+
+Generate the unbounded index name used before names were hashed, so connectors can recognise their own legacy indexes.
+TODO: remove together with the connectors' legacy index handling.
+
+#### Parameters
+
+##### tableName
+
+`string`
+
+The fully-qualified table name, including any deployment prefix.
+
+##### columnName
+
+`string`
+
+The column being indexed.
+
+##### maxIdentifierLength?
+
+`number`
+
+Optional length the database silently truncated identifiers to.
+
+#### Returns
+
+`string`
+
+The legacy index name, truncated to maxIdentifierLength when supplied.

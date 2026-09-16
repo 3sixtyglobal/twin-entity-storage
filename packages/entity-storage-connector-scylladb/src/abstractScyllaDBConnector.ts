@@ -671,6 +671,11 @@ export abstract class AbstractScyllaDBConnector<T> {
 			}
 		} else if (fieldDescriptor.format === EntitySchemaPropertyFormat.Uuid) {
 			return (value as CassandraTypes.Uuid).toString();
+		} else if (
+			fieldDescriptor.type === EntitySchemaPropertyType.Integer &&
+			CassandraTypes.Long.isLong(value)
+		) {
+			return value.toNumber();
 		}
 
 		return value;

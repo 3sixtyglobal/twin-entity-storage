@@ -20,6 +20,14 @@ import { ScyllaDBTableConnector } from "../src/scyllaDBTableConnector.js";
 // without a full table drop, so the two-table pattern is not viable here.
 const SUPPORT_SECONDARY_INDEXING = false;
 
+// Set to false for connectors that do not create named index objects in the database.
+const SUPPORT_NAMED_INDEX_OBJECTS = false;
+
+// ScyllaDB expresses a secondary index as a clustering column in the compound PRIMARY KEY,
+// and CQL cannot add a clustering column to a table that already exists, so bootstrap
+// cannot reconcile a schema which gains one.
+const SUPPORT_INDEX_UPDATE = false;
+
 @entity()
 class IndexedTestType {
 	@property({ type: "string", isPrimary: true })
@@ -135,5 +143,226 @@ describe("ScyllaDBTableConnector", () => {
 			}
 		},
 		300_000
+	);
+
+	test("bootstrap is idempotent when called multiple times", async () => {
+		const connector = createIndexedConnector();
+
+		try {
+			const firstResult = await connector.bootstrap();
+			const secondResult = await connector.bootstrap();
+
+			expect(firstResult).toBe(true);
+			expect(secondResult).toBe(true);
+
+			await connector.set({ id: "1", category: "catA", value: 1 });
+			const storedEntity = await connector.get("1");
+			expect(storedEntity?.category).toBe("catA");
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+		}
+	}, 60_000);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a differently named index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only a non-leading member of another index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when a same-named table in another schema has a covering index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only covered by an invalid or invisible index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"still creates its own index when the column is only covered by a FULLTEXT or partial index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index after an index naming-scheme change",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a descending index",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"does not create a duplicate index when the column is already covered by a compound index leading on it",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				await connector.bootstrap();
+				await connector.bootstrap();
+
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.category).toBe("catA");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_INDEX_UPDATE)(
+		"bootstrap adds an index when an existing store gains one in its schema",
+		async () => {
+			const tableName = `${TEST_SCYLLA_CONFIG.tableName}_index_update_${Date.now()}`;
+			const unindexed = new ScyllaDBTableConnector<UnindexedTestType>({
+				entitySchema: nameof<UnindexedTestType>(),
+				config: { ...TEST_SCYLLA_CONFIG, tableName }
+			});
+			const indexed = new ScyllaDBTableConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_SCYLLA_CONFIG, tableName }
+			});
+
+			try {
+				// Create the table from a schema which does not index the category column.
+				expect(await unindexed.bootstrap()).toBe(true);
+
+				// Bootstrapping the same table from a schema which does index it must add the index.
+				expect(await indexed.bootstrap()).toBe(true);
+
+				// The added index has to actually serve queries routed through it.
+				await indexed.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await indexed.get("catA", "category");
+				expect(storedEntity?.id).toBe("1");
+			} finally {
+				try {
+					await indexed.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
 	);
 });

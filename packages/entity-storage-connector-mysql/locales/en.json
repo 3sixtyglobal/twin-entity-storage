@@ -6,7 +6,9 @@
 			"tableCreating": "Table \"{tableName}\" creating",
 			"tableExists": "Table \"{tableName}\" created or it already exists",
 			"tableDropping": "Dropping table \"{tableName}\"",
-			"tableDropped": "Table \"{tableName}\" dropped"
+			"tableDropped": "Table \"{tableName}\" dropped",
+			"legacyIndexDropped": "Legacy index \"{indexName}\" dropped from table \"{tableName}\", \"{newIndexName}\" already covers the column",
+			"legacyIndexRenamed": "Legacy index \"{indexName}\" renamed to \"{newIndexName}\" on table \"{tableName}\""
 		}
 	},
 	"warn": {
@@ -26,6 +28,7 @@
 			"conditionalNotSupported": "Conditional operator \"{operator}\" is not supported",
 			"entitySchemaPropertiesUndefined": "The entity schema properties are undefined",
 			"databaseCreateFailed": "Unable to create database \"{databaseName}\"",
+			"tableCreateFailed": "Unable to create table \"{tableName}\"",
 			"setBatchFailed": "Unable to set batch of entities",
 			"countFailed": "Unable to count entities",
 			"emptyFailed": "Unable to empty entity storage",

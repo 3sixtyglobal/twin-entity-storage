@@ -34,6 +34,7 @@ import {
 import {
 	ConnectionHelper,
 	EntityStorageHelper,
+	MigrationHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -66,6 +67,13 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
+	 * Maximum base collection name length, leaving room in the 255-byte namespace limit for the
+	 * database name and the partition suffix.
+	 * @internal
+	 */
+	private static readonly _MAX_IDENTIFIER_LENGTH: number = 120;
 
 	/**
 	 * The name for the schema.
@@ -229,13 +237,72 @@ export class MongoDbEntityStorageConnector<T = unknown>
 				}
 			});
 
+			let existingIndexes: Document[] = [];
+			try {
+				existingIndexes = await collection.listIndexes().toArray();
+			} catch {
+				// Collection does not exist yet; all indexes will be created below.
+			}
+
+			let bootstrapSuccess = true;
+
 			for (const prop of this._entitySchema.properties ?? []) {
+				const propName = String(prop.property);
+
 				if (prop.isPrimary === true) {
-					await collection.createIndex({ [String(prop.property)]: 1 }, { unique: true });
+					const coveringIndex = this.findCoveringIndex(existingIndexes, propName, true);
+					if (Is.empty(coveringIndex)) {
+						try {
+							await collection.createIndex({ [propName]: 1 }, { unique: true });
+						} catch (propError) {
+							await nodeLogging?.log({
+								level: "error",
+								source: MongoDbEntityStorageConnector.CLASS_NAME,
+								ts: Date.now(),
+								message: "indexCreateFailed",
+								error: BaseError.fromError(propError),
+								data: { property: propName }
+							});
+							bootstrapSuccess = false;
+						}
+					} else if (!coveringIndex.unique || this.hasRestrictiveOptions(coveringIndex)) {
+						await nodeLogging?.log({
+							level: "warn",
+							source: MongoDbEntityStorageConnector.CLASS_NAME,
+							ts: Date.now(),
+							message: "indexOptionsConflict",
+							data: { property: propName }
+						});
+					}
 				} else if (prop.isSecondary === true || !Is.empty(prop.sortDirection)) {
-					await collection.createIndex({ [String(prop.property)]: 1 });
+					const coveringIndex = this.findCoveringIndex(existingIndexes, propName, false);
+					if (Is.empty(coveringIndex)) {
+						try {
+							await collection.createIndex({ [propName]: 1 });
+						} catch (propError) {
+							await nodeLogging?.log({
+								level: "error",
+								source: MongoDbEntityStorageConnector.CLASS_NAME,
+								ts: Date.now(),
+								message: "indexCreateFailed",
+								error: BaseError.fromError(propError),
+								data: { property: propName }
+							});
+							bootstrapSuccess = false;
+						}
+					} else if (this.hasRestrictiveOptions(coveringIndex)) {
+						await nodeLogging?.log({
+							level: "warn",
+							source: MongoDbEntityStorageConnector.CLASS_NAME,
+							ts: Date.now(),
+							message: "indexOptionsConflict",
+							data: { property: propName }
+						});
+					}
 				}
 			}
+
+			return bootstrapSuccess;
 		} catch (error) {
 			await nodeLogging?.log({
 				level: "error",
@@ -249,8 +316,6 @@ export class MongoDbEntityStorageConnector<T = unknown>
 			});
 			return false;
 		}
-
-		return true;
 	}
 
 	/**
@@ -843,7 +908,10 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	public async createTargetConnector<U>(
 		newEntitySchema: string
 	): Promise<IEntityStorageConnector<U>> {
-		const migrationCollectionName = `${this._config.collection}Migration${Date.now()}`;
+		const migrationCollectionName = MigrationHelper.generateTargetName(
+			this._config.collection,
+			MongoDbEntityStorageConnector._MAX_IDENTIFIER_LENGTH
+		);
 		return new MongoDbEntityStorageConnector<U>({
 			entitySchema: newEntitySchema,
 			config: {
@@ -984,6 +1052,48 @@ export class MongoDbEntityStorageConnector<T = unknown>
 		const collectionName = await this.resolveCollectionName(this._config.collection);
 		const client = await this.getClient();
 		return client.db(this._config.database).collection(collectionName);
+	}
+
+	/**
+	 * Find an existing index that already covers a property so bootstrap can skip creating a redundant one.
+	 * An exact single-field ascending match always counts even if hidden, sparse or partial, since MongoDB refuses to recreate it under different options.
+	 * Otherwise an index counts when it leads on the property in either direction and is not hidden, sparse or partial; with requireUnique it must also be unique and single-field.
+	 * @param existingIndexes The indexes returned by listIndexes.
+	 * @param propName The property to check coverage for.
+	 * @param requireUnique Restrict coverage to single-field, unique indexes, for when the property must also enforce uniqueness (the primary key).
+	 * @returns The covering index if one exists.
+	 * @internal
+	 */
+	private findCoveringIndex(
+		existingIndexes: Document[],
+		propName: string,
+		requireUnique: boolean
+	): Document | undefined {
+		return existingIndexes.find(idx => {
+			const key = idx.key as { [k: string]: unknown };
+			const keys = Object.keys(key);
+			const direction = key[propName];
+			if (keys[0] !== propName || (direction !== 1 && direction !== -1)) {
+				return false;
+			}
+			if (keys.length === 1 && direction === 1) {
+				return true;
+			}
+			if (requireUnique && keys.length > 1) {
+				return false;
+			}
+			return (!requireUnique || idx.unique === true) && !this.hasRestrictiveOptions(idx);
+		});
+	}
+
+	/**
+	 * Determine whether an index is hidden, sparse or partial, meaning the query planner cannot rely on it to serve every document.
+	 * @param idx The index to check.
+	 * @returns True if the index is hidden, sparse or partial.
+	 * @internal
+	 */
+	private hasRestrictiveOptions(idx: Document): boolean {
+		return idx.hidden === true || idx.sparse === true || !Is.empty(idx.partialFilterExpression);
 	}
 
 	/**

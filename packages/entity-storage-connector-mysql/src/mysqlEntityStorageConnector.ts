@@ -26,8 +26,8 @@ import {
 	ComparisonOperator,
 	type EntityCondition,
 	EntitySchemaFactory,
-	EntitySchemaPropertyFormat,
 	EntitySchemaHelper,
+	EntitySchemaPropertyFormat,
 	EntitySchemaPropertyType,
 	type IComparator,
 	type IEntitySchema,
@@ -39,6 +39,7 @@ import {
 	ConnectionHelper,
 	EntityStorageHelper,
 	IndexHelper,
+	MigrationHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
@@ -83,6 +84,25 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
+	 * MySQL's maximum identifier length in characters.
+	 * @internal
+	 */
+	private static readonly _MAX_IDENTIFIER_LENGTH: number = 64;
+
+	/**
+	 * The largest length which can be expressed as VARCHAR(N), anything above this is stored as LONGTEXT.
+	 * A row is limited to 65535 bytes and utf8mb4 uses up to 4 bytes per character.
+	 * @internal
+	 */
+	private static readonly _MAX_VARCHAR_LENGTH: number = 16383;
+
+	/**
+	 * The prefix length used when indexing a column which is too long to index in full.
+	 * @internal
+	 */
+	private static readonly _INDEX_PREFIX_LENGTH: number = 255;
 
 	/**
 	 * The name for the schema.
@@ -284,8 +304,9 @@ export class MySqlEntityStorageConnector<T = unknown>
 	public async bootstrap(nodeLoggingComponentType?: string): Promise<boolean> {
 		const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(nodeLoggingComponentType);
 
+		let pool: Pool;
 		try {
-			const pool = await this.getPool();
+			pool = await this.getPool();
 
 			const databaseExists = await this.databaseExists();
 			if (!databaseExists) {
@@ -312,7 +333,21 @@ export class MySqlEntityStorageConnector<T = unknown>
 					}
 				});
 			}
+		} catch (error) {
+			await nodeLogging?.log({
+				level: "error",
+				source: MySqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "databaseCreateFailed",
+				error: BaseError.fromError(error),
+				data: {
+					databaseName: this._config.database
+				}
+			});
+			return false;
+		}
 
+		try {
 			const tableExists = await this.tableExists();
 			if (!tableExists) {
 				await nodeLogging?.log({
@@ -348,21 +383,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 					prop.type !== EntitySchemaPropertyType.Object &&
 					prop.type !== EntitySchemaPropertyType.Array
 				) {
-					const columnName = String(prop.property);
-					const needsPrefix =
-						prop.type === EntitySchemaPropertyType.String &&
-						prop.format !== EntitySchemaPropertyFormat.Uuid;
-					const indexCol = needsPrefix ? `\`${columnName}\`(255)` : `\`${columnName}\``;
-					const indexName = IndexHelper.generateName(this._config.tableName, columnName);
-					const [indexRows] = await pool.query(
-						"SELECT COUNT(1) AS indexExists FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND index_name = ?",
-						[this._config.database, this._config.tableName, indexName]
-					);
-					if (Is.array(indexRows) && ObjectHelper.propertyGet(indexRows[0], "indexExists") === 0) {
-						await pool.query(
-							`CREATE INDEX \`${indexName}\` ON \`${this._config.database}\`.\`${this._config.tableName}\` (${indexCol})`
-						);
-					}
+					await this.ensureIndex(pool, prop, nodeLogging);
 				}
 			}
 		} catch (error) {
@@ -370,10 +391,10 @@ export class MySqlEntityStorageConnector<T = unknown>
 				level: "error",
 				source: MySqlEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
-				message: "databaseCreateFailed",
+				message: "tableCreateFailed",
 				error: BaseError.fromError(error),
 				data: {
-					databaseName: this._config.database
+					tableName: this._config.tableName
 				}
 			});
 			return false;
@@ -1104,7 +1125,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @returns The connector implementation version.
 	 */
 	public connectorVersion(): number {
-		return 0;
+		return 1;
 	}
 
 	/**
@@ -1115,7 +1136,10 @@ export class MySqlEntityStorageConnector<T = unknown>
 	public async createTargetConnector<U>(
 		newEntitySchema: string
 	): Promise<IEntityStorageConnector<U>> {
-		const migrationTableName = `${this._config.tableName}Migration${Date.now()}`;
+		const migrationTableName = MigrationHelper.generateTargetName(
+			this._config.tableName,
+			MySqlEntityStorageConnector._MAX_IDENTIFIER_LENGTH
+		);
 		return new MySqlEntityStorageConnector<U>({
 			entitySchema: newEntitySchema,
 			config: {
@@ -1225,6 +1249,77 @@ export class MySqlEntityStorageConnector<T = unknown>
 			}
 			await new Promise(resolve => setTimeout(resolve, 250));
 		}
+	}
+
+	/**
+	 * Ensure the secondary index for a property exists, replacing a legacy-named index if present.
+	 * @param pool The pool to query with.
+	 * @param prop The indexed property.
+	 * @param nodeLogging Optional logging component.
+	 * @internal
+	 */
+	private async ensureIndex(
+		pool: Pool,
+		prop: IEntitySchemaProperty<T>,
+		nodeLogging?: ILoggingComponent
+	): Promise<void> {
+		const columnName = String(prop.property);
+		const indexCol = this.indexColumn(columnName, this.mapSqlColumn(prop).indexPrefixLength);
+		const indexName = IndexHelper.generateName(this._config.tableName, columnName);
+		const qualifiedTable = `\`${this._config.database}\`.\`${this._config.tableName}\``;
+
+		const [indexRows] = await pool.query(
+			"SELECT DISTINCT index_name AS indexName FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND column_name = ? AND seq_in_index = 1 AND is_visible = 'YES' AND index_type = 'BTREE'",
+			[this._config.database, this._config.tableName, columnName]
+		);
+		const indexNames = Is.array(indexRows)
+			? indexRows.map(row => ObjectHelper.propertyGet<string>(row, "indexName"))
+			: [];
+
+		if (!Is.arrayValue(indexNames)) {
+			await pool.query(`CREATE INDEX \`${indexName}\` ON ${qualifiedTable} (${indexCol})`);
+			return;
+		}
+
+		// TODO: remove the legacy index handling once every installation has bootstrapped on a release that contains it
+		const legacyName = IndexHelper.generateLegacyName(this._config.tableName, columnName);
+		if (!indexNames.includes(legacyName)) {
+			return;
+		}
+
+		// The connector's own legacy indexes were always non-unique and single-column, anything else is an operator's
+		const [legacyRows] = await pool.query(
+			"SELECT MAX(non_unique) AS nonUnique, COUNT(1) AS keyColumnCount FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND index_name = ?",
+			[this._config.database, this._config.tableName, legacyName]
+		);
+		const legacyRow = Is.array(legacyRows) ? legacyRows[0] : undefined;
+		if (
+			!Is.object(legacyRow) ||
+			Coerce.integer(ObjectHelper.propertyGet(legacyRow, "nonUnique")) !== 1 ||
+			Coerce.integer(ObjectHelper.propertyGet(legacyRow, "keyColumnCount")) !== 1
+		) {
+			return;
+		}
+
+		const hasCurrent = indexNames.includes(indexName);
+		if (hasCurrent) {
+			await pool.query(`DROP INDEX \`${legacyName}\` ON ${qualifiedTable}`);
+		} else {
+			await pool.query(
+				`ALTER TABLE ${qualifiedTable} RENAME INDEX \`${legacyName}\` TO \`${indexName}\``
+			);
+		}
+		await nodeLogging?.log({
+			level: "info",
+			source: MySqlEntityStorageConnector.CLASS_NAME,
+			ts: Date.now(),
+			message: hasCurrent ? "legacyIndexDropped" : "legacyIndexRenamed",
+			data: {
+				tableName: this._config.tableName,
+				indexName: legacyName,
+				newIndexName: indexName
+			}
+		});
 	}
 
 	/**
@@ -1615,15 +1710,6 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private mapMySqlProperties(schema?: IEntitySchema<T>): string {
 		const entitySchema = schema ?? this._entitySchema;
 
-		const sqlTypeMap: { [key in EntitySchemaPropertyType]: string } = {
-			[EntitySchemaPropertyType.String]: "LONGTEXT",
-			[EntitySchemaPropertyType.Number]: "FLOAT",
-			[EntitySchemaPropertyType.Integer]: "INT",
-			[EntitySchemaPropertyType.Object]: "JSON",
-			[EntitySchemaPropertyType.Array]: "JSON",
-			[EntitySchemaPropertyType.Boolean]: "TINYINT(1)"
-		};
-
 		if (!entitySchema.properties) {
 			throw new GeneralError(
 				MySqlEntityStorageConnector.CLASS_NAME,
@@ -1643,64 +1729,12 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		const columnDefinitions = props
 			.map(prop => {
-				let sqlType = sqlTypeMap[prop.type] || "TEXT";
-				if (prop.format) {
-					switch (prop.type) {
-						case EntitySchemaPropertyType.String:
-							sqlType = "LONGTEXT";
-							switch (prop.format) {
-								case "uuid":
-									sqlType = "CHAR(36)";
-									break;
-								case "date":
-								case "date-time":
-									sqlType = "LONGTEXT";
-									break;
-							}
-							break;
-						case EntitySchemaPropertyType.Number:
-							sqlType = "FLOAT";
-							switch (prop.format) {
-								case "float":
-									sqlType = "FLOAT";
-									break;
-								case "double":
-									sqlType = "DOUBLE";
-									break;
-							}
-							break;
-						case EntitySchemaPropertyType.Integer:
-							sqlType = "INT";
-							switch (prop.format) {
-								case "int8":
-								case "uint8":
-									sqlType = "TINYINT";
-									break;
-								case "int16":
-								case "uint16":
-									sqlType = "SMALLINT";
-									break;
-								case "int32":
-								case "uint32":
-									sqlType = "INT";
-									break;
-								case "int64":
-								case "uint64":
-									sqlType = "BIGINT";
-									break;
-							}
-							break;
-					}
-				}
+				const { sqlType, indexPrefixLength } = this.mapSqlColumn(prop);
 				const columnName = String(prop.property);
 				const nullable = prop.optional ? " NULL" : " NOT NULL";
 
 				if (prop.isPrimary) {
-					if (sqlType === "LONGTEXT" || sqlType === "TEXT") {
-						primaryKeys.push(`\`${columnName}\`(255)`);
-					} else {
-						primaryKeys.push(`\`${columnName}\``);
-					}
+					primaryKeys.push(this.indexColumn(columnName, indexPrefixLength));
 				}
 				return `\`${columnName}\` ${sqlType}${nullable}`;
 			})
@@ -1709,5 +1743,124 @@ export class MySqlEntityStorageConnector<T = unknown>
 		const primaryKeyDefinition =
 			primaryKeys.length > 0 ? `, PRIMARY KEY (${primaryKeys.join(", ")})` : "";
 		return columnDefinitions + primaryKeyDefinition;
+	}
+
+	/**
+	 * Map an entity schema property to its MySQL column definition.
+	 * A string property with an explicit maxLength is stored as VARCHAR(N), which takes precedence
+	 * over the format mapping. A format which has a default length in EntitySchemaHelper.FORMAT_MAX_LENGTHS
+	 * and no dedicated column type is also bounded to that length.
+	 * @param prop The property to map.
+	 * @returns The MySQL column type, and the prefix length needed to index it, if any.
+	 * @internal
+	 */
+	private mapSqlColumn<U>(prop: IEntitySchemaProperty<U>): {
+		sqlType: string;
+		indexPrefixLength?: number;
+	} {
+		const sqlTypeMap: { [key in EntitySchemaPropertyType]: string } = {
+			[EntitySchemaPropertyType.String]: "LONGTEXT",
+			[EntitySchemaPropertyType.Number]: "FLOAT",
+			[EntitySchemaPropertyType.Integer]: "INT",
+			[EntitySchemaPropertyType.Object]: "JSON",
+			[EntitySchemaPropertyType.Array]: "JSON",
+			[EntitySchemaPropertyType.Boolean]: "TINYINT(1)"
+		};
+
+		let sqlType = sqlTypeMap[prop.type] || "TEXT";
+		let columnLength: number | undefined;
+
+		if (prop.format) {
+			switch (prop.type) {
+				case EntitySchemaPropertyType.String:
+					sqlType = "LONGTEXT";
+					switch (prop.format) {
+						case "uuid":
+							columnLength = EntitySchemaHelper.FORMAT_MAX_LENGTHS[EntitySchemaPropertyFormat.Uuid];
+							sqlType = `CHAR(${columnLength})`;
+							break;
+						case "date":
+						case "date-time":
+							sqlType = "LONGTEXT";
+							break;
+					}
+					break;
+				case EntitySchemaPropertyType.Number:
+					sqlType = "FLOAT";
+					switch (prop.format) {
+						case "float":
+							sqlType = "FLOAT";
+							break;
+						case "double":
+							sqlType = "DOUBLE";
+							break;
+					}
+					break;
+				case EntitySchemaPropertyType.Integer:
+					sqlType = "INT";
+					switch (prop.format) {
+						case "int8":
+						case "uint8":
+							sqlType = "TINYINT";
+							break;
+						case "int16":
+						case "uint16":
+							sqlType = "SMALLINT";
+							break;
+						case "int32":
+						case "uint32":
+							sqlType = "INT";
+							break;
+						case "int64":
+						case "uint64":
+							sqlType = "BIGINT";
+							break;
+					}
+					break;
+			}
+		}
+
+		// An explicit maxLength always wins, otherwise a format default only applies when the
+		// format did not already map to a dedicated column type such as CHAR for a uuid.
+		const isUnboundedText = sqlType === "LONGTEXT" || sqlType === "TEXT";
+		const formatMaxLength =
+			isUnboundedText && Is.stringValue(prop.format)
+				? EntitySchemaHelper.FORMAT_MAX_LENGTHS[prop.format]
+				: undefined;
+		const maxLength = prop.maxLength ?? formatMaxLength;
+
+		if (
+			prop.type === EntitySchemaPropertyType.String &&
+			Is.integer(maxLength) &&
+			maxLength > 0 &&
+			maxLength <= MySqlEntityStorageConnector._MAX_VARCHAR_LENGTH
+		) {
+			columnLength = maxLength;
+			sqlType = `VARCHAR(${columnLength})`;
+		}
+
+		// A column which cannot be indexed in full needs a prefix, anything which is not text
+		// is always indexable in full.
+		const needsPrefix = Is.integer(columnLength)
+			? columnLength > MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH
+			: isUnboundedText;
+
+		return {
+			sqlType,
+			indexPrefixLength: needsPrefix ? MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH : undefined
+		};
+	}
+
+	/**
+	 * Build the column reference for an index or primary key.
+	 * @param columnName The name of the column.
+	 * @param indexPrefixLength The prefix length to index, or undefined to index the column in full.
+	 * @returns The quoted column reference.
+	 * @internal
+	 */
+	private indexColumn(columnName: string, indexPrefixLength?: number): string {
+		return Is.integer(indexPrefixLength)
+			? `\`${columnName}\`(${indexPrefixLength})`
+			: `\`${columnName}\``;
 	}
 }

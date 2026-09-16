@@ -51,8 +51,14 @@ runs:
     # Inject secrets as env vars so subsequent steps can reference them without re-expanding the secret.
     - name: Load Test Environment Variables
       shell: bash
+      env:
+        TEST_ENV_VARS: ${{ inputs.test_env_vars }}
       run: |
-        printf '%s\n' "${{ inputs.test_env_vars }}" >> "$GITHUB_ENV"
+        while IFS= read -r line; do
+          [[ -z "$line" ]] && continue
+          echo "::add-mask::${line#*=}"
+          printf '%s\n' "$line" >> "$GITHUB_ENV"
+        done <<< "$TEST_ENV_VARS"
 
     # Import GPG key for signing commits
     - name: Import GPG key
@@ -108,6 +114,12 @@ runs:
         cd "$TARGET_DIR"
         git diff --binary origin/next origin/main | git apply --index
 
+    # Set up Node.js environment for running npm commands
+    - name: Setup Node.js
+      uses: actions/setup-node@v6
+      with:
+        node-version: 24
+
     # Hotfix mode: instead of the content alignment, sync only the release
     # artifacts from main: the prod manifest (so the version script continues
     # next's line from the released hotfix version) and the changelogs (they
@@ -127,12 +139,6 @@ runs:
           echo "Synced changelog: $CHANGELOG"
         done
         echo "Synced prod manifest from main: $(node -e "const m=require('./release/release-please-manifest.prod.json');console.log(Object.values(m)[0])") (next currently $ORIGINAL_NEXT_VERSION)"
-
-    # Set up Node.js environment for running npm commands
-    - name: Setup Node.js
-      uses: actions/setup-node@v6
-      with:
-        node-version: 24
 
     # Timestamp the branch name to avoid collisions when the action is re-run on the same day.
     - name: Create Version Update Branch
@@ -211,7 +217,7 @@ runs:
       run: |
         cd "$TARGET_DIR"
         for i in {1..5}; do
-          npm install && break || {
+          npm install --no-audit --no-fund && break || {
             if [ $i -eq 5 ]; then
               echo "npm install failed after 5 attempts"
               exit 1
@@ -239,7 +245,12 @@ runs:
       run: |
         cd "$TARGET_DIR"
         git add -A
-        git commit -S -m "chore: prepare versions for ${{ inputs.branch }} to $RELEASE_VERSION"
+        # [skip ci] stops GitHub creating the pull_request runs for this branch.
+        # They are opened by GITHUB_TOKEN, so GitHub parks them as action_required
+        # with no jobs and relabels them as failures when the PR merges. Closing
+        # this PR starts no release job: process-workspaces in Release Production
+        # requires the 'autorelease: pending' label, which only the release PR has.
+        git commit -S -m "chore: prepare versions for ${{ inputs.branch }} to $RELEASE_VERSION [skip ci]"
         git push origin $BRANCH_NAME
 
     # Create a PR with the changes
