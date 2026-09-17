@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.1-next.2](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-scylladb-v0.10.1-next.1...entity-storage-connector-scylladb-v0.10.1-next.2) (2026-09-17)
+
+
+### Bug Fixes
+
+* support NotEquals and null comparisons in the scylladb connector ([#277](https://github.com/iotaledger/twin-entity-storage/issues/277)) ([670992a](https://github.com/iotaledger/twin-entity-storage/commit/670992a060a7c540cf21cbb1669f266e6c3873ce))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.10.1-next.1 to 0.10.1-next.2
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.10.1-next.1 to 0.10.1-next.2
+
 ## [0.10.1-next.1](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-scylladb-v0.10.1-next.0...entity-storage-connector-scylladb-v0.10.1-next.1) (2026-09-17)
 
 
