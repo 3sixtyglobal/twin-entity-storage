@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0.
 import { Converter, Is } from "@twin.org/core";
 import { Blake2b } from "@twin.org/crypto";
+import { type IEntitySchemaProperty, SortDirection } from "@twin.org/entity";
 
 /**
  * Helper for generating bounded database index names.
@@ -39,6 +40,31 @@ export class IndexHelper {
 		const hex = Converter.bytesToHex(hash);
 		const maxHashChars = maxIdentifierLength - IndexHelper._PREFIX.length;
 		return `${IndexHelper._PREFIX}${hex.slice(0, maxHashChars)}`;
+	}
+
+	/**
+	 * Generate a deterministic, length-bounded index name for a composite index group.
+	 * The name is derived from the group's property names and sort directions in index order,
+	 * so two groups which index the same columns the same way resolve to the same name. The
+	 * column list is marked with a separator which cannot appear in an entity property name, so
+	 * a composite index name can never collide with a single-column index name.
+	 * @param tableName The fully-qualified table name, including any deployment prefix.
+	 * @param indexProperties The properties of the index group, ordered by their index position.
+	 * @param maxIdentifierLength The maximum identifier length allowed by the target database.
+	 * @returns A deterministic index name no longer than maxIdentifierLength characters.
+	 */
+	public static generateCompositeName<T>(
+		tableName: string,
+		indexProperties: { property: IEntitySchemaProperty<T>; direction: SortDirection }[],
+		maxIdentifierLength: number = IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH
+	): string {
+		const columnNames = indexProperties
+			.map(
+				indexProperty =>
+					`${String(indexProperty.property.property)}_${indexProperty.direction ?? SortDirection.Ascending}`
+			)
+			.join("_");
+		return IndexHelper.generateName(tableName, `#${columnNames}`, maxIdentifierLength);
 	}
 
 	/**

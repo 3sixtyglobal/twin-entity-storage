@@ -1601,11 +1601,14 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Build the composite indexes needed to serve multi-property ORDER BY queries.
+	 * Build the composite indexes needed to serve multi-property ORDER BY queries and the
+	 * schema's composite index groups.
 	 * Pairing each sortable property with the primary key in both directions covers all
-	 * four direction combinations, as Cosmos DB also serves each index reversed.
+	 * four direction combinations, as Cosmos DB also serves each index reversed. Each index
+	 * group becomes one composite index over its properties in index order, each path taking
+	 * the direction the property declared for that group.
 	 * @returns The indexing policy for the container, or undefined if the schema has no
-	 * sortable properties.
+	 * sortable properties or index groups.
 	 * @internal
 	 */
 	private buildIndexingPolicy(): IndexingPolicy | undefined {
@@ -1625,6 +1628,24 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 						{ path: primaryKeyPath, order: "descending" }
 					]);
 				}
+			}
+		}
+
+		const indexGroups = EntitySchemaHelper.getIndexGroups(this._entitySchema);
+		for (const indexProperties of Object.values(indexGroups)) {
+			const groupCompositeIndex = indexProperties.map<CompositePath>(indexProperty => ({
+				path: `/${indexProperty.property.property as string}`,
+				order: indexProperty.direction === SortDirection.Descending ? "descending" : "ascending"
+			}));
+
+			// Two groups over the same paths resolve to the same index, so only one is needed.
+			if (
+				!compositeIndexes.some(
+					existing =>
+						this.compositeIndexKey(existing) === this.compositeIndexKey(groupCompositeIndex)
+				)
+			) {
+				compositeIndexes.push(groupCompositeIndex);
 			}
 		}
 

@@ -28,12 +28,14 @@ import {
 	EntitySchemaHelper,
 	EntitySchemaPropertyType,
 	type IEntitySchema,
+	type IEntitySchemaProperty,
 	LogicalOperator,
-	type SortDirection
+	SortDirection
 } from "@twin.org/entity";
 import {
 	ConnectionHelper,
 	EntityStorageHelper,
+	IndexHelper,
 	MigrationHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
@@ -300,6 +302,17 @@ export class MongoDbEntityStorageConnector<T = unknown>
 						});
 					}
 				}
+			}
+
+			const indexGroups = EntitySchemaHelper.getIndexGroups(this._entitySchema);
+			for (const indexProperties of Object.values(indexGroups)) {
+				const created = await this.ensureCompositeIndex(
+					collection,
+					existingIndexes,
+					indexProperties,
+					nodeLogging
+				);
+				bootstrapSuccess &&= created;
 			}
 
 			return bootstrapSuccess;
@@ -1052,6 +1065,88 @@ export class MongoDbEntityStorageConnector<T = unknown>
 		const collectionName = await this.resolveCollectionName(this._config.collection);
 		const client = await this.getClient();
 		return client.db(this._config.database).collection(collectionName);
+	}
+
+	/**
+	 * Ensure the composite index for a schema index group exists.
+	 * A group needs at least two properties to form a composite index, otherwise it is skipped.
+	 * @param collection The collection to index.
+	 * @param existingIndexes The indexes returned by listIndexes.
+	 * @param indexProperties The properties in the group, ordered by their index position.
+	 * @param nodeLogging Optional logging component.
+	 * @returns True if the group is covered by an index.
+	 * @internal
+	 */
+	private async ensureCompositeIndex(
+		collection: Collection,
+		existingIndexes: Document[],
+		indexProperties: { property: IEntitySchemaProperty<T>; direction: SortDirection }[],
+		nodeLogging?: ILoggingComponent
+	): Promise<boolean> {
+		const key: { [propName: string]: 1 | -1 } = {};
+		for (const indexProperty of indexProperties) {
+			key[String(indexProperty.property.property)] =
+				indexProperty.direction === SortDirection.Descending ? -1 : 1;
+		}
+
+		if (!Is.empty(this.findCoveringCompositeIndex(existingIndexes, key))) {
+			return true;
+		}
+
+		try {
+			await collection.createIndex(key, {
+				name: IndexHelper.generateCompositeName(this._config.collection, indexProperties)
+			});
+		} catch (groupError) {
+			await nodeLogging?.log({
+				level: "error",
+				source: MongoDbEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "indexCreateFailed",
+				error: BaseError.fromError(groupError),
+				data: { property: Object.keys(key).join(", ") }
+			});
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Find an existing index which already serves a composite index group, meaning its leading key
+	 * columns are the group properties in order with the directions the group asked for, or with
+	 * every direction inverted since MongoDB walks a compound index backwards just as cheaply.
+	 * @param existingIndexes The indexes already on the collection.
+	 * @param groupKey The group's key columns and directions, in index order.
+	 * @returns The covering index if there is one.
+	 * @internal
+	 */
+	private findCoveringCompositeIndex(
+		existingIndexes: Document[],
+		groupKey: { [propName: string]: 1 | -1 }
+	): Document | undefined {
+		const groupPropNames = Object.keys(groupKey);
+
+		return existingIndexes.find(idx => {
+			const key = idx.key as { [k: string]: unknown };
+			const keys = Object.keys(key);
+			if (keys.length < groupPropNames.length) {
+				return false;
+			}
+
+			let matchesForwards = true;
+			let matchesBackwards = true;
+			for (let i = 0; i < groupPropNames.length; i++) {
+				const propName = groupPropNames[i];
+				if (keys[i] !== propName) {
+					return false;
+				}
+				matchesForwards &&= key[propName] === groupKey[propName];
+				matchesBackwards &&= key[propName] === -groupKey[propName];
+			}
+
+			return (matchesForwards || matchesBackwards) && !this.hasRestrictiveOptions(idx);
+		});
 	}
 
 	/**

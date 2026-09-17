@@ -6,6 +6,8 @@ import {
 	ComparisonOperator,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
+	LogicalOperator,
+	SortDirection,
 	entity,
 	property
 } from "@twin.org/entity";
@@ -23,6 +25,9 @@ const SUPPORT_NAMED_INDEX_OBJECTS = true;
 
 // Set to false for connectors which cannot add an index to an already created store.
 const SUPPORT_INDEX_UPDATE = true;
+
+// Set to false for connectors which cannot create a composite index over a schema index group.
+const SUPPORT_COMPOSITE_INDEXING = true;
 
 /**
  * Count how many indexes lead on the given column for a table.
@@ -62,6 +67,28 @@ async function indexNamesLeadingOnColumn(
 	return (rows as { indexName: string }[]).map(row => row.indexName);
 }
 
+/**
+ * Read the key columns of every index on a table, in key order.
+ * @param pool The pool to query with.
+ * @param tableName The table to inspect.
+ * @returns The key columns and their sort order for each index, keyed by index name.
+ */
+async function indexColumnsByName(
+	pool: Pool,
+	tableName: string
+): Promise<{ [indexName: string]: string[] }> {
+	const [rows] = await pool.query(
+		"SELECT index_name AS indexName, column_name AS columnName, collation AS sortOrder FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? ORDER BY index_name, seq_in_index",
+		[TEST_MYSQL_CONFIG.database, tableName]
+	);
+	const indexColumns: { [indexName: string]: string[] } = {};
+	for (const row of rows as { indexName: string; columnName: string; sortOrder: string }[]) {
+		indexColumns[row.indexName] ??= [];
+		indexColumns[row.indexName].push(`${row.columnName} ${row.sortOrder === "D" ? "DESC" : "ASC"}`);
+	}
+	return indexColumns;
+}
+
 @entity()
 class IndexedTestType {
 	@property({ type: "string", isPrimary: true })
@@ -83,6 +110,47 @@ class UnindexedTestType {
 	public category!: string;
 
 	@property({ type: "number", format: "uint32" })
+	public value!: number;
+}
+
+/**
+ * Resolve the index name a connector generates for one of the schema's index groups.
+ * @param tableName The table or collection the index belongs to.
+ * @param groupName The name of the index group.
+ * @returns The generated index name.
+ */
+function compositeIndexName(tableName: string, groupName: string): string {
+	const indexGroups = EntitySchemaHelper.getIndexGroups(
+		EntitySchemaHelper.getSchema(CompositeIndexedTestType)
+	);
+	return IndexHelper.generateCompositeName(tableName, indexGroups[groupName]);
+}
+
+@entity()
+class CompositeIndexedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [{ name: "categoryStatus", direction: SortDirection.Ascending, index: 0 }]
+	})
+	public category!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [
+			{ name: "categoryStatus", direction: SortDirection.Descending, index: 1 },
+			{ name: "statusValue", direction: SortDirection.Ascending, index: 1 }
+		]
+	})
+	public status!: string;
+
+	@property({
+		type: "number",
+		format: "uint32",
+		indexGroup: [{ name: "statusValue", direction: SortDirection.Descending, index: 0 }]
+	})
 	public value!: number;
 }
 
@@ -113,6 +181,9 @@ describe("MySqlEntityStorageConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<UnindexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(UnindexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<CompositeIndexedTestType>(), () =>
+			EntitySchemaHelper.getSchema(CompositeIndexedTestType)
 		);
 
 		ContextIdStore.getContextIds = vi
@@ -846,4 +917,130 @@ describe("MySqlEntityStorageConnector", () => {
 		},
 		60_000
 	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstrap creates a composite index for each multi-property index group",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_group_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<CompositeIndexedTestType>({
+				entitySchema: nameof<CompositeIndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const indexColumns = await indexColumnsByName(pool, tableName);
+
+				// The group order and directions come from the index entries, not the schema order.
+				expect(indexColumns[compositeIndexName(tableName, "categoryStatus")]).toEqual([
+					"category ASC",
+					"status DESC"
+				]);
+				expect(indexColumns[compositeIndexName(tableName, "statusValue")]).toEqual([
+					"value DESC",
+					"status ASC"
+				]);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstrap does not create a duplicate composite index when called multiple times",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_group_idempotent_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<CompositeIndexedTestType>({
+				entitySchema: nameof<CompositeIndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+				expect(await connector.bootstrap()).toBe(true);
+
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const indexColumns = await indexColumnsByName(pool, tableName);
+
+				const groupIndexNames = Object.keys(indexColumns).filter(
+					indexName =>
+						indexName === compositeIndexName(tableName, "categoryStatus") ||
+						indexName === compositeIndexName(tableName, "statusValue")
+				);
+				expect(groupIndexNames.length).toBe(2);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test("query filtering on every property of an index group returns only the matching entities", async () => {
+		const tableName = `${TEST_MYSQL_CONFIG.tableName}_group_query_${Date.now()}`;
+		const connector = new MySqlEntityStorageConnector<CompositeIndexedTestType>({
+			entitySchema: nameof<CompositeIndexedTestType>(),
+			config: { ...TEST_MYSQL_CONFIG, tableName }
+		});
+
+		try {
+			expect(await connector.bootstrap()).toBe(true);
+
+			await connector.setBatch([
+				{ id: "1", category: "catA", status: "active", value: 1 },
+				{ id: "2", category: "catA", status: "archived", value: 2 },
+				{ id: "3", category: "catB", status: "active", value: 3 },
+				{ id: "4", category: "catA", status: "active", value: 4 }
+			]);
+
+			const result = await connector.query({
+				conditions: [
+					{ property: "category", value: "catA", comparison: ComparisonOperator.Equals },
+					{ property: "status", value: "active", comparison: ComparisonOperator.Equals }
+				],
+				logicalOperator: LogicalOperator.And
+			});
+
+			expect(result.entities.map(matched => matched.id).sort()).toEqual(["1", "4"]);
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+		}
+	}, 60_000);
 });

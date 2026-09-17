@@ -9,6 +9,8 @@ import {
 	ComparisonOperator,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
+	LogicalOperator,
+	SortDirection,
 	entity,
 	property
 } from "@twin.org/entity";
@@ -27,6 +29,10 @@ const SUPPORT_NAMED_INDEX_OBJECTS = false;
 // and CQL cannot add a clustering column to a table that already exists, so bootstrap
 // cannot reconcile a schema which gains one.
 const SUPPORT_INDEX_UPDATE = false;
+
+// CQL secondary indexes cover a single column, and the one composite index a table has is its
+// clustering key, which is already derived from the primary and secondary properties.
+const SUPPORT_COMPOSITE_INDEXING = false;
 
 @entity()
 class IndexedTestType {
@@ -52,6 +58,34 @@ class UnindexedTestType {
 	public value!: number;
 }
 
+@entity()
+class CompositeIndexedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [{ name: "categoryStatus", direction: SortDirection.Ascending, index: 0 }]
+	})
+	public category!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [
+			{ name: "categoryStatus", direction: SortDirection.Descending, index: 1 },
+			{ name: "statusValue", direction: SortDirection.Ascending, index: 1 }
+		]
+	})
+	public status!: string;
+
+	@property({
+		type: "number",
+		format: "uint32",
+		indexGroup: [{ name: "statusValue", direction: SortDirection.Descending, index: 0 }]
+	})
+	public value!: number;
+}
+
 function createIndexedConnector(): ScyllaDBTableConnector<IndexedTestType> {
 	return new ScyllaDBTableConnector<IndexedTestType>({
 		entitySchema: nameof<IndexedTestType>(),
@@ -66,6 +100,13 @@ function createUnindexedConnector(): ScyllaDBTableConnector<UnindexedTestType> {
 	});
 }
 
+function createCompositeConnector(): ScyllaDBTableConnector<CompositeIndexedTestType> {
+	return new ScyllaDBTableConnector<CompositeIndexedTestType>({
+		entitySchema: nameof<CompositeIndexedTestType>(),
+		config: { ...TEST_SCYLLA_CONFIG, tableName: `${TEST_SCYLLA_CONFIG.tableName}_composite` }
+	});
+}
+
 describe("ScyllaDBTableConnector", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<IndexedTestType>(), () =>
@@ -73,6 +114,9 @@ describe("ScyllaDBTableConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<UnindexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(UnindexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<CompositeIndexedTestType>(), () =>
+			EntitySchemaHelper.getSchema(CompositeIndexedTestType)
 		);
 
 		ContextIdStore.getContextIds = vi
@@ -365,4 +409,93 @@ describe("ScyllaDBTableConnector", () => {
 		},
 		60_000
 	);
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstrap creates a composite index for each multi-property index group",
+		async () => {
+			const connector = createCompositeConnector();
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+				expect(await connector.bootstrap()).toBe(true);
+
+				await connector.set({
+					id: "1",
+					category: "catA",
+					status: "active",
+					value: 1
+				});
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.status).toBe("active");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstrap does not create a duplicate composite index when called multiple times",
+		async () => {
+			const connector = createCompositeConnector();
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+				expect(await connector.bootstrap()).toBe(true);
+
+				await connector.set({
+					id: "1",
+					category: "catA",
+					status: "active",
+					value: 1
+				});
+				const storedEntity = await connector.get("1");
+				expect(storedEntity?.status).toBe("active");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test("query filtering on every property of an index group returns only the matching entities", async () => {
+		const connector = createCompositeConnector();
+
+		try {
+			expect(await connector.bootstrap()).toBe(true);
+
+			await connector.setBatch([
+				{ id: "1", category: "catA", status: "active", value: 1 },
+				{ id: "2", category: "catA", status: "archived", value: 2 },
+				{ id: "3", category: "catB", status: "active", value: 3 },
+				{ id: "4", category: "catA", status: "active", value: 4 }
+			]);
+
+			const result = await connector.query({
+				conditions: [
+					{ property: "category", value: "catA", comparison: ComparisonOperator.Equals },
+					{ property: "status", value: "active", comparison: ComparisonOperator.Equals }
+				],
+				logicalOperator: LogicalOperator.And
+			});
+
+			expect(result.entities.map(matched => matched.id).sort()).toEqual(["1", "4"]);
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+		}
+	}, 60_000);
 });

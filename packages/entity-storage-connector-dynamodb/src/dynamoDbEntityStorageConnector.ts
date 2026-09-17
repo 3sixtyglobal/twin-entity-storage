@@ -64,6 +64,7 @@ import {
 import {
 	ConnectionHelper,
 	EntityStorageHelper,
+	IndexHelper,
 	MigrationHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
@@ -108,6 +109,12 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _WRITE_CONCURRENCY: number = 25;
+
+	/**
+	 * DynamoDB's maximum number of attributes in a global secondary index sort key.
+	 * @internal
+	 */
+	private static readonly _MAX_SORT_KEY_ATTRIBUTES: number = 4;
 
 	/**
 	 * Partition id field name.
@@ -359,11 +366,20 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 
 				// You can only query and sort items if you have a secondary index
 				// defined for the property
-				const gsi = this.buildGlobalSecondaryIndexes();
+				const gsi = await this.buildGlobalSecondaryIndexes(nodeLogging);
 
 				if (gsi.length > 0) {
+					// A property can key more than one index, but an attribute may only be defined once.
+					const definedAttributes = new Set(
+						tableParams.AttributeDefinitions?.map(attribute => attribute.AttributeName)
+					);
 					for (const secondaryIndex of gsi) {
-						tableParams.AttributeDefinitions?.push(secondaryIndex.attributeDefinition);
+						for (const attributeDefinition of secondaryIndex.attributeDefinitions) {
+							if (!definedAttributes.has(attributeDefinition.AttributeName)) {
+								definedAttributes.add(attributeDefinition.AttributeName);
+								tableParams.AttributeDefinitions?.push(attributeDefinition);
+							}
+						}
 					}
 					tableParams.GlobalSecondaryIndexes = gsi.map(secondaryIndex => secondaryIndex.index);
 				}
@@ -1815,17 +1831,21 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Build the global secondary indexes required by the entity schema.
-	 * @returns The indexes and the attribute definition each one's key schema requires.
+	 * Build the global secondary indexes required by the entity schema, one per indexed property
+	 * and one per composite index group.
+	 * @param nodeLogging Optional logging component.
+	 * @returns The indexes and the attribute definitions each one's key schema requires.
 	 * @internal
 	 */
-	private buildGlobalSecondaryIndexes(): {
-		index: GlobalSecondaryIndex;
-		attributeDefinition: AttributeDefinition;
-	}[] {
+	private async buildGlobalSecondaryIndexes(nodeLogging?: ILoggingComponent): Promise<
+		{
+			index: GlobalSecondaryIndex;
+			attributeDefinitions: AttributeDefinition[];
+		}[]
+	> {
 		const secondaryIndexes: {
 			index: GlobalSecondaryIndex;
-			attributeDefinition: AttributeDefinition;
+			attributeDefinitions: AttributeDefinition[];
 		}[] = [];
 
 		for (const prop of this._entitySchema.properties ?? []) {
@@ -1833,10 +1853,12 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 				const propertyName = prop.property as string;
 
 				secondaryIndexes.push({
-					attributeDefinition: {
-						AttributeName: propertyName,
-						AttributeType: this.attributeType(prop)
-					},
+					attributeDefinitions: [
+						{
+							AttributeName: propertyName,
+							AttributeType: this.attributeType(prop)
+						}
+					],
 					index: {
 						IndexName: this.indexName(propertyName),
 						KeySchema: [
@@ -1861,7 +1883,84 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 			}
 		}
 
+		const indexGroups = EntitySchemaHelper.getIndexGroups(this._entitySchema);
+		for (const groupName of Object.keys(indexGroups)) {
+			const compositeIndex = this.buildCompositeGlobalSecondaryIndex(indexGroups[groupName]);
+
+			if (Is.empty(compositeIndex)) {
+				await nodeLogging?.log({
+					level: "warn",
+					source: DynamoDbEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "compositeIndexSkipped",
+					data: {
+						tableName: this._config.tableName,
+						groupName
+					}
+				});
+			} else if (
+				// Two groups over the same attributes resolve to the same index, so only one is needed.
+				!secondaryIndexes.some(
+					existing => existing.index.IndexName === compositeIndex.index.IndexName
+				)
+			) {
+				secondaryIndexes.push(compositeIndex);
+			}
+		}
+
 		return secondaryIndexes;
+	}
+
+	/**
+	 * Build the global secondary index for a composite index group, using the group properties as
+	 * a multi-attribute sort key beside the partition key.
+	 * A group needs at least two properties to form a composite index and DynamoDB accepts at most
+	 * four sort key attributes, otherwise the group cannot be expressed as an index.
+	 * @param indexProperties The properties in the group, ordered by their index position.
+	 * @returns The index and the attribute definitions its key schema requires, or undefined if
+	 * the group cannot be expressed as an index.
+	 * @internal
+	 */
+	private buildCompositeGlobalSecondaryIndex(
+		indexProperties: { property: IEntitySchemaProperty<T>; direction: SortDirection }[]
+	):
+		| {
+				index: GlobalSecondaryIndex;
+				attributeDefinitions: AttributeDefinition[];
+		  }
+		| undefined {
+		if (indexProperties.length > DynamoDbEntityStorageConnector._MAX_SORT_KEY_ATTRIBUTES) {
+			return undefined;
+		}
+
+		return {
+			attributeDefinitions: indexProperties.map(indexProperty => ({
+				AttributeName: indexProperty.property.property as string,
+				AttributeType: this.attributeType(indexProperty.property)
+			})),
+			index: {
+				IndexName: IndexHelper.generateCompositeName(this._config.tableName, indexProperties),
+				KeySchema: [
+					{
+						AttributeName: DynamoDbEntityStorageConnector._PARTITION_KEY,
+						KeyType: KeyType.HASH
+					},
+					// The sort key attributes order the index left to right; DynamoDB applies one
+					// direction to the whole sort key, so the per-property directions cannot be honoured.
+					...indexProperties.map(indexProperty => ({
+						AttributeName: indexProperty.property.property as string,
+						KeyType: KeyType.RANGE
+					}))
+				],
+				Projection: {
+					ProjectionType: ProjectionType.ALL
+				},
+				ProvisionedThroughput: {
+					ReadCapacityUnits: 1,
+					WriteCapacityUnits: 1
+				}
+			}
+		};
 	}
 
 	/**
@@ -1871,7 +1970,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private async ensureGlobalSecondaryIndexes(nodeLogging?: ILoggingComponent): Promise<boolean> {
-		const secondaryIndexes = this.buildGlobalSecondaryIndexes();
+		const secondaryIndexes = await this.buildGlobalSecondaryIndexes(nodeLogging);
 
 		if (secondaryIndexes.length === 0) {
 			return true;
@@ -1914,7 +2013,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 						TableName: this._config.tableName,
 						AttributeDefinitions: this.mergeAttributeDefinitions(
 							existingAttributes,
-							secondaryIndex.attributeDefinition
+							secondaryIndex.attributeDefinitions
 						),
 						GlobalSecondaryIndexUpdates: [
 							{
@@ -1933,7 +2032,14 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 					await this.waitForIndexActive(indexName);
 
 					existingIndexNames.push(indexName);
-					existingAttributes.push(secondaryIndex.attributeDefinition);
+					existingAttributes.push(
+						...this.mergeAttributeDefinitions([], secondaryIndex.attributeDefinitions).filter(
+							attribute =>
+								!existingAttributes.some(
+									existing => existing.AttributeName === attribute.AttributeName
+								)
+						)
+					);
 
 					await nodeLogging?.log({
 						level: "info",
@@ -1965,21 +2071,27 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Combine the table's attribute definitions with the one a new index needs.
+	 * Combine the table's attribute definitions with those a new index needs.
 	 * @param existing The attribute definitions already on the table.
-	 * @param additional The attribute definition the new index key schema requires.
-	 * @returns The combined attribute definitions.
+	 * @param additional The attribute definitions the new index key schema requires.
+	 * @returns The combined attribute definitions, each attribute defined once.
 	 * @internal
 	 */
 	private mergeAttributeDefinitions(
 		existing: AttributeDefinition[],
-		additional: AttributeDefinition
+		additional: AttributeDefinition[]
 	): AttributeDefinition[] {
-		const alreadyDefined = existing.some(
-			attribute => attribute.AttributeName === additional.AttributeName
-		);
+		const merged = [...existing];
 
-		return alreadyDefined ? [...existing] : [...existing, additional];
+		for (const attributeDefinition of additional) {
+			if (
+				!merged.some(attribute => attribute.AttributeName === attributeDefinition.AttributeName)
+			) {
+				merged.push(attributeDefinition);
+			}
+		}
+
+		return merged;
 	}
 
 	/**

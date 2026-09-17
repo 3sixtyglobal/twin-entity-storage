@@ -1,11 +1,12 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { Container, type ContainerDefinition } from "@azure/cosmos";
+import { Container, type ContainerDefinition, Containers } from "@azure/cosmos";
 import { ContextIdStore } from "@twin.org/context";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
+	LogicalOperator,
 	SortDirection,
 	entity,
 	property
@@ -23,6 +24,9 @@ const SUPPORT_NAMED_INDEX_OBJECTS = false;
 
 // Set to false for connectors which cannot add an index to an already created store.
 const SUPPORT_INDEX_UPDATE = true;
+
+// Set to false for connectors which cannot create a composite index over a schema index group.
+const SUPPORT_COMPOSITE_INDEXING = true;
 
 @entity()
 class IndexedTestType {
@@ -45,6 +49,34 @@ class UnindexedTestType {
 	public category!: string;
 
 	@property({ type: "number", format: "uint32" })
+	public value!: number;
+}
+
+@entity()
+class CompositeIndexedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [{ name: "categoryStatus", direction: SortDirection.Ascending, index: 0 }]
+	})
+	public category!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [
+			{ name: "categoryStatus", direction: SortDirection.Descending, index: 1 },
+			{ name: "statusValue", direction: SortDirection.Ascending, index: 1 }
+		]
+	})
+	public status!: string;
+
+	@property({
+		type: "number",
+		format: "uint32",
+		indexGroup: [{ name: "statusValue", direction: SortDirection.Descending, index: 0 }]
+	})
 	public value!: number;
 }
 
@@ -79,6 +111,30 @@ function compositeIndexPaths(body: ContainerDefinition): string[][] {
 	);
 }
 
+/**
+ * Read the composite index paths and their orders from a container definition.
+ * @param body The container definition passed to create or replace.
+ * @returns The path and sort order of each composite index.
+ */
+function compositeIndexOrderedPaths(body: ContainerDefinition): string[][] {
+	return (body.indexingPolicy?.compositeIndexes ?? []).map(compositeIndex =>
+		compositeIndex.map(path => `${path.path} ${path.order === "descending" ? "DESC" : "ASC"}`)
+	);
+}
+
+/**
+ * Count how many composite indexes in a definition match an exact ordered path list.
+ * @param body The container definition passed to create or replace.
+ * @param paths The composite index paths and sort orders to match.
+ * @returns The number of matching composite indexes.
+ */
+function countCompositeIndex(body: ContainerDefinition, paths: string[]): number {
+	return compositeIndexOrderedPaths(body).filter(
+		indexPaths =>
+			indexPaths.length === paths.length && indexPaths.every((path, i) => path === paths[i])
+	).length;
+}
+
 describe("CosmosDbEntityStorageConnector", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<IndexedTestType>(), () =>
@@ -86,6 +142,9 @@ describe("CosmosDbEntityStorageConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<UnindexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(UnindexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<CompositeIndexedTestType>(), () =>
+			EntitySchemaHelper.getSchema(CompositeIndexedTestType)
 		);
 
 		ContextIdStore.getContextIds = vi
@@ -396,4 +455,100 @@ describe("CosmosDbEntityStorageConnector", () => {
 		},
 		120_000
 	);
+	// The emulator always reads the indexing policy back with an empty compositeIndexes list, so
+	// the composite indexes are asserted on the definition the connector sends to the container.
+
+	// The emulator always reads the indexing policy back with an empty compositeIndexes list, so
+	// the composite indexes are asserted on the definition the connector sends to the container.
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstrap creates a composite index for each multi-property index group",
+		async () => {
+			const containerId = `${TEST_COSMOS_CONFIG.containerId}_group_${Date.now()}`;
+			const connector = new CosmosDbEntityStorageConnector<CompositeIndexedTestType>({
+				entitySchema: nameof<CompositeIndexedTestType>(),
+				config: { ...TEST_COSMOS_CONFIG, containerId }
+			});
+			const createSpy = vi.spyOn(Containers.prototype, "create");
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+				expect(createSpy).toHaveBeenCalledTimes(1);
+
+				const createdDefinition = createSpy.mock.calls[0][0] as ContainerDefinition;
+
+				// The group order and directions come from the index entries, not the schema order.
+				expect(countCompositeIndex(createdDefinition, ["/category ASC", "/status DESC"])).toBe(1);
+				expect(countCompositeIndex(createdDefinition, ["/value DESC", "/status ASC"])).toBe(1);
+			} finally {
+				createSpy.mockRestore();
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		120_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstrap does not create a duplicate composite index when called multiple times",
+		async () => {
+			const containerId = `${TEST_COSMOS_CONFIG.containerId}_group_idempotent_${Date.now()}`;
+			const connector = new CosmosDbEntityStorageConnector<CompositeIndexedTestType>({
+				entitySchema: nameof<CompositeIndexedTestType>(),
+				config: { ...TEST_COSMOS_CONFIG, containerId }
+			});
+			const replaceSpy = vi.spyOn(Container.prototype, "replace");
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+				expect(await connector.bootstrap()).toBe(true);
+
+				// The second bootstrap sees an existing container, so it reconciles the policy rather
+				// than creating one; whatever it sends must still list each group exactly once.
+				expect(replaceSpy).toHaveBeenCalledTimes(1);
+				const replacedDefinition = replaceSpy.mock.calls[0][0] as ContainerDefinition;
+				expect(countCompositeIndex(replacedDefinition, ["/category ASC", "/status DESC"])).toBe(1);
+				expect(countCompositeIndex(replacedDefinition, ["/value DESC", "/status ASC"])).toBe(1);
+			} finally {
+				replaceSpy.mockRestore();
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		120_000
+	);
+
+	test("query filtering on every property of an index group returns only the matching entities", async () => {
+		const containerId = `${TEST_COSMOS_CONFIG.containerId}_group_query_${Date.now()}`;
+		const connector = new CosmosDbEntityStorageConnector<CompositeIndexedTestType>({
+			entitySchema: nameof<CompositeIndexedTestType>(),
+			config: { ...TEST_COSMOS_CONFIG, containerId }
+		});
+
+		try {
+			expect(await connector.bootstrap()).toBe(true);
+
+			await connector.setBatch([
+				{ id: "1", category: "catA", status: "active", value: 1 },
+				{ id: "2", category: "catA", status: "archived", value: 2 },
+				{ id: "3", category: "catB", status: "active", value: 3 },
+				{ id: "4", category: "catA", status: "active", value: 4 }
+			]);
+
+			const result = await connector.query({
+				conditions: [
+					{ property: "category", value: "catA", comparison: ComparisonOperator.Equals },
+					{ property: "status", value: "active", comparison: ComparisonOperator.Equals }
+				],
+				logicalOperator: LogicalOperator.And
+			});
+
+			expect(result.entities.map(matched => matched.id).sort()).toEqual(["1", "4"]);
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+		}
+	}, 120_000);
 });

@@ -386,6 +386,11 @@ export class MySqlEntityStorageConnector<T = unknown>
 					await this.ensureIndex(pool, prop, nodeLogging);
 				}
 			}
+
+			const indexGroups = EntitySchemaHelper.getIndexGroups(this._entitySchema);
+			for (const indexProperties of Object.values(indexGroups)) {
+				await this.ensureCompositeIndex(pool, indexProperties);
+			}
 		} catch (error) {
 			await nodeLogging?.log({
 				level: "error",
@@ -1320,6 +1325,41 @@ export class MySqlEntityStorageConnector<T = unknown>
 				newIndexName: indexName
 			}
 		});
+	}
+
+	/**
+	 * Ensure the composite index for a schema index group exists.
+	 * A group needs at least two properties to form a composite index, otherwise it is skipped.
+	 * @param pool The pool to query with.
+	 * @param indexProperties The properties in the group, ordered by their index position.
+	 * @internal
+	 */
+	private async ensureCompositeIndex(
+		pool: Pool,
+		indexProperties: { property: IEntitySchemaProperty<T>; direction: SortDirection }[]
+	): Promise<void> {
+		const indexName = IndexHelper.generateCompositeName(this._config.tableName, indexProperties);
+
+		const [indexRows] = await pool.query(
+			"SELECT 1 FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND index_name = ? LIMIT 1",
+			[this._config.database, this._config.tableName, indexName]
+		);
+
+		if (Is.arrayValue(indexRows)) {
+			return;
+		}
+
+		const indexCols = indexProperties.map(indexProperty => {
+			const column = this.indexColumn(
+				String(indexProperty.property.property),
+				this.mapSqlColumn(indexProperty.property).indexPrefixLength
+			);
+			return `${column} ${indexProperty.direction === SortDirection.Descending ? "DESC" : "ASC"}`;
+		});
+
+		await pool.query(
+			`CREATE INDEX \`${indexName}\` ON \`${this._config.database}\`.\`${this._config.tableName}\` (${indexCols.join(", ")})`
+		);
 	}
 
 	/**

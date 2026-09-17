@@ -6,6 +6,8 @@ import {
 	ComparisonOperator,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
+	LogicalOperator,
+	SortDirection,
 	entity,
 	property
 } from "@twin.org/entity";
@@ -23,6 +25,9 @@ const SUPPORT_NAMED_INDEX_OBJECTS = true;
 
 // Set to false for connectors which cannot add an index to an already created store.
 const SUPPORT_INDEX_UPDATE = true;
+
+// Set to false for connectors which cannot create a composite index over a schema index group.
+const SUPPORT_COMPOSITE_INDEXING = true;
 
 /**
  * Open a direct connection to the test database for catalog inspection and manual DDL.
@@ -88,6 +93,41 @@ async function indexNamesLeadingOnColumn(
 	return (rows as unknown as { indexName: string }[]).map(row => row.indexName);
 }
 
+/**
+ * Read the key columns of every index on a table, in key order.
+ * @param sql The connection to query with.
+ * @param tableName The table to inspect.
+ * @returns The key columns and their sort order for each index, keyed by index name.
+ */
+async function indexColumnsByName(
+	sql: postgres.Sql,
+	tableName: string
+): Promise<{ [indexName: string]: string[] }> {
+	const rows = await sql.unsafe(
+		`SELECT i.relname AS "indexName", a.attname AS "columnName",
+			(ix.indoption[k.ordinality - 1] & 1) = 1 AS "isDescending"
+		FROM pg_index ix
+		JOIN pg_class t ON t.oid = ix.indrelid
+		JOIN pg_namespace n ON n.oid = t.relnamespace
+		JOIN pg_class i ON i.oid = ix.indexrelid
+		JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS k(attnum, ordinality) ON TRUE
+		JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
+		WHERE n.nspname = 'public' AND t.relname = $1
+		ORDER BY i.relname, k.ordinality`,
+		[tableName]
+	);
+	const indexColumns: { [indexName: string]: string[] } = {};
+	for (const row of rows as unknown as {
+		indexName: string;
+		columnName: string;
+		isDescending: boolean;
+	}[]) {
+		indexColumns[row.indexName] ??= [];
+		indexColumns[row.indexName].push(`${row.columnName} ${row.isDescending ? "DESC" : "ASC"}`);
+	}
+	return indexColumns;
+}
+
 @entity()
 class IndexedTestType {
 	@property({ type: "string", isPrimary: true })
@@ -109,6 +149,47 @@ class UnindexedTestType {
 	public category!: string;
 
 	@property({ type: "number", format: "uint32" })
+	public value!: number;
+}
+
+/**
+ * Resolve the index name a connector generates for one of the schema's index groups.
+ * @param tableName The table or collection the index belongs to.
+ * @param groupName The name of the index group.
+ * @returns The generated index name.
+ */
+function compositeIndexName(tableName: string, groupName: string): string {
+	const indexGroups = EntitySchemaHelper.getIndexGroups(
+		EntitySchemaHelper.getSchema(CompositeIndexedTestType)
+	);
+	return IndexHelper.generateCompositeName(tableName, indexGroups[groupName]);
+}
+
+@entity()
+class CompositeIndexedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [{ name: "categoryStatus", direction: SortDirection.Ascending, index: 0 }]
+	})
+	public category!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [
+			{ name: "categoryStatus", direction: SortDirection.Descending, index: 1 },
+			{ name: "statusValue", direction: SortDirection.Ascending, index: 1 }
+		]
+	})
+	public status!: string;
+
+	@property({
+		type: "number",
+		format: "uint32",
+		indexGroup: [{ name: "statusValue", direction: SortDirection.Descending, index: 0 }]
+	})
 	public value!: number;
 }
 
@@ -139,6 +220,9 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<UnindexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(UnindexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<CompositeIndexedTestType>(), () =>
+			EntitySchemaHelper.getSchema(CompositeIndexedTestType)
 		);
 
 		ContextIdStore.getContextIds = vi
@@ -918,4 +1002,118 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		},
 		60_000
 	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstrap creates a composite index for each multi-property index group",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_group_${Date.now()}`;
+			const connector = new PostgreSqlEntityStorageConnector<CompositeIndexedTestType>({
+				entitySchema: nameof<CompositeIndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			let sql: postgres.Sql | undefined;
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				sql = openTestConnection();
+				const indexColumns = await indexColumnsByName(sql, tableName);
+
+				// The group order and directions come from the index entries, not the schema order.
+				expect(indexColumns[compositeIndexName(tableName, "categoryStatus")]).toEqual([
+					"category ASC",
+					"status DESC"
+				]);
+				expect(indexColumns[compositeIndexName(tableName, "statusValue")]).toEqual([
+					"value DESC",
+					"status ASC"
+				]);
+			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstrap does not create a duplicate composite index when called multiple times",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_group_idempotent_${Date.now()}`;
+			const connector = new PostgreSqlEntityStorageConnector<CompositeIndexedTestType>({
+				entitySchema: nameof<CompositeIndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			let sql: postgres.Sql | undefined;
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+				expect(await connector.bootstrap()).toBe(true);
+
+				sql = openTestConnection();
+				const indexColumns = await indexColumnsByName(sql, tableName);
+
+				const groupIndexNames = Object.keys(indexColumns).filter(
+					indexName =>
+						indexName === compositeIndexName(tableName, "categoryStatus") ||
+						indexName === compositeIndexName(tableName, "statusValue")
+				);
+				expect(groupIndexNames.length).toBe(2);
+			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test("query filtering on every property of an index group returns only the matching entities", async () => {
+		const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_group_query_${Date.now()}`;
+		const connector = new PostgreSqlEntityStorageConnector<CompositeIndexedTestType>({
+			entitySchema: nameof<CompositeIndexedTestType>(),
+			config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+		});
+
+		try {
+			expect(await connector.bootstrap()).toBe(true);
+
+			await connector.setBatch([
+				{ id: "1", category: "catA", status: "active", value: 1 },
+				{ id: "2", category: "catA", status: "archived", value: 2 },
+				{ id: "3", category: "catB", status: "active", value: 3 },
+				{ id: "4", category: "catA", status: "active", value: 4 }
+			]);
+
+			const result = await connector.query({
+				conditions: [
+					{ property: "category", value: "catA", comparison: ComparisonOperator.Equals },
+					{ property: "status", value: "active", comparison: ComparisonOperator.Equals }
+				],
+				logicalOperator: LogicalOperator.And
+			});
+
+			expect(result.entities.map(matched => matched.id).sort()).toEqual(["1", "4"]);
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+		}
+	}, 60_000);
 });
