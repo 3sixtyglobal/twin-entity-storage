@@ -194,6 +194,12 @@ The suggested number of entities to return in each chunk, in some scenarios can 
 All the entities for the storage matching the conditions,
 and a cursor which can be used to request more entities.
 
+#### Remarks
+
+Comparisons which CQL cannot express are filtered client side. Candidate pages are
+consumed whole so the page state stays a valid cursor, which can return up to a page more
+than the limit.
+
 #### Implementation of
 
 `IEntityStorageMigrationConnector.query`
@@ -223,6 +229,10 @@ The optional conditions to match for the entities.
 `Promise`\<`number`\>
 
 The total count of entities in the storage.
+
+#### Remarks
+
+Comparisons which CQL cannot express are counted client side.
 
 #### Implementation of
 
