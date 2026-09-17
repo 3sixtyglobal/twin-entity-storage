@@ -60,6 +60,50 @@ A deterministic index name no longer than maxIdentifierLength characters.
 
 ***
 
+### generateCompositeName() {#generatecompositename}
+
+> `static` **generateCompositeName**\<`T`\>(`tableName`, `indexProperties`, `maxIdentifierLength?`): `string`
+
+Generate a deterministic, length-bounded index name for a composite index group.
+The name is derived from the group's property names and sort directions in index order,
+so two groups which index the same columns the same way resolve to the same name. The
+column list is marked with a separator which cannot appear in an entity property name, so
+a composite index name can never collide with a single-column index name.
+
+#### Type Parameters
+
+##### T
+
+`T`
+
+#### Parameters
+
+##### tableName
+
+`string`
+
+The fully-qualified table name, including any deployment prefix.
+
+##### indexProperties
+
+`object`[]
+
+The properties of the index group, ordered by their index position.
+
+##### maxIdentifierLength?
+
+`number` = `IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH`
+
+The maximum identifier length allowed by the target database.
+
+#### Returns
+
+`string`
+
+A deterministic index name no longer than maxIdentifierLength characters.
+
+***
+
 ### generateLegacyName() {#generatelegacyname}
 
 > `static` **generateLegacyName**(`tableName`, `columnName`, `maxIdentifierLength?`): `string`
