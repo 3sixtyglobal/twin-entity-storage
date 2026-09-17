@@ -23,11 +23,11 @@ import { ScyllaDBTableConnector } from "../src/scyllaDBTableConnector.js";
 // Does the connector support dot-notation property paths.
 const SUPPORT_DOT_NOTATION = false;
 // Does the connector support null/undefined comparisons.
-const SUPPORT_NULL_UNDEFINED_COMPARISON = false;
+const SUPPORT_NULL_UNDEFINED_COMPARISON = true;
 // Does the connector support OR logical operators in conditions.
 const SUPPORT_OR_CONDITIONS = false;
 // Does the connector support NotEquals (!=) comparisons.
-const SUPPORT_NOT_EQUALS = false;
+const SUPPORT_NOT_EQUALS = true;
 // Does the connector support NotIncludes (NOT LIKE) comparisons.
 const SUPPORT_NOT_INCLUDES = false;
 // Does the connector support optional secondary index fields (clustering keys) being null.
