@@ -23,6 +23,13 @@ const SUPPORT_SECONDARY_INDEXING = true;
 // Set to false for connectors that do not create named index objects in the database.
 const SUPPORT_NAMED_INDEX_OBJECTS = true;
 
+// Set to false for connectors which create no index for a property marked isSecondary.
+const SUPPORT_SECONDARY_INDEX_CREATION = true;
+
+// Set to false for connectors which create no index for a property that only declares a
+// sortDirection.
+const SUPPORT_SORT_DIRECTION_INDEX_CREATION = true;
+
 // Set to false for connectors which cannot add an index to an already created store.
 const SUPPORT_INDEX_UPDATE = true;
 
@@ -96,6 +103,18 @@ class IndexedTestType {
 
 	@property({ type: "string", isSecondary: true })
 	public category!: string;
+
+	@property({ type: "number", format: "uint32" })
+	public value!: number;
+}
+
+@entity()
+class SortedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", sortDirection: SortDirection.Descending })
+	public sorted!: string;
 
 	@property({ type: "number", format: "uint32" })
 	public value!: number;
@@ -179,6 +198,9 @@ describe("MySqlEntityStorageConnector", () => {
 		EntitySchemaFactory.register(nameof<IndexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(IndexedTestType)
 		);
+		EntitySchemaFactory.register(nameof<SortedTestType>(), () =>
+			EntitySchemaHelper.getSchema(SortedTestType)
+		);
 		EntitySchemaFactory.register(nameof<UnindexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(UnindexedTestType)
 		);
@@ -260,6 +282,103 @@ describe("MySqlEntityStorageConnector", () => {
 			}
 		},
 		300_000
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_CREATION)(
+		"bootstrap creates an index for a property marked isSecondary",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_secondary_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+					IndexHelper.generateName(tableName, "category")
+				]);
+
+				// The index has to actually serve a query on the property it covers.
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const result = await connector.query({
+					property: "category",
+					value: "catA",
+					comparison: ComparisonOperator.Equals
+				});
+				expect(result.entities.map(e => e.id)).toEqual(["1"]);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_SORT_DIRECTION_INDEX_CREATION)(
+		"bootstrap creates an index for a property which only declares a sortDirection",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_sortdirection_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<SortedTestType>({
+				entitySchema: nameof<SortedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+
+				// A sortDirection alone marks the property as sortable, which needs the same index
+				// an isSecondary property gets.
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "sorted")).toEqual([
+					IndexHelper.generateName(tableName, "sorted")
+				]);
+
+				// The index has to actually serve a sort on the property it covers.
+				await connector.set({ id: "1", sorted: "a", value: 1 });
+				await connector.set({ id: "2", sorted: "b", value: 2 });
+				const result = await connector.query(undefined, [
+					{ property: "sorted", sortDirection: SortDirection.Descending }
+				]);
+				expect(result.entities.map(e => e.id)).toEqual(["2", "1"]);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
 	);
 
 	test("bootstrap is idempotent when called multiple times", async () => {

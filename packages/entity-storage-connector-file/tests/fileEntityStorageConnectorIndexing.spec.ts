@@ -21,6 +21,12 @@ const SUPPORT_SECONDARY_INDEXING = false;
 // Set to false for connectors that do not create named index objects in the database.
 const SUPPORT_NAMED_INDEX_OBJECTS = false;
 
+// The file connector keeps entities in a JSON file, so a secondary property gets no index.
+const SUPPORT_SECONDARY_INDEX_CREATION = false;
+
+// The file connector sorts in memory after a full scan, so a sortDirection needs no index.
+const SUPPORT_SORT_DIRECTION_INDEX_CREATION = false;
+
 // The file connector holds no indexes, so a schema which gains one needs no bootstrap action.
 const SUPPORT_INDEX_UPDATE = false;
 
@@ -34,6 +40,18 @@ class IndexedTestType {
 
 	@property({ type: "string", isSecondary: true })
 	public category!: string;
+
+	@property({ type: "number", format: "uint32" })
+	public value!: number;
+}
+
+@entity()
+class SortedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", sortDirection: SortDirection.Descending })
+	public sorted!: string;
 
 	@property({ type: "number", format: "uint32" })
 	public value!: number;
@@ -86,6 +104,13 @@ function createIndexedConnector(): FileEntityStorageConnector<IndexedTestType> {
 	});
 }
 
+function createSortedConnector(): FileEntityStorageConnector<SortedTestType> {
+	return new FileEntityStorageConnector<SortedTestType>({
+		entitySchema: nameof<SortedTestType>(),
+		config: { directory: path.join(os.tmpdir(), "entity-storage-sorted") }
+	});
+}
+
 function createUnindexedConnector(): FileEntityStorageConnector<UnindexedTestType> {
 	return new FileEntityStorageConnector<UnindexedTestType>({
 		entitySchema: nameof<UnindexedTestType>(),
@@ -104,6 +129,9 @@ describe("FileEntityStorageConnector", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<IndexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(IndexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<SortedTestType>(), () =>
+			EntitySchemaHelper.getSchema(SortedTestType)
 		);
 		EntitySchemaFactory.register(nameof<UnindexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(UnindexedTestType)
@@ -180,6 +208,55 @@ describe("FileEntityStorageConnector", () => {
 			}
 		},
 		300_000
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_CREATION)(
+		"bootstrap creates an index for a property marked isSecondary",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				// A query on the property has to return the matching entity.
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const result = await connector.query({
+					property: "category",
+					value: "catA",
+					comparison: ComparisonOperator.Equals
+				});
+				expect(result.entities.map(e => e.id)).toEqual(["1"]);
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_SORT_DIRECTION_INDEX_CREATION)(
+		"bootstrap creates an index for a property which only declares a sortDirection",
+		async () => {
+			const connector = createSortedConnector();
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				// A sort on the property has to return the entities in the requested order.
+				await connector.set({ id: "1", sorted: "a", value: 1 });
+				await connector.set({ id: "2", sorted: "b", value: 2 });
+				const result = await connector.query(undefined, [
+					{ property: "sorted", sortDirection: SortDirection.Descending }
+				]);
+				expect(result.entities.map(e => e.id)).toEqual(["2", "1"]);
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
 	);
 
 	test("bootstrap is idempotent when called multiple times", async () => {

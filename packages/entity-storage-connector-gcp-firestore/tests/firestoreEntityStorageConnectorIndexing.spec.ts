@@ -24,6 +24,14 @@ const SUPPORT_SECONDARY_INDEXING = false;
 // Set to false for connectors that do not create named index objects in the database.
 const SUPPORT_NAMED_INDEX_OBJECTS = false;
 
+// Firestore creates a single-field index for every property by itself, leaving the connector
+// with no index object of its own to create for a secondary property.
+const SUPPORT_SECONDARY_INDEX_CREATION = false;
+
+// Firestore creates a single-field index for every property by itself, so a sortDirection
+// leaves the connector with no index object of its own to create.
+const SUPPORT_SORT_DIRECTION_INDEX_CREATION = false;
+
 // Firestore indexes every single field automatically, so a schema which gains a secondary
 // index needs no bootstrap action; composite indexes are managed out-of-band via the admin
 // API, which this connector's client does not expose.
@@ -41,6 +49,18 @@ class IndexedTestType {
 
 	@property({ type: "string", isSecondary: true })
 	public category!: string;
+
+	@property({ type: "number", format: "uint32" })
+	public value!: number;
+}
+
+@entity()
+class SortedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", sortDirection: SortDirection.Descending })
+	public sorted!: string;
 
 	@property({ type: "number", format: "uint32" })
 	public value!: number;
@@ -96,6 +116,16 @@ function createIndexedConnector(): FirestoreEntityStorageConnector<IndexedTestTy
 	});
 }
 
+function createSortedConnector(): FirestoreEntityStorageConnector<SortedTestType> {
+	return new FirestoreEntityStorageConnector<SortedTestType>({
+		entitySchema: nameof<SortedTestType>(),
+		config: {
+			...TEST_FIRESTORE_CONFIG,
+			collectionName: `${TEST_FIRESTORE_CONFIG.collectionName}_sorted`
+		}
+	});
+}
+
 function createUnindexedConnector(): FirestoreEntityStorageConnector<UnindexedTestType> {
 	return new FirestoreEntityStorageConnector<UnindexedTestType>({
 		entitySchema: nameof<UnindexedTestType>(),
@@ -120,6 +150,9 @@ describe("FirestoreEntityStorageConnector", () => {
 	beforeAll(() => {
 		EntitySchemaFactory.register(nameof<IndexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(IndexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<SortedTestType>(), () =>
+			EntitySchemaHelper.getSchema(SortedTestType)
 		);
 		EntitySchemaFactory.register(nameof<UnindexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(UnindexedTestType)
@@ -196,6 +229,55 @@ describe("FirestoreEntityStorageConnector", () => {
 			}
 		},
 		300_000
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_CREATION)(
+		"bootstrap creates an index for a property marked isSecondary",
+		async () => {
+			const connector = createIndexedConnector();
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				// A query on the property has to return the matching entity.
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const result = await connector.query({
+					property: "category",
+					value: "catA",
+					comparison: ComparisonOperator.Equals
+				});
+				expect(result.entities.map(e => e.id)).toEqual(["1"]);
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_SORT_DIRECTION_INDEX_CREATION)(
+		"bootstrap creates an index for a property which only declares a sortDirection",
+		async () => {
+			const connector = createSortedConnector();
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				// A sort on the property has to return the entities in the requested order.
+				await connector.set({ id: "1", sorted: "a", value: 1 });
+				await connector.set({ id: "2", sorted: "b", value: 2 });
+				const result = await connector.query(undefined, [
+					{ property: "sorted", sortDirection: SortDirection.Descending }
+				]);
+				expect(result.entities.map(e => e.id)).toEqual(["2", "1"]);
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+			}
+		},
+		60_000
 	);
 
 	test("bootstrap is idempotent when called multiple times", async () => {

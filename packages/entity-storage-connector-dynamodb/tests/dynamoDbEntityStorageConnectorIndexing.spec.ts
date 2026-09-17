@@ -26,6 +26,13 @@ const SUPPORT_SECONDARY_INDEXING = false;
 // Set to false for connectors that do not create named index objects in the database.
 const SUPPORT_NAMED_INDEX_OBJECTS = false;
 
+// Set to false for connectors which create no index for a property marked isSecondary.
+const SUPPORT_SECONDARY_INDEX_CREATION = true;
+
+// Set to false for connectors which create no index for a property that only declares a
+// sortDirection.
+const SUPPORT_SORT_DIRECTION_INDEX_CREATION = true;
+
 // Set to false for connectors which cannot add an index to an already created store.
 const SUPPORT_INDEX_UPDATE = true;
 
@@ -41,6 +48,18 @@ class IndexedTestType {
 
 	@property({ type: "string", isSecondary: true })
 	public category!: string;
+
+	@property({ type: "number", format: "uint32" })
+	public value!: number;
+}
+
+@entity()
+class SortedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", sortDirection: SortDirection.Descending })
+	public sorted!: string;
 
 	@property({ type: "number", format: "uint32" })
 	public value!: number;
@@ -174,6 +193,9 @@ describe("DynamoDbEntityStorageConnector", () => {
 		EntitySchemaFactory.register(nameof<IndexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(IndexedTestType)
 		);
+		EntitySchemaFactory.register(nameof<SortedTestType>(), () =>
+			EntitySchemaHelper.getSchema(SortedTestType)
+		);
 		EntitySchemaFactory.register(nameof<UnindexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(UnindexedTestType)
 		);
@@ -249,6 +271,85 @@ describe("DynamoDbEntityStorageConnector", () => {
 			}
 		},
 		300_000
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_CREATION)(
+		"bootstrap creates an index for a property marked isSecondary",
+		async () => {
+			const tableName = `${TEST_DYNAMODB_CONFIG.tableName}_secondary_${Date.now()}`;
+			const connector = new DynamoDbEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_DYNAMODB_CONFIG, tableName }
+			});
+			const client = openTestClient();
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				expect(await globalSecondaryIndexNames(client, tableName)).toContain("categoryIndex");
+
+				const description = await client.describeTable({ TableName: tableName });
+				const categoryIndex = (description.Table?.GlobalSecondaryIndexes ?? []).find(
+					index => index.IndexName === "categoryIndex"
+				);
+				expect(categoryIndex?.KeySchema?.find(key => key.KeyType === "RANGE")?.AttributeName).toBe(
+					"category"
+				);
+
+				// The index has to actually serve a lookup routed through it.
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const storedEntity = await connector.get("catA", "category");
+				expect(storedEntity?.id).toBe("1");
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				client.destroy();
+			}
+		},
+		120_000
+	);
+
+	test.skipIf(!SUPPORT_SORT_DIRECTION_INDEX_CREATION)(
+		"bootstrap creates an index for a property which only declares a sortDirection",
+		async () => {
+			const tableName = `${TEST_DYNAMODB_CONFIG.tableName}_sortdirection_${Date.now()}`;
+			const connector = new DynamoDbEntityStorageConnector<SortedTestType>({
+				entitySchema: nameof<SortedTestType>(),
+				config: { ...TEST_DYNAMODB_CONFIG, tableName }
+			});
+			const client = openTestClient();
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				// A sortDirection alone marks the property as sortable, which needs the same index
+				// an isSecondary property gets.
+				expect(await globalSecondaryIndexNames(client, tableName)).toContain("sortedIndex");
+
+				const description = await client.describeTable({ TableName: tableName });
+				const sortedIndex = (description.Table?.GlobalSecondaryIndexes ?? []).find(
+					index => index.IndexName === "sortedIndex"
+				);
+				expect(sortedIndex?.KeySchema?.find(key => key.KeyType === "RANGE")?.AttributeName).toBe(
+					"sorted"
+				);
+
+				// The index has to actually serve a sort on the property it covers.
+				await connector.set({ id: "1", sorted: "a", value: 1 });
+				await connector.set({ id: "2", sorted: "b", value: 2 });
+				const result = await connector.query(undefined, [
+					{ property: "sorted", sortDirection: SortDirection.Descending }
+				]);
+				expect(result.entities.map(e => e.id)).toEqual(["2", "1"]);
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				client.destroy();
+			}
+		},
+		120_000
 	);
 
 	test("bootstrap is idempotent when called multiple times", async () => {
