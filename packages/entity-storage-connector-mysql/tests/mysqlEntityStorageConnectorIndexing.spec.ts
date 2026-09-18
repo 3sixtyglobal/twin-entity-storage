@@ -203,6 +203,30 @@ class CompositeIndexedTestType {
 	public value!: number;
 }
 
+@entity()
+class WideCompositeIndexedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [{ name: "wide", direction: SortDirection.Ascending, index: 0 }]
+	})
+	public first!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [{ name: "wide", direction: SortDirection.Ascending, index: 1 }]
+	})
+	public second!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [{ name: "wide", direction: SortDirection.Ascending, index: 2 }]
+	})
+	public third!: string;
+}
+
 function createIndexedConnector(): MySqlEntityStorageConnector<IndexedTestType> {
 	return new MySqlEntityStorageConnector<IndexedTestType>({
 		entitySchema: nameof<IndexedTestType>(),
@@ -236,6 +260,9 @@ describe("MySqlEntityStorageConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<CompositeIndexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(CompositeIndexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<WideCompositeIndexedTestType>(), () =>
+			EntitySchemaHelper.getSchema(WideCompositeIndexedTestType)
 		);
 
 		ContextIdStore.getContextIds = vi
@@ -940,6 +967,54 @@ describe("MySqlEntityStorageConnector", () => {
 	);
 
 	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"bootstraps a table created by an earlier release whose partition key column is LONGTEXT",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_legacytext_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const currentIndexName = IndexHelper.generateName(tableName, "category");
+
+				// The table and index exactly as a release before the partition key led the indexes created them.
+				await pool.query(
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` LONGTEXT NOT NULL, \`id\` LONGTEXT NOT NULL, \`category\` LONGTEXT NOT NULL, \`value\` INT NOT NULL, PRIMARY KEY (\`partitionId\`(255), \`id\`(255)))`
+				);
+				await pool.query(
+					`CREATE INDEX \`${currentIndexName}\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255))`
+				);
+
+				expect(await connector.bootstrap()).toBe(true);
+				expect(await indexNamesCoveringColumn(pool, tableName, "category")).toEqual([
+					currentIndexName
+				]);
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([]);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
 		"does not create a duplicate index when the column is already covered by a descending index",
 		async () => {
 			const tableName = `${TEST_MYSQL_CONFIG.tableName}_desc_${Date.now()}`;
@@ -1166,6 +1241,115 @@ describe("MySqlEntityStorageConnector", () => {
 						indexName === compositeIndexName(tableName, "statusValue")
 				);
 				expect(groupIndexNames.length).toBe(2);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstraps a composite index group on a table created by an earlier release whose partition key column is LONGTEXT",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_group_legacytext_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<CompositeIndexedTestType>({
+				entitySchema: nameof<CompositeIndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const categoryStatusIndexName = compositeIndexName(tableName, "categoryStatus");
+
+				// The table and composite index exactly as a release before the partition key led the indexes created them.
+				await pool.query(
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` LONGTEXT NOT NULL, \`id\` LONGTEXT NOT NULL, \`category\` LONGTEXT NOT NULL, \`status\` LONGTEXT NOT NULL, \`value\` INT NOT NULL, PRIMARY KEY (\`partitionId\`(255), \`id\`(255)))`
+				);
+				await pool.query(
+					`CREATE INDEX \`${categoryStatusIndexName}\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255) ASC, \`status\`(255) DESC)`
+				);
+
+				expect(await connector.bootstrap()).toBe(true);
+
+				const indexColumns = await indexColumnsByName(pool, tableName);
+				expect(indexColumns[categoryStatusIndexName]).toEqual([
+					`${PARTITION_KEY} ASC`,
+					"category ASC",
+					"status DESC"
+				]);
+				expect(indexColumns[compositeIndexName(tableName, "statusValue")]).toEqual([
+					`${PARTITION_KEY} ASC`,
+					"value DESC",
+					"status ASC"
+				]);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"keeps the existing index when replacing it fails",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_group_replacefail_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<WideCompositeIndexedTestType>({
+				entitySchema: nameof<WideCompositeIndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const indexGroups = EntitySchemaHelper.getIndexGroups(
+					EntitySchemaHelper.getSchema(WideCompositeIndexedTestType)
+				);
+				const wideIndexName = IndexHelper.generateCompositeName(tableName, indexGroups.wide);
+
+				// Three prefixed text columns fit MySQL's key length limit, the partition key in front
+				// of them does not, so the replacement index cannot be created.
+				await pool.query(
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` LONGTEXT NOT NULL, \`id\` LONGTEXT NOT NULL, \`first\` LONGTEXT NOT NULL, \`second\` LONGTEXT NOT NULL, \`third\` LONGTEXT NOT NULL, PRIMARY KEY (\`partitionId\`(255), \`id\`(255)))`
+				);
+				await pool.query(
+					`CREATE INDEX \`${wideIndexName}\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`first\`(255) ASC, \`second\`(255) ASC, \`third\`(255) ASC)`
+				);
+
+				expect(await connector.bootstrap()).toBe(false);
+				expect((await indexColumnsByName(pool, tableName))[wideIndexName]).toEqual([
+					"first ASC",
+					"second ASC",
+					"third ASC"
+				]);
 			} finally {
 				try {
 					await pool?.end();

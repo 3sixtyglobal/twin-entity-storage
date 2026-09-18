@@ -1318,20 +1318,14 @@ export class MySqlEntityStorageConnector<T = unknown>
 		const keyColumns = [MySqlEntityStorageConnector._PARTITION_KEY, columnName];
 
 		if (!this.isIndexCovered(indexes, keyColumns)) {
-			// An index of ours under the same name but with a different shape predates the partition
-			// key leading the key columns, so it has to be replaced rather than left in place.
-			if (!Is.empty(indexes[indexName])) {
-				await pool.query(`DROP INDEX \`${indexName}\` ON ${qualifiedTable}`);
-			}
-
 			const indexCols = [
 				this.partitionKeyIndexColumn(),
 				this.indexColumn(columnName, this.mapSqlColumn(prop).indexPrefixLength)
 			];
 
-			await pool.query(
-				`CREATE INDEX \`${indexName}\` ON ${qualifiedTable} (${indexCols.join(", ")})`
-			);
+			// An index of ours under the same name but with a different shape predates the partition
+			// key leading the key columns, so it has to be replaced rather than left in place.
+			await this.addIndex(pool, indexName, indexCols, !Is.empty(indexes[indexName]));
 		}
 
 		// TODO: remove the legacy index handling once every installation has bootstrapped on a release that contains it
@@ -1370,7 +1364,6 @@ export class MySqlEntityStorageConnector<T = unknown>
 		indexProperties: { property: IEntitySchemaProperty<T>; direction: SortDirection }[]
 	): Promise<void> {
 		const indexName = IndexHelper.generateCompositeName(this._config.tableName, indexProperties);
-		const qualifiedTable = `\`${this._config.database}\`.\`${this._config.tableName}\``;
 		const keyColumns = [
 			MySqlEntityStorageConnector._PARTITION_KEY,
 			...indexProperties.map(indexProperty => String(indexProperty.property.property))
@@ -1378,12 +1371,6 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		if (this.isIndexCovered(indexes, keyColumns)) {
 			return;
-		}
-
-		// An index of ours under the same name but with a different shape predates the partition
-		// key leading the key columns, so it has to be replaced rather than left in place.
-		if (!Is.empty(indexes[indexName])) {
-			await pool.query(`DROP INDEX \`${indexName}\` ON ${qualifiedTable}`);
 		}
 
 		const indexCols = [
@@ -1397,8 +1384,29 @@ export class MySqlEntityStorageConnector<T = unknown>
 			})
 		];
 
+		// An index of ours under the same name but with a different shape predates the partition
+		// key leading the key columns, so it has to be replaced rather than left in place.
+		await this.addIndex(pool, indexName, indexCols, !Is.empty(indexes[indexName]));
+	}
+
+	/**
+	 * Add an index to the table, replacing a same-named one in the same statement so that a
+	 * failed create leaves the existing index in place.
+	 * @param pool The pool to query with.
+	 * @param indexName The name of the index.
+	 * @param indexCols The key column references, in key order.
+	 * @param replace True to drop the same-named index in the same statement.
+	 * @internal
+	 */
+	private async addIndex(
+		pool: Pool,
+		indexName: string,
+		indexCols: string[],
+		replace: boolean
+	): Promise<void> {
+		const dropClause = replace ? `DROP INDEX \`${indexName}\`, ` : "";
 		await pool.query(
-			`CREATE INDEX \`${indexName}\` ON ${qualifiedTable} (${indexCols.join(", ")})`
+			`ALTER TABLE \`${this._config.database}\`.\`${this._config.tableName}\` ${dropClause}ADD INDEX \`${indexName}\` (${indexCols.join(", ")})`
 		);
 	}
 
@@ -1985,13 +1993,15 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 	/**
 	 * Build the column reference for the partition key when it leads an index.
+	 * The prefix is always applied: a table created by an earlier release still has a LONGTEXT
+	 * partition column, and on the VARCHAR(255) column the prefix indexes it in full.
 	 * @returns The quoted column reference.
 	 * @internal
 	 */
 	private partitionKeyIndexColumn(): string {
 		return this.indexColumn(
 			MySqlEntityStorageConnector._PARTITION_KEY,
-			this.mapSqlColumn(this.partitionKeyProperty()).indexPrefixLength
+			MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH
 		);
 	}
 
