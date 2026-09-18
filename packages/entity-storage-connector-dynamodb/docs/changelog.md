@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.1-next.5](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-dynamodb-v0.10.1-next.4...entity-storage-connector-dynamodb-v0.10.1-next.5) (2026-09-18)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-connector-dynamodb:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.10.1-next.4 to 0.10.1-next.5
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.10.1-next.4 to 0.10.1-next.5
+
 ## [0.10.1-next.4](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-dynamodb-v0.10.1-next.3...entity-storage-connector-dynamodb-v0.10.1-next.4) (2026-09-18)
 
 

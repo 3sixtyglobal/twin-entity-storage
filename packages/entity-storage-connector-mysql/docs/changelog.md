@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.1-next.5](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.10.1-next.4...entity-storage-connector-mysql-v0.10.1-next.5) (2026-09-18)
+
+
+### Bug Fixes
+
+* index the partition key with a prefix so tables created by earlier releases bootstrap ([#285](https://github.com/iotaledger/twin-entity-storage/issues/285)) ([45ea305](https://github.com/iotaledger/twin-entity-storage/commit/45ea305d04707bcd878273c514f99c4a701321f6))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.10.1-next.4 to 0.10.1-next.5
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.10.1-next.4 to 0.10.1-next.5
+
 ## [0.10.1-next.4](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.10.1-next.3...entity-storage-connector-mysql-v0.10.1-next.4) (2026-09-18)
 
 
