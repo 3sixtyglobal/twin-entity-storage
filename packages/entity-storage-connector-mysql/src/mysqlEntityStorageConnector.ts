@@ -1663,8 +1663,13 @@ export class MySqlEntityStorageConnector<T = unknown>
 			switch (comparator.comparison) {
 				case ComparisonOperator.Includes: {
 					values.pop();
-					values.push(`%${String(comparator.value).toLowerCase()}%`);
-					return `LOWER(${jsonExpr}) LIKE ?`;
+					values.push(`%${String(comparator.value)}%`);
+					return `${jsonExpr} LIKE ?`;
+				}
+				case ComparisonOperator.StartsWith: {
+					values.pop();
+					values.push(`${this.escapeLike(String(comparator.value))}%`);
+					return `${jsonExpr} LIKE ?`;
 				}
 				case ComparisonOperator.NotEquals:
 					return `${jsonExpr} <> ?`;
@@ -1703,8 +1708,8 @@ export class MySqlEntityStorageConnector<T = unknown>
 			case ComparisonOperator.Includes: {
 				if (type === EntitySchemaPropertyType.String) {
 					values.pop();
-					values.push(`%${String(comparator.value).toLowerCase()}%`);
-					return `LOWER(\`${prop}\`) LIKE ?`;
+					values.push(`%${String(comparator.value)}%`);
+					return `\`${prop}\` LIKE ?`;
 				}
 				values.pop();
 				values.push(JSON.stringify(comparator.value));
@@ -1713,18 +1718,39 @@ export class MySqlEntityStorageConnector<T = unknown>
 			case ComparisonOperator.NotIncludes: {
 				if (type === EntitySchemaPropertyType.String) {
 					values.pop();
-					values.push(`%${String(comparator.value).toLowerCase()}%`);
-					return `LOWER(\`${prop}\`) NOT LIKE ?`;
+					values.push(`%${String(comparator.value)}%`);
+					return `\`${prop}\` NOT LIKE ?`;
 				}
 				values.pop();
 				values.push(JSON.stringify(comparator.value));
 				return `NOT JSON_CONTAINS(\`${prop}\`, ?)`;
+			}
+			case ComparisonOperator.StartsWith: {
+				if (type === EntitySchemaPropertyType.String) {
+					values.pop();
+					values.push(`${this.escapeLike(String(comparator.value))}%`);
+					return `\`${prop}\` LIKE ?`;
+				}
+				throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {
+					comparison: comparator.comparison,
+					type
+				});
 			}
 			default:
 				throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {
 					comparison: comparator.comparison
 				});
 		}
+	}
+
+	/**
+	 * Escape the LIKE wildcard characters in a value so they match literally.
+	 * @param value The value to escape.
+	 * @returns The escaped value.
+	 * @internal
+	 */
+	private escapeLike(value: string): string {
+		return value.replace(/[\\%_]/g, "\\$&");
 	}
 
 	/**

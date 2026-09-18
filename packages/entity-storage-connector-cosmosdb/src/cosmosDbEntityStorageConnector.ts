@@ -1406,6 +1406,8 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 			return `CONTAINS(c.${attributeName}, @${propName})`;
 		} else if (comparator.comparison === ComparisonOperator.NotIncludes) {
 			return `NOT CONTAINS(c.${attributeName}, @${propName})`;
+		} else if (comparator.comparison === ComparisonOperator.StartsWith) {
+			return `STARTSWITH(c.${attributeName}, @${propName})`;
 		} else if (comparator.comparison === ComparisonOperator.In) {
 			return `c.${propName} IN ${attributeName}`;
 		}

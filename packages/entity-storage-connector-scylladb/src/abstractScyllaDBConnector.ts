@@ -941,6 +941,16 @@ export abstract class AbstractScyllaDBConnector<T> {
 	}
 
 	/**
+	 * Escape the LIKE wildcard characters in a value so they match literally.
+	 * @param value The value to escape.
+	 * @returns The escaped value.
+	 * @internal
+	 */
+	private escapeLike(value: string): string {
+		return value.replace(/[\\%_]/g, "\\$&");
+	}
+
+	/**
 	 * Build a stable cache key for the shared client based on connection parameters.
 	 * @returns The client cache key.
 	 * @internal
@@ -1046,6 +1056,11 @@ export abstract class AbstractScyllaDBConnector<T> {
 				} else {
 					conds.push(`"${condition.property}" NOT LIKE ?`);
 				}
+			} else if (condition.comparison === ComparisonOperator.StartsWith) {
+				const serialized = this.propertyToDbValue(condition.value, descriptor);
+				const searchStr = Is.stringValue(serialized) ? serialized : "";
+				params.push(`${this.escapeLike(searchStr)}%`);
+				conds.push(`"${condition.property}" LIKE ?`);
 			} else if (condition.comparison === ComparisonOperator.In) {
 				// Guard must come first: Is.arrayValue([]) returns false for an empty array,
 				// so an empty value would be wrapped as a single element below and bypass

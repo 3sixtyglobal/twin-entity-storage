@@ -1364,6 +1364,8 @@ export class MongoDbEntityStorageConnector<T = unknown>
 				return { $lte: value };
 			case ComparisonOperator.In:
 				return { $in: Array.isArray(value) ? value : [value] };
+			case ComparisonOperator.StartsWith:
+				return { $regex: `^${this.escapeRegex(String(value))}` };
 			case ComparisonOperator.Includes:
 				// For string fields, use regex for substring matching
 				if (type === EntitySchemaPropertyType.String) {

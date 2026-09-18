@@ -2007,6 +2007,35 @@ describe("MongoDbEntityStorageConnector", () => {
 		);
 	});
 
+	test("can query with StartsWith on string field", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "hello world", value2: 1 });
+		await connector.set({ id: "2", value1: "worldwide", value2: 2 });
+		await connector.set({ id: "3", value1: "foo bar", value2: 3 });
+		const result = await connector.query({
+			conditions: [
+				{ property: "value1", value: "world", comparison: ComparisonOperator.StartsWith }
+			]
+		});
+		expect(result.entities.length).toEqual(1);
+		expect((result.entities[0] as TestType).value1).toEqual("worldwide");
+	});
+
+	test("can query with StartsWith treating wildcard characters in the value literally", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "a_b", value2: 1 });
+		await connector.set({ id: "2", value1: "axb", value2: 2 });
+		await connector.set({ id: "3", value1: "a%b", value2: 3 });
+		const underscore = await connector.query({
+			conditions: [{ property: "value1", value: "a_", comparison: ComparisonOperator.StartsWith }]
+		});
+		expect(underscore.entities.map(e => (e as TestType).value1)).toEqual(["a_b"]);
+		const percent = await connector.query({
+			conditions: [{ property: "value1", value: "a%", comparison: ComparisonOperator.StartsWith }]
+		});
+		expect(percent.entities.map(e => (e as TestType).value1)).toEqual(["a%b"]);
+	});
+
 	test.skipIf(!SUPPORT_NOT_INCLUDES)("can query with NotIncludes on string field", async () => {
 		const connector = await createConnector<TestType>(nameof<TestType>());
 		await connector.set({ id: "1", value1: "hello world", value2: 1 });

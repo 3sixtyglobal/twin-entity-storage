@@ -1712,25 +1712,36 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			switch (comparator.comparison) {
 				case ComparisonOperator.Includes: {
 					values.pop();
-					values.push(`%${String(comparator.value).toLowerCase()}%`);
+					values.push(`%${String(comparator.value)}%`);
 					if (isArray) {
 						const elemPath = nestedParts
 							.map((p, i, arr) => (i === arr.length - 1 ? `->>'${p}'` : `->'${p}'`))
 							.join("");
-						return `EXISTS (SELECT 1 FROM jsonb_array_elements("${rootProp}") elem WHERE LOWER(elem${elemPath}) ILIKE $${valueIndex})`;
+						return `EXISTS (SELECT 1 FROM jsonb_array_elements("${rootProp}") elem WHERE elem${elemPath} LIKE $${valueIndex})`;
 					}
-					return `LOWER(${jsonTextExpr}) ILIKE $${valueIndex}`;
+					return `${jsonTextExpr} LIKE $${valueIndex}`;
 				}
 				case ComparisonOperator.NotIncludes: {
 					values.pop();
-					values.push(`%${String(comparator.value).toLowerCase()}%`);
+					values.push(`%${String(comparator.value)}%`);
 					if (isArray) {
 						const elemPath = nestedParts
 							.map((p, i, arr) => (i === arr.length - 1 ? `->>'${p}'` : `->'${p}'`))
 							.join("");
-						return `NOT EXISTS (SELECT 1 FROM jsonb_array_elements("${rootProp}") elem WHERE LOWER(elem${elemPath}) ILIKE $${valueIndex})`;
+						return `NOT EXISTS (SELECT 1 FROM jsonb_array_elements("${rootProp}") elem WHERE elem${elemPath} LIKE $${valueIndex})`;
 					}
-					return `LOWER(${jsonTextExpr}) NOT ILIKE $${valueIndex}`;
+					return `${jsonTextExpr} NOT LIKE $${valueIndex}`;
+				}
+				case ComparisonOperator.StartsWith: {
+					values.pop();
+					values.push(`${this.escapeLike(String(comparator.value))}%`);
+					if (isArray) {
+						const elemPath = nestedParts
+							.map((p, i, arr) => (i === arr.length - 1 ? `->>'${p}'` : `->'${p}'`))
+							.join("");
+						return `EXISTS (SELECT 1 FROM jsonb_array_elements("${rootProp}") elem WHERE elem${elemPath} LIKE $${valueIndex})`;
+					}
+					return `${jsonTextExpr} LIKE $${valueIndex}`;
 				}
 				case ComparisonOperator.NotEquals:
 					return `${jsonTextExpr} <> $${valueIndex}`;
@@ -1768,7 +1779,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				return `"${prop}" <= $${valueIndex}`;
 			case ComparisonOperator.Includes: {
 				if (type === EntitySchemaPropertyType.String) {
-					return `"${prop}" ILIKE '%' || $${valueIndex} || '%'`;
+					return `"${prop}" LIKE '%' || $${valueIndex} || '%'`;
 				}
 				if (type === EntitySchemaPropertyType.Array || type === EntitySchemaPropertyType.Object) {
 					return `EXISTS (SELECT 1 FROM jsonb_array_elements("${prop}") elem WHERE elem @> $${valueIndex}::jsonb)`;
@@ -1784,10 +1795,25 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			}
 			case ComparisonOperator.NotIncludes: {
 				if (type === EntitySchemaPropertyType.String) {
-					return `"${prop}" NOT ILIKE '%' || $${valueIndex} || '%'`;
+					return `"${prop}" NOT LIKE '%' || $${valueIndex} || '%'`;
 				}
 				if (type === EntitySchemaPropertyType.Array || type === EntitySchemaPropertyType.Object) {
 					return `NOT EXISTS (SELECT 1 FROM jsonb_array_elements("${prop}") elem WHERE elem @> $${valueIndex}::jsonb)`;
+				}
+				throw new GeneralError(
+					PostgreSqlEntityStorageConnector.CLASS_NAME,
+					"comparisonNotSupported",
+					{
+						comparison: comparator.comparison,
+						type
+					}
+				);
+			}
+			case ComparisonOperator.StartsWith: {
+				if (type === EntitySchemaPropertyType.String) {
+					values.pop();
+					values.push(`${this.escapeLike(String(comparator.value))}%`);
+					return `"${prop}" LIKE $${valueIndex}`;
 				}
 				throw new GeneralError(
 					PostgreSqlEntityStorageConnector.CLASS_NAME,
@@ -1807,6 +1833,16 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 					}
 				);
 		}
+	}
+
+	/**
+	 * Escape the LIKE wildcard characters in a value so they match literally.
+	 * @param value The value to escape.
+	 * @returns The escaped value.
+	 * @internal
+	 */
+	private escapeLike(value: string): string {
+		return value.replace(/[\\%_]/g, "\\$&");
 	}
 
 	/**

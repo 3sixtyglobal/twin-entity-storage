@@ -1624,6 +1624,8 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 			return `contains(${attributeName}, ${propName})`;
 		} else if (comparator.comparison === ComparisonOperator.NotIncludes) {
 			return `NOT contains(${attributeName}, ${propName})`;
+		} else if (comparator.comparison === ComparisonOperator.StartsWith) {
+			return `begins_with(${attributeName}, ${propName})`;
 		} else if (comparator.comparison === ComparisonOperator.In) {
 			return `${propName} IN ${attributeName}`;
 		}

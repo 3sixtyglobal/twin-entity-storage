@@ -1337,6 +1337,18 @@ export class FirestoreEntityStorageConnector<T = unknown>
 				return Filter.where(property, "<=", value);
 			case ComparisonOperator.In:
 				return Filter.where(property, "in", value);
+			case ComparisonOperator.StartsWith:
+				if (!Is.string(value)) {
+					throw new GeneralError(
+						FirestoreEntityStorageConnector.CLASS_NAME,
+						"unsupportedComparisonOperator",
+						{ comparison }
+					);
+				}
+				return Filter.and(
+					Filter.where(property, ">=", value),
+					Filter.where(property, "<=", `${value}\uF8FF`)
+				);
 			case ComparisonOperator.Includes:
 				// Object value → array-contains (caller ensured needsPostFilter is false here)
 				return Filter.where(property, "array-contains", value);
