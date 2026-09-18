@@ -7,8 +7,7 @@
 			"tableExists": "Table \"{tableName}\" created or it already exists",
 			"tableDropping": "Dropping table \"{tableName}\"",
 			"tableDropped": "Table \"{tableName}\" dropped",
-			"legacyIndexDropped": "Legacy index \"{indexName}\" dropped from table \"{tableName}\", \"{newIndexName}\" already covers the column",
-			"legacyIndexRenamed": "Legacy index \"{indexName}\" renamed to \"{newIndexName}\" on table \"{tableName}\""
+			"legacyIndexDropped": "Legacy index \"{indexName}\" dropped from table \"{tableName}\", \"{newIndexName}\" now covers the column"
 		}
 	},
 	"warn": {

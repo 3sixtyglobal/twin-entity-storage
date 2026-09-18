@@ -78,6 +78,13 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	private static readonly _PARTITION_KEY_VALUE: string = "root";
 
 	/**
+	 * Maximum length of the partition id column. The column leads the primary key and every
+	 * index, so it is bounded rather than stored as unconstrained text.
+	 * @internal
+	 */
+	private static readonly _PARTITION_KEY_MAX_LENGTH: number = 255;
+
+	/**
 	 * Maximum number of rows per INSERT statement in setBatch.
 	 * @internal
 	 */
@@ -312,19 +319,21 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				});
 			}
 
+			const indexes = await this.readIndexes(dbConnection);
+
 			for (const prop of this._entitySchema.properties ?? []) {
 				if (
 					(prop.isSecondary === true || !Is.empty(prop.sortDirection)) &&
 					prop.type !== EntitySchemaPropertyType.Object &&
 					prop.type !== EntitySchemaPropertyType.Array
 				) {
-					await this.ensureIndex(dbConnection, prop, nodeLogging);
+					await this.ensureIndex(dbConnection, indexes, prop, nodeLogging);
 				}
 			}
 
 			const indexGroups = EntitySchemaHelper.getIndexGroups(this._entitySchema);
 			for (const indexProperties of Object.values(indexGroups)) {
-				await this.ensureCompositeIndex(dbConnection, indexProperties);
+				await this.ensureCompositeIndex(dbConnection, indexes, indexProperties);
 			}
 		} catch (error) {
 			await nodeLogging?.log({
@@ -891,7 +900,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * @returns The connector implementation version.
 	 */
 	public connectorVersion(): number {
-		return 0;
+		return 1;
 	}
 
 	/**
@@ -1265,44 +1274,35 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Ensure the secondary index for a property exists, replacing a legacy-named index if present.
+	 * Ensure the secondary index for a property exists, dropping a legacy-named index if present.
+	 * Every query is scoped to a single partition, so the index leads with the partition key and
+	 * the property follows it, letting one index serve both the partition filter and the sort.
 	 * @param dbConnection The connection to query with.
+	 * @param indexes The indexes already on the table, keyed by index name.
 	 * @param prop The indexed property.
 	 * @param nodeLogging Optional logging component.
 	 * @internal
 	 */
 	private async ensureIndex(
 		dbConnection: postgres.Sql,
+		indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } },
 		prop: IEntitySchemaProperty<T>,
 		nodeLogging?: ILoggingComponent
 	): Promise<void> {
 		const columnName = String(prop.property);
 		const indexName = IndexHelper.generateName(this._config.tableName, columnName);
+		const keyColumns = [PostgreSqlEntityStorageConnector._PARTITION_KEY, columnName];
 
-		const indexRows = await dbConnection.unsafe(
-			`SELECT i.relname AS "indexName", ix.indisunique AS "isUnique", ix.indnkeyatts AS "keyColumnCount"
-			FROM pg_index ix
-			JOIN pg_class t ON t.oid = ix.indrelid
-			JOIN pg_namespace n ON n.oid = t.relnamespace
-			JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ix.indkey[0]
-			JOIN pg_class i ON i.oid = ix.indexrelid
-			JOIN pg_am am ON am.oid = i.relam
-			WHERE n.nspname = 'public'
-				AND t.relname = $1
-				AND a.attname = $2
-				AND ix.indisvalid
-				AND ix.indisready
-				AND ix.indpred IS NULL
-				AND am.amname = 'btree'`,
-			[this._config.tableName, columnName] as ParameterOrJSON<never>[]
-		);
-		const indexNames = indexRows.map(row => ObjectHelper.propertyGet<string>(row, "indexName"));
+		if (!this.isIndexCovered(indexes, keyColumns)) {
+			// An index of ours under the same name but with a different shape predates the partition
+			// key leading the key columns, so it has to be replaced rather than left in place.
+			if (!Is.empty(indexes[indexName])) {
+				await dbConnection.unsafe(`DROP INDEX "${indexName}"`);
+			}
 
-		if (!Is.arrayValue(indexNames)) {
 			await dbConnection.unsafe(
-				`CREATE INDEX IF NOT EXISTS "${indexName}" ON "${this._config.tableName}" ("${columnName}")`
+				`CREATE INDEX IF NOT EXISTS "${indexName}" ON "${this._config.tableName}" ("${PostgreSqlEntityStorageConnector._PARTITION_KEY}", "${columnName}")`
 			);
-			return;
 		}
 
 		// TODO: remove the legacy index handling once every installation has bootstrapped on a release that contains it
@@ -1311,62 +1311,130 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			columnName,
 			IndexHelper.DEFAULT_MAX_IDENTIFIER_LENGTH
 		);
-		if (!indexNames.includes(legacyName)) {
-			return;
-		}
+		const legacyIndex = indexes[legacyName];
 
 		// The connector's own legacy indexes were always non-unique and single-column, anything else is an operator's
-		const legacyRow = indexRows.find(
-			row => ObjectHelper.propertyGet(row, "indexName") === legacyName
-		);
-		if (
-			!Is.object(legacyRow) ||
-			ObjectHelper.propertyGet(legacyRow, "isUnique") !== false ||
-			Coerce.integer(ObjectHelper.propertyGet(legacyRow, "keyColumnCount")) !== 1
-		) {
-			return;
-		}
-
-		const hasCurrent = indexNames.includes(indexName);
-		if (hasCurrent) {
+		if (!Is.empty(legacyIndex) && legacyIndex.nonUnique && legacyIndex.columns.length === 1) {
 			await dbConnection.unsafe(`DROP INDEX "${legacyName}"`);
-		} else {
-			await dbConnection.unsafe(`ALTER INDEX "${legacyName}" RENAME TO "${indexName}"`);
+			await nodeLogging?.log({
+				level: "info",
+				source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "legacyIndexDropped",
+				data: {
+					tableName: this._config.tableName,
+					indexName: legacyName,
+					newIndexName: indexName
+				}
+			});
 		}
-		await nodeLogging?.log({
-			level: "info",
-			source: PostgreSqlEntityStorageConnector.CLASS_NAME,
-			ts: Date.now(),
-			message: hasCurrent ? "legacyIndexDropped" : "legacyIndexRenamed",
-			data: {
-				tableName: this._config.tableName,
-				indexName: legacyName,
-				newIndexName: indexName
-			}
-		});
 	}
 
 	/**
 	 * Ensure the composite index for a schema index group exists.
 	 * A group needs at least two properties to form a composite index, otherwise it is skipped.
+	 * The partition key leads the index for the same reason it leads a single property index.
 	 * @param dbConnection The connection to query with.
+	 * @param indexes The indexes already on the table, keyed by index name.
 	 * @param indexProperties The properties in the group, ordered by their index position.
 	 * @internal
 	 */
 	private async ensureCompositeIndex(
 		dbConnection: postgres.Sql,
+		indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } },
 		indexProperties: { property: IEntitySchemaProperty<T>; direction: SortDirection }[]
 	): Promise<void> {
 		const indexName = IndexHelper.generateCompositeName(this._config.tableName, indexProperties);
-		const indexCols = indexProperties
-			.map(
+		const keyColumns = [
+			PostgreSqlEntityStorageConnector._PARTITION_KEY,
+			...indexProperties.map(indexProperty => String(indexProperty.property.property))
+		];
+
+		if (this.isIndexCovered(indexes, keyColumns)) {
+			return;
+		}
+
+		// An index of ours under the same name but with a different shape predates the partition
+		// key leading the key columns, so it has to be replaced rather than left in place.
+		if (!Is.empty(indexes[indexName])) {
+			await dbConnection.unsafe(`DROP INDEX "${indexName}"`);
+		}
+
+		const indexCols = [
+			`"${PostgreSqlEntityStorageConnector._PARTITION_KEY}" ASC`,
+			...indexProperties.map(
 				indexProperty =>
 					`"${String(indexProperty.property.property)}" ${indexProperty.direction === SortDirection.Descending ? "DESC" : "ASC"}`
 			)
-			.join(", ");
+		].join(", ");
 
 		await dbConnection.unsafe(
 			`CREATE INDEX IF NOT EXISTS "${indexName}" ON "${this._config.tableName}" (${indexCols})`
+		);
+	}
+
+	/**
+	 * Read the key columns of every usable index on the table, in key order.
+	 * @param dbConnection The connection to query with.
+	 * @returns The key columns and uniqueness of each index, keyed by index name.
+	 * @internal
+	 */
+	private async readIndexes(
+		dbConnection: postgres.Sql
+	): Promise<{ [indexName: string]: { columns: string[]; nonUnique: boolean } }> {
+		const indexRows = await dbConnection.unsafe(
+			`SELECT i.relname AS "indexName", a.attname AS "columnName", k.pos AS "position", ix.indisunique AS "isUnique"
+			FROM pg_index ix
+			JOIN pg_class t ON t.oid = ix.indrelid
+			JOIN pg_namespace n ON n.oid = t.relnamespace
+			JOIN pg_class i ON i.oid = ix.indexrelid
+			JOIN pg_am am ON am.oid = i.relam
+			JOIN LATERAL generate_series(0, ix.indnkeyatts - 1) AS k(pos) ON true
+			JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ix.indkey[k.pos]
+			WHERE n.nspname = 'public'
+				AND t.relname = $1
+				AND ix.indisvalid
+				AND ix.indisready
+				AND ix.indpred IS NULL
+				AND am.amname = 'btree'
+			ORDER BY i.relname, k.pos`,
+			[this._config.tableName] as ParameterOrJSON<never>[]
+		);
+
+		const indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } } = {};
+
+		for (const row of indexRows) {
+			const indexName = ObjectHelper.propertyGet<string>(row, "indexName");
+			const columnName = ObjectHelper.propertyGet<string>(row, "columnName");
+			const position = Coerce.integer(ObjectHelper.propertyGet(row, "position"));
+
+			if (Is.stringValue(indexName) && Is.stringValue(columnName) && Is.integer(position)) {
+				indexes[indexName] ??= {
+					columns: [],
+					nonUnique: ObjectHelper.propertyGet(row, "isUnique") === false
+				};
+				// An expression key has no column to join to, leaving a hole which stops the
+				// index from matching any key column list beyond that position.
+				indexes[indexName].columns[position] = columnName;
+			}
+		}
+
+		return indexes;
+	}
+
+	/**
+	 * Check if any of the indexes already starts with the given key columns.
+	 * @param indexes The indexes on the table, keyed by index name.
+	 * @param keyColumns The leading key columns the index must have, in order.
+	 * @returns True if an index already leads with the key columns.
+	 * @internal
+	 */
+	private isIndexCovered(
+		indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } },
+		keyColumns: string[]
+	): boolean {
+		return Object.values(indexes).some(index =>
+			keyColumns.every((keyColumn, position) => index.columns[position] === keyColumn)
 		);
 	}
 
@@ -1841,6 +1909,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		props.unshift({
 			property: PostgreSqlEntityStorageConnector._PARTITION_KEY as keyof T,
 			type: EntitySchemaPropertyType.String,
+			maxLength: PostgreSqlEntityStorageConnector._PARTITION_KEY_MAX_LENGTH,
 			optional: false,
 			isPrimary: true
 		});

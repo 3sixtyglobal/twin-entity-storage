@@ -80,6 +80,13 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private static readonly _PARTITION_KEY_VALUE: string = "root";
 
 	/**
+	 * Maximum length of the partition id column. The column leads the primary key and every
+	 * index, so it is bounded to a length which can be indexed in full rather than by prefix.
+	 * @internal
+	 */
+	private static readonly _PARTITION_KEY_MAX_LENGTH: number = 255;
+
+	/**
 	 * Maximum number of rows per INSERT statement in setBatch.
 	 * @internal
 	 */
@@ -377,19 +384,21 @@ export class MySqlEntityStorageConnector<T = unknown>
 				});
 			}
 
+			const indexes = await this.readIndexes(pool);
+
 			for (const prop of this._entitySchema.properties ?? []) {
 				if (
 					(prop.isSecondary === true || !Is.empty(prop.sortDirection)) &&
 					prop.type !== EntitySchemaPropertyType.Object &&
 					prop.type !== EntitySchemaPropertyType.Array
 				) {
-					await this.ensureIndex(pool, prop, nodeLogging);
+					await this.ensureIndex(pool, indexes, prop, nodeLogging);
 				}
 			}
 
 			const indexGroups = EntitySchemaHelper.getIndexGroups(this._entitySchema);
 			for (const indexProperties of Object.values(indexGroups)) {
-				await this.ensureCompositeIndex(pool, indexProperties);
+				await this.ensureCompositeIndex(pool, indexes, indexProperties);
 			}
 		} catch (error) {
 			await nodeLogging?.log({
@@ -1130,7 +1139,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @returns The connector implementation version.
 	 */
 	public connectorVersion(): number {
-		return 1;
+		return 2;
 	}
 
 	/**
@@ -1257,108 +1266,155 @@ export class MySqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Ensure the secondary index for a property exists, replacing a legacy-named index if present.
+	 * Read the key columns of every usable index on the table, in key order.
 	 * @param pool The pool to query with.
+	 * @returns The key columns and uniqueness of each index, keyed by index name.
+	 * @internal
+	 */
+	private async readIndexes(
+		pool: Pool
+	): Promise<{ [indexName: string]: { columns: string[]; nonUnique: boolean } }> {
+		const [indexRows] = await pool.query(
+			"SELECT index_name AS indexName, column_name AS columnName, non_unique AS nonUnique FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND is_visible = 'YES' AND index_type = 'BTREE' ORDER BY index_name, seq_in_index",
+			[this._config.database, this._config.tableName]
+		);
+
+		const indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } } = {};
+
+		for (const row of Is.array(indexRows) ? indexRows : []) {
+			const indexName = ObjectHelper.propertyGet<string>(row, "indexName");
+			const columnName = ObjectHelper.propertyGet<string>(row, "columnName");
+			if (Is.stringValue(indexName) && Is.stringValue(columnName)) {
+				indexes[indexName] ??= {
+					columns: [],
+					nonUnique: Coerce.integer(ObjectHelper.propertyGet(row, "nonUnique")) === 1
+				};
+				indexes[indexName].columns.push(columnName);
+			}
+		}
+
+		return indexes;
+	}
+
+	/**
+	 * Ensure the secondary index for a property exists, dropping a legacy-named index if present.
+	 * Every query is scoped to a single partition, so the index leads with the partition key and
+	 * the property follows it, letting one index serve both the partition filter and the sort.
+	 * @param pool The pool to query with.
+	 * @param indexes The indexes already on the table, keyed by index name.
 	 * @param prop The indexed property.
 	 * @param nodeLogging Optional logging component.
 	 * @internal
 	 */
 	private async ensureIndex(
 		pool: Pool,
+		indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } },
 		prop: IEntitySchemaProperty<T>,
 		nodeLogging?: ILoggingComponent
 	): Promise<void> {
 		const columnName = String(prop.property);
-		const indexCol = this.indexColumn(columnName, this.mapSqlColumn(prop).indexPrefixLength);
 		const indexName = IndexHelper.generateName(this._config.tableName, columnName);
 		const qualifiedTable = `\`${this._config.database}\`.\`${this._config.tableName}\``;
+		const keyColumns = [MySqlEntityStorageConnector._PARTITION_KEY, columnName];
 
-		const [indexRows] = await pool.query(
-			"SELECT DISTINCT index_name AS indexName FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND column_name = ? AND seq_in_index = 1 AND is_visible = 'YES' AND index_type = 'BTREE'",
-			[this._config.database, this._config.tableName, columnName]
-		);
-		const indexNames = Is.array(indexRows)
-			? indexRows.map(row => ObjectHelper.propertyGet<string>(row, "indexName"))
-			: [];
+		if (!this.isIndexCovered(indexes, keyColumns)) {
+			// An index of ours under the same name but with a different shape predates the partition
+			// key leading the key columns, so it has to be replaced rather than left in place.
+			if (!Is.empty(indexes[indexName])) {
+				await pool.query(`DROP INDEX \`${indexName}\` ON ${qualifiedTable}`);
+			}
 
-		if (!Is.arrayValue(indexNames)) {
-			await pool.query(`CREATE INDEX \`${indexName}\` ON ${qualifiedTable} (${indexCol})`);
-			return;
+			const indexCols = [
+				this.partitionKeyIndexColumn(),
+				this.indexColumn(columnName, this.mapSqlColumn(prop).indexPrefixLength)
+			];
+
+			await pool.query(
+				`CREATE INDEX \`${indexName}\` ON ${qualifiedTable} (${indexCols.join(", ")})`
+			);
 		}
 
 		// TODO: remove the legacy index handling once every installation has bootstrapped on a release that contains it
 		const legacyName = IndexHelper.generateLegacyName(this._config.tableName, columnName);
-		if (!indexNames.includes(legacyName)) {
-			return;
-		}
+		const legacyIndex = indexes[legacyName];
 
 		// The connector's own legacy indexes were always non-unique and single-column, anything else is an operator's
-		const [legacyRows] = await pool.query(
-			"SELECT MAX(non_unique) AS nonUnique, COUNT(1) AS keyColumnCount FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND index_name = ?",
-			[this._config.database, this._config.tableName, legacyName]
-		);
-		const legacyRow = Is.array(legacyRows) ? legacyRows[0] : undefined;
-		if (
-			!Is.object(legacyRow) ||
-			Coerce.integer(ObjectHelper.propertyGet(legacyRow, "nonUnique")) !== 1 ||
-			Coerce.integer(ObjectHelper.propertyGet(legacyRow, "keyColumnCount")) !== 1
-		) {
-			return;
-		}
-
-		const hasCurrent = indexNames.includes(indexName);
-		if (hasCurrent) {
+		if (!Is.empty(legacyIndex) && legacyIndex.nonUnique && legacyIndex.columns.length === 1) {
 			await pool.query(`DROP INDEX \`${legacyName}\` ON ${qualifiedTable}`);
-		} else {
-			await pool.query(
-				`ALTER TABLE ${qualifiedTable} RENAME INDEX \`${legacyName}\` TO \`${indexName}\``
-			);
+			await nodeLogging?.log({
+				level: "info",
+				source: MySqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "legacyIndexDropped",
+				data: {
+					tableName: this._config.tableName,
+					indexName: legacyName,
+					newIndexName: indexName
+				}
+			});
 		}
-		await nodeLogging?.log({
-			level: "info",
-			source: MySqlEntityStorageConnector.CLASS_NAME,
-			ts: Date.now(),
-			message: hasCurrent ? "legacyIndexDropped" : "legacyIndexRenamed",
-			data: {
-				tableName: this._config.tableName,
-				indexName: legacyName,
-				newIndexName: indexName
-			}
-		});
 	}
 
 	/**
 	 * Ensure the composite index for a schema index group exists.
 	 * A group needs at least two properties to form a composite index, otherwise it is skipped.
+	 * The partition key leads the index for the same reason it leads a single property index.
 	 * @param pool The pool to query with.
+	 * @param indexes The indexes already on the table, keyed by index name.
 	 * @param indexProperties The properties in the group, ordered by their index position.
 	 * @internal
 	 */
 	private async ensureCompositeIndex(
 		pool: Pool,
+		indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } },
 		indexProperties: { property: IEntitySchemaProperty<T>; direction: SortDirection }[]
 	): Promise<void> {
 		const indexName = IndexHelper.generateCompositeName(this._config.tableName, indexProperties);
+		const qualifiedTable = `\`${this._config.database}\`.\`${this._config.tableName}\``;
+		const keyColumns = [
+			MySqlEntityStorageConnector._PARTITION_KEY,
+			...indexProperties.map(indexProperty => String(indexProperty.property.property))
+		];
 
-		const [indexRows] = await pool.query(
-			"SELECT 1 FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND index_name = ? LIMIT 1",
-			[this._config.database, this._config.tableName, indexName]
-		);
-
-		if (Is.arrayValue(indexRows)) {
+		if (this.isIndexCovered(indexes, keyColumns)) {
 			return;
 		}
 
-		const indexCols = indexProperties.map(indexProperty => {
-			const column = this.indexColumn(
-				String(indexProperty.property.property),
-				this.mapSqlColumn(indexProperty.property).indexPrefixLength
-			);
-			return `${column} ${indexProperty.direction === SortDirection.Descending ? "DESC" : "ASC"}`;
-		});
+		// An index of ours under the same name but with a different shape predates the partition
+		// key leading the key columns, so it has to be replaced rather than left in place.
+		if (!Is.empty(indexes[indexName])) {
+			await pool.query(`DROP INDEX \`${indexName}\` ON ${qualifiedTable}`);
+		}
+
+		const indexCols = [
+			`${this.partitionKeyIndexColumn()} ASC`,
+			...indexProperties.map(indexProperty => {
+				const column = this.indexColumn(
+					String(indexProperty.property.property),
+					this.mapSqlColumn(indexProperty.property).indexPrefixLength
+				);
+				return `${column} ${indexProperty.direction === SortDirection.Descending ? "DESC" : "ASC"}`;
+			})
+		];
 
 		await pool.query(
-			`CREATE INDEX \`${indexName}\` ON \`${this._config.database}\`.\`${this._config.tableName}\` (${indexCols.join(", ")})`
+			`CREATE INDEX \`${indexName}\` ON ${qualifiedTable} (${indexCols.join(", ")})`
+		);
+	}
+
+	/**
+	 * Check if any of the indexes already starts with the given key columns.
+	 * @param indexes The indexes on the table, keyed by index name.
+	 * @param keyColumns The leading key columns the index must have, in order.
+	 * @returns True if an index already leads with the key columns.
+	 * @internal
+	 */
+	private isIndexCovered(
+		indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } },
+		keyColumns: string[]
+	): boolean {
+		return Object.values(indexes).some(index =>
+			keyColumns.every((keyColumn, position) => index.columns[position] === keyColumn)
 		);
 	}
 
@@ -1761,11 +1817,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		const props: IEntitySchemaProperty<T>[] = [...entitySchema.properties];
 
-		props.unshift({
-			property: MySqlEntityStorageConnector._PARTITION_KEY as keyof T,
-			type: EntitySchemaPropertyType.String,
-			isPrimary: true
-		});
+		props.unshift(this.partitionKeyProperty());
 
 		const columnDefinitions = props
 			.map(prop => {
@@ -1889,6 +1941,32 @@ export class MySqlEntityStorageConnector<T = unknown>
 			sqlType,
 			indexPrefixLength: needsPrefix ? MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH : undefined
 		};
+	}
+
+	/**
+	 * Build the schema property describing the partition key column.
+	 * @returns The partition key property.
+	 * @internal
+	 */
+	private partitionKeyProperty(): IEntitySchemaProperty<T> {
+		return {
+			property: MySqlEntityStorageConnector._PARTITION_KEY as keyof T,
+			type: EntitySchemaPropertyType.String,
+			maxLength: MySqlEntityStorageConnector._PARTITION_KEY_MAX_LENGTH,
+			isPrimary: true
+		};
+	}
+
+	/**
+	 * Build the column reference for the partition key when it leads an index.
+	 * @returns The quoted column reference.
+	 * @internal
+	 */
+	private partitionKeyIndexColumn(): string {
+		return this.indexColumn(
+			MySqlEntityStorageConnector._PARTITION_KEY,
+			this.mapSqlColumn(this.partitionKeyProperty()).indexPrefixLength
+		);
 	}
 
 	/**

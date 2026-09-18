@@ -1,7 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
-import { Coerce } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -50,33 +49,54 @@ function openTestConnection(): postgres.Sql {
 	});
 }
 
+// The column the connector partitions on, which leads the primary key and every index it creates.
+const PARTITION_KEY = "partitionId";
+
 /**
- * Count how many indexes lead on the given column for a table.
+ * List the names of the indexes that cover the given column for a table, meaning the partition
+ * key leads the index and the column follows it.
  * @param sql The connection to query with.
  * @param tableName The table to inspect.
- * @param columnName The column that must be the leading (first) key column of the index.
- * @returns The number of indexes whose leading column is columnName.
+ * @param columnName The column that must be the second key column of the index.
+ * @returns The names of the indexes which cover columnName.
  */
-async function countIndexesLeadingOnColumn(
+async function indexNamesCoveringColumn(
 	sql: postgres.Sql,
 	tableName: string,
 	columnName: string
-): Promise<number> {
+): Promise<string[]> {
 	const rows = await sql.unsafe(
-		`SELECT COUNT(DISTINCT i.relname) AS "indexCount"
+		`SELECT DISTINCT i.relname AS "indexName"
 		FROM pg_index ix
 		JOIN pg_class t ON t.oid = ix.indrelid
 		JOIN pg_namespace n ON n.oid = t.relnamespace
 		JOIN pg_class i ON i.oid = ix.indexrelid
-		JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = ix.indkey[0]
-		WHERE n.nspname = 'public' AND t.relname = $1 AND a.attname = $2`,
-		[tableName, columnName]
+		JOIN pg_attribute partitioned ON partitioned.attrelid = t.oid AND partitioned.attnum = ix.indkey[0]
+		JOIN pg_attribute covered ON covered.attrelid = t.oid AND covered.attnum = ix.indkey[1]
+		WHERE n.nspname = 'public' AND t.relname = $1 AND partitioned.attname = $2 AND covered.attname = $3`,
+		[tableName, PARTITION_KEY, columnName]
 	);
-	return Coerce.number((rows as unknown as { indexCount: string }[])[0].indexCount) ?? 0;
+	return (rows as unknown as { indexName: string }[]).map(row => row.indexName);
 }
 
 /**
- * List the names of the indexes that lead on the given column for a table.
+ * Count how many indexes cover the given column for a table.
+ * @param sql The connection to query with.
+ * @param tableName The table to inspect.
+ * @param columnName The column that must be the second key column of the index.
+ * @returns The number of indexes which cover columnName.
+ */
+async function countIndexesCoveringColumn(
+	sql: postgres.Sql,
+	tableName: string,
+	columnName: string
+): Promise<number> {
+	return (await indexNamesCoveringColumn(sql, tableName, columnName)).length;
+}
+
+/**
+ * List the names of the indexes that lead on the given column for a table, which is the shape an
+ * operator's own index takes rather than the shape the connector creates.
  * @param sql The connection to query with.
  * @param tableName The table to inspect.
  * @param columnName The column that must be the leading (first) key column of the index.
@@ -337,7 +357,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				expect(await connector.bootstrap()).toBe(true);
 
 				sql = openTestConnection();
-				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+				expect(await indexNamesCoveringColumn(sql, tableName, "category")).toEqual([
 					IndexHelper.generateName(tableName, "category")
 				]);
 
@@ -381,7 +401,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 
 				// A sortDirection alone marks the property as sortable, which needs the same index
 				// an isSecondary property gets.
-				expect(await indexNamesLeadingOnColumn(sql, tableName, "sorted")).toEqual([
+				expect(await indexNamesCoveringColumn(sql, tableName, "sorted")).toEqual([
 					IndexHelper.generateName(tableName, "sorted")
 				]);
 
@@ -427,7 +447,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 			expect(storedEntity?.category).toBe("catA");
 
 			sql = openTestConnection();
-			const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+			const indexCount = await countIndexesCoveringColumn(sql, tableName, "category");
 			expect(indexCount).toBe(1);
 		} finally {
 			try {
@@ -456,13 +476,15 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				sql = openTestConnection();
 
 				await sql.unsafe(
-					`CREATE TABLE "${tableName}" ("id" VARCHAR(255) PRIMARY KEY, "category" VARCHAR(255), "value" INT)`
+					`CREATE TABLE "${tableName}" ("partitionId" VARCHAR(255) NOT NULL, "id" VARCHAR(255) NOT NULL, "category" VARCHAR(255), "value" INT, PRIMARY KEY ("partitionId", "id"))`
 				);
-				await sql.unsafe(`CREATE INDEX "manual_cat_idx" ON "${tableName}" ("category")`);
+				await sql.unsafe(
+					`CREATE INDEX "manual_cat_idx" ON "${tableName}" ("partitionId", "category")`
+				);
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(sql, tableName, "category");
 				expect(indexCount).toBe(1);
 			} finally {
 				try {
@@ -493,7 +515,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				sql = openTestConnection();
 
 				await sql.unsafe(
-					`CREATE TABLE "${tableName}" ("id" VARCHAR(255) PRIMARY KEY, "category" VARCHAR(255), "value" INT)`
+					`CREATE TABLE "${tableName}" ("partitionId" VARCHAR(255) NOT NULL, "id" VARCHAR(255) NOT NULL, "category" VARCHAR(255), "value" INT, PRIMARY KEY ("partitionId", "id"))`
 				);
 				await sql.unsafe(
 					`CREATE INDEX "manual_value_category_idx" ON "${tableName}" ("value", "category")`
@@ -501,7 +523,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(sql, tableName, "category");
 				expect(indexCount).toBe(1);
 			} finally {
 				try {
@@ -544,7 +566,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(sql, tableName, "category");
 				expect(indexCount).toBe(1);
 			} finally {
 				try {
@@ -578,12 +600,14 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				sql = openTestConnection();
 
 				await sql.unsafe(
-					`CREATE TABLE "${tableName}" ("id" VARCHAR(255) PRIMARY KEY, "category" VARCHAR(255), "value" INT)`
+					`CREATE TABLE "${tableName}" ("partitionId" VARCHAR(255) NOT NULL, "id" VARCHAR(255) NOT NULL, "category" VARCHAR(255), "value" INT, PRIMARY KEY ("partitionId", "id"))`
 				);
 				// Force an invalid index: a unique index that a duplicate-violating concurrent
 				// build would leave behind. Simulated directly via catalog update since forcing a
 				// genuine failed CONCURRENTLY build deterministically in a test is impractical.
-				await sql.unsafe(`CREATE INDEX "manual_invalid_cat_idx" ON "${tableName}" ("category")`);
+				await sql.unsafe(
+					`CREATE INDEX "manual_invalid_cat_idx" ON "${tableName}" ("partitionId", "category")`
+				);
 				await sql.unsafe(
 					`UPDATE pg_index SET indisvalid = false
 					WHERE indexrelid = '"manual_invalid_cat_idx"'::regclass`
@@ -591,7 +615,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(sql, tableName, "category");
 				expect(indexCount).toBe(2);
 			} finally {
 				try {
@@ -622,15 +646,15 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				sql = openTestConnection();
 
 				await sql.unsafe(
-					`CREATE TABLE "${tableName}" ("id" VARCHAR(255) PRIMARY KEY, "category" VARCHAR(255), "value" INT)`
+					`CREATE TABLE "${tableName}" ("partitionId" VARCHAR(255) NOT NULL, "id" VARCHAR(255) NOT NULL, "category" VARCHAR(255), "value" INT, PRIMARY KEY ("partitionId", "id"))`
 				);
 				await sql.unsafe(
-					`CREATE INDEX "manual_partial_cat_idx" ON "${tableName}" ("category") WHERE "category" IS NOT NULL`
+					`CREATE INDEX "manual_partial_cat_idx" ON "${tableName}" ("partitionId", "category") WHERE "category" IS NOT NULL`
 				);
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(sql, tableName, "category");
 				expect(indexCount).toBe(2);
 			} finally {
 				try {
@@ -661,15 +685,15 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				sql = openTestConnection();
 
 				await sql.unsafe(
-					`CREATE TABLE "${tableName}" ("id" VARCHAR(255) PRIMARY KEY, "category" VARCHAR(255), "value" INT)`
+					`CREATE TABLE "${tableName}" ("partitionId" VARCHAR(255) NOT NULL, "id" VARCHAR(255) NOT NULL, "category" VARCHAR(255), "value" INT, PRIMARY KEY ("partitionId", "id"))`
 				);
 				await sql.unsafe(
-					`CREATE INDEX "manual_brin_cat_idx" ON "${tableName}" USING brin ("category")`
+					`CREATE INDEX "manual_brin_cat_idx" ON "${tableName}" USING brin ("partitionId", "category")`
 				);
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(sql, tableName, "category");
 				expect(indexCount).toBe(2);
 			} finally {
 				try {
@@ -709,7 +733,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(sql, tableName, "category");
 				expect(indexCount).toBe(1);
 			} finally {
 				try {
@@ -727,7 +751,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 	);
 
 	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
-		"renames its legacy index to the current name",
+		"replaces its legacy index with one led by the partition key",
 		async () => {
 			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_legacyrename_${Date.now()}`;
 			const connector = new PostgreSqlEntityStorageConnector<IndexedTestType>({
@@ -750,12 +774,13 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				await sql.unsafe(`CREATE INDEX "${legacyIndexName}" ON "${tableName}" ("category")`);
 
 				await connector.bootstrap();
-				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+				expect(await indexNamesCoveringColumn(sql, tableName, "category")).toEqual([
 					currentIndexName
 				]);
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([]);
 
 				await connector.bootstrap();
-				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+				expect(await indexNamesCoveringColumn(sql, tableName, "category")).toEqual([
 					currentIndexName
 				]);
 			} finally {
@@ -794,12 +819,15 @@ describe("PostgreSqlEntityStorageConnector", () => {
 
 				await connector.bootstrap();
 				await sql.unsafe(`CREATE INDEX "${legacyIndexName}" ON "${tableName}" ("category")`);
-				expect(await countIndexesLeadingOnColumn(sql, tableName, "category")).toBe(2);
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+					legacyIndexName
+				]);
 
 				await connector.bootstrap();
-				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+				expect(await indexNamesCoveringColumn(sql, tableName, "category")).toEqual([
 					currentIndexName
 				]);
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([]);
 			} finally {
 				try {
 					await sql?.end();
@@ -828,13 +856,18 @@ describe("PostgreSqlEntityStorageConnector", () => {
 			try {
 				sql = openTestConnection();
 				await sql.unsafe(
-					`CREATE TABLE "${tableName}" ("id" VARCHAR(255) PRIMARY KEY, "category" VARCHAR(255), "value" INT)`
+					`CREATE TABLE "${tableName}" ("partitionId" VARCHAR(255) NOT NULL, "id" VARCHAR(255) NOT NULL, "category" VARCHAR(255), "value" INT, PRIMARY KEY ("partitionId", "id"))`
 				);
 				await sql.unsafe(`CREATE INDEX "manual_cat_idx" ON "${tableName}" ("category")`);
 
 				await connector.bootstrap();
+				// The operator's index does not lead with the partition key, so the connector adds
+				// its own alongside it rather than treating the column as already covered.
 				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
 					"manual_cat_idx"
+				]);
+				expect(await indexNamesCoveringColumn(sql, tableName, "category")).toEqual([
+					IndexHelper.generateName(tableName, "category")
 				]);
 			} finally {
 				try {
@@ -852,7 +885,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 	);
 
 	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
-		"renames a legacy index whose name was truncated to the identifier limit",
+		"replaces a legacy index whose name was truncated to the identifier limit",
 		async () => {
 			const tableName = `legacytrunc_${Date.now()}_${"x".repeat(60)}`.slice(0, 58);
 			const connector = new PostgreSqlEntityStorageConnector<IndexedTestType>({
@@ -878,9 +911,10 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				]);
 
 				await connector.bootstrap();
-				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+				expect(await indexNamesCoveringColumn(sql, tableName, "category")).toEqual([
 					currentIndexName
 				]);
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([]);
 			} finally {
 				try {
 					await sql?.end();
@@ -919,9 +953,12 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				await sql.unsafe(`CREATE UNIQUE INDEX "${legacyIndexName}" ON "${tableName}" ("category")`);
 
 				await connector.bootstrap();
-				expect((await indexNamesLeadingOnColumn(sql, tableName, "category")).sort()).toEqual(
-					[currentIndexName, legacyIndexName].sort()
-				);
+				expect(await indexNamesCoveringColumn(sql, tableName, "category")).toEqual([
+					currentIndexName
+				]);
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+					legacyIndexName
+				]);
 			} finally {
 				try {
 					await sql?.end();
@@ -962,9 +999,12 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				);
 
 				await connector.bootstrap();
-				expect((await indexNamesLeadingOnColumn(sql, tableName, "category")).sort()).toEqual(
-					[currentIndexName, legacyIndexName].sort()
-				);
+				expect(await indexNamesCoveringColumn(sql, tableName, "category")).toEqual([
+					currentIndexName
+				]);
+				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toEqual([
+					legacyIndexName
+				]);
 			} finally {
 				try {
 					await sql?.end();
@@ -994,13 +1034,15 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				sql = openTestConnection();
 
 				await sql.unsafe(
-					`CREATE TABLE "${tableName}" ("id" VARCHAR(255) PRIMARY KEY, "category" VARCHAR(255), "value" INT)`
+					`CREATE TABLE "${tableName}" ("partitionId" VARCHAR(255) NOT NULL, "id" VARCHAR(255) NOT NULL, "category" VARCHAR(255), "value" INT, PRIMARY KEY ("partitionId", "id"))`
 				);
-				await sql.unsafe(`CREATE INDEX "manual_desc_cat_idx" ON "${tableName}" ("category" DESC)`);
+				await sql.unsafe(
+					`CREATE INDEX "manual_desc_cat_idx" ON "${tableName}" ("partitionId", "category" DESC)`
+				);
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(sql, tableName, "category");
 				expect(indexCount).toBe(1);
 			} finally {
 				try {
@@ -1031,15 +1073,15 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				sql = openTestConnection();
 
 				await sql.unsafe(
-					`CREATE TABLE "${tableName}" ("id" VARCHAR(255) PRIMARY KEY, "category" VARCHAR(255), "value" INT)`
+					`CREATE TABLE "${tableName}" ("partitionId" VARCHAR(255) NOT NULL, "id" VARCHAR(255) NOT NULL, "category" VARCHAR(255), "value" INT, PRIMARY KEY ("partitionId", "id"))`
 				);
 				await sql.unsafe(
-					`CREATE INDEX "manual_cat_value_idx" ON "${tableName}" ("category", "value")`
+					`CREATE INDEX "manual_cat_value_idx" ON "${tableName}" ("partitionId", "category", "value")`
 				);
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(sql, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(sql, tableName, "category");
 				expect(indexCount).toBe(1);
 			} finally {
 				try {
@@ -1075,11 +1117,11 @@ describe("PostgreSqlEntityStorageConnector", () => {
 
 				// Create the table from a schema which does not index the category column.
 				expect(await unindexed.bootstrap()).toBe(true);
-				expect(await countIndexesLeadingOnColumn(sql, tableName, "category")).toBe(0);
+				expect(await countIndexesCoveringColumn(sql, tableName, "category")).toBe(0);
 
 				// Bootstrapping the same table from a schema which does index it must add the index.
 				expect(await indexed.bootstrap()).toBe(true);
-				expect(await indexNamesLeadingOnColumn(sql, tableName, "category")).toContain(
+				expect(await indexNamesCoveringColumn(sql, tableName, "category")).toContain(
 					IndexHelper.generateName(tableName, "category")
 				);
 
@@ -1090,7 +1132,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 
 				// A further bootstrap must not create the index a second time.
 				expect(await indexed.bootstrap()).toBe(true);
-				expect(await countIndexesLeadingOnColumn(sql, tableName, "category")).toBe(1);
+				expect(await countIndexesCoveringColumn(sql, tableName, "category")).toBe(1);
 			} finally {
 				try {
 					await sql?.end();
@@ -1127,10 +1169,12 @@ describe("PostgreSqlEntityStorageConnector", () => {
 
 				// The group order and directions come from the index entries, not the schema order.
 				expect(indexColumns[compositeIndexName(tableName, "categoryStatus")]).toEqual([
+					`${PARTITION_KEY} ASC`,
 					"category ASC",
 					"status DESC"
 				]);
 				expect(indexColumns[compositeIndexName(tableName, "statusValue")]).toEqual([
+					`${PARTITION_KEY} ASC`,
 					"value DESC",
 					"status ASC"
 				]);

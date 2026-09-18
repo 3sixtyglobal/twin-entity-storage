@@ -132,6 +132,13 @@ describe("PostgreSqlEntityStorageConnector - maxLength column mapping", () => {
 		});
 	});
 
+	test("bounds the partition key which leads the primary key and every index", async () => {
+		expect(await columnType(sql, tableName, "partitionId")).toEqual({
+			dataType: "character varying",
+			maxLength: 255
+		});
+	});
+
 	test("maps a secondary index with a maxLength to VARCHAR of that length", async () => {
 		expect(await columnType(sql, tableName, "indexed")).toEqual({
 			dataType: "character varying",

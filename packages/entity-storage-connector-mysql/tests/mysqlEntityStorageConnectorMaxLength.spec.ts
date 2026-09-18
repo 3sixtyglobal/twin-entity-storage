@@ -30,12 +30,32 @@ async function columnType(
 
 /**
  * Read the index prefix length used for a column.
+ * The connector leads each index with the partition key, so the column follows it.
+ * @param pool The pool to query with.
+ * @param tableName The table to inspect.
+ * @param columnName The column that must be the second key column of the index.
+ * @returns The prefix length, or undefined when the column is indexed in full.
+ */
+async function indexPrefixLength(
+	pool: Pool,
+	tableName: string,
+	columnName: string
+): Promise<number | undefined> {
+	const [rows] = await pool.query(
+		"SELECT sub_part AS subPart FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND column_name = ? AND seq_in_index = 2 LIMIT 1",
+		[TEST_MYSQL_CONFIG.database, tableName, columnName]
+	);
+	return Coerce.number((rows as { subPart: number | null }[])[0]?.subPart);
+}
+
+/**
+ * Read the index prefix length used for a column which leads an index.
  * @param pool The pool to query with.
  * @param tableName The table to inspect.
  * @param columnName The column that must be the leading key column of the index.
  * @returns The prefix length, or undefined when the column is indexed in full.
  */
-async function indexPrefixLength(
+async function indexLeadingPrefixLength(
 	pool: Pool,
 	tableName: string,
 	columnName: string
@@ -143,6 +163,14 @@ describe("MySqlEntityStorageConnector - maxLength column mapping", () => {
 			dataType: "varchar",
 			maxLength: 64
 		});
+	});
+
+	test("bounds the partition key so it can lead an index without a prefix", async () => {
+		expect(await columnType(pool, tableName, "partitionId")).toEqual({
+			dataType: "varchar",
+			maxLength: 255
+		});
+		expect(await indexLeadingPrefixLength(pool, tableName, "partitionId")).toBeUndefined();
 	});
 
 	test("maxLength takes precedence over the uuid format mapping", async () => {

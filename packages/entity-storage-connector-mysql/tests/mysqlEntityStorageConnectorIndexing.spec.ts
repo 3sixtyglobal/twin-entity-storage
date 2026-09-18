@@ -1,7 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
-import { Coerce } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -36,27 +35,58 @@ const SUPPORT_INDEX_UPDATE = true;
 // Set to false for connectors which cannot create a composite index over a schema index group.
 const SUPPORT_COMPOSITE_INDEXING = true;
 
+// The column the connector partitions on, which leads the primary key and every index it creates.
+const PARTITION_KEY = "partitionId";
+
 /**
- * Count how many indexes lead on the given column for a table.
+ * List the names of the indexes that cover the given column for a table, meaning the partition
+ * key leads the index and the column follows it.
  * @param pool The pool to query with.
  * @param tableName The table to inspect.
- * @param columnName The column that must be the leading (first) key column of the index.
- * @returns The number of indexes whose leading column is columnName.
+ * @param columnName The column that must be the second key column of the index.
+ * @returns The names of the indexes which cover columnName.
  */
-async function countIndexesLeadingOnColumn(
+async function indexNamesCoveringColumn(
+	pool: Pool,
+	tableName: string,
+	columnName: string
+): Promise<string[]> {
+	const [rows] = await pool.query(
+		`SELECT DISTINCT partitioned.index_name AS indexName
+		FROM INFORMATION_SCHEMA.STATISTICS partitioned
+		JOIN INFORMATION_SCHEMA.STATISTICS covered
+			ON covered.table_schema = partitioned.table_schema
+			AND covered.table_name = partitioned.table_name
+			AND covered.index_name = partitioned.index_name
+		WHERE partitioned.table_schema = ?
+			AND partitioned.table_name = ?
+			AND partitioned.column_name = ?
+			AND partitioned.seq_in_index = 1
+			AND covered.column_name = ?
+			AND covered.seq_in_index = 2`,
+		[TEST_MYSQL_CONFIG.database, tableName, PARTITION_KEY, columnName]
+	);
+	return (rows as { indexName: string }[]).map(row => row.indexName);
+}
+
+/**
+ * Count how many indexes cover the given column for a table.
+ * @param pool The pool to query with.
+ * @param tableName The table to inspect.
+ * @param columnName The column that must be the second key column of the index.
+ * @returns The number of indexes which cover columnName.
+ */
+async function countIndexesCoveringColumn(
 	pool: Pool,
 	tableName: string,
 	columnName: string
 ): Promise<number> {
-	const [rows] = await pool.query(
-		"SELECT COUNT(DISTINCT index_name) AS indexCount FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND column_name = ? AND seq_in_index = 1",
-		[TEST_MYSQL_CONFIG.database, tableName, columnName]
-	);
-	return Coerce.number((rows as { indexCount: number }[])[0].indexCount) ?? 0;
+	return (await indexNamesCoveringColumn(pool, tableName, columnName)).length;
 }
 
 /**
- * List the names of the indexes that lead on the given column for a table.
+ * List the names of the indexes that lead on the given column for a table, which is the shape an
+ * operator's own index takes rather than the shape the connector creates.
  * @param pool The pool to query with.
  * @param tableName The table to inspect.
  * @param columnName The column that must be the leading (first) key column of the index.
@@ -305,7 +335,7 @@ describe("MySqlEntityStorageConnector", () => {
 					database: TEST_MYSQL_CONFIG.database
 				});
 
-				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+				expect(await indexNamesCoveringColumn(pool, tableName, "category")).toEqual([
 					IndexHelper.generateName(tableName, "category")
 				]);
 
@@ -355,7 +385,7 @@ describe("MySqlEntityStorageConnector", () => {
 
 				// A sortDirection alone marks the property as sortable, which needs the same index
 				// an isSecondary property gets.
-				expect(await indexNamesLeadingOnColumn(pool, tableName, "sorted")).toEqual([
+				expect(await indexNamesCoveringColumn(pool, tableName, "sorted")).toEqual([
 					IndexHelper.generateName(tableName, "sorted")
 				]);
 
@@ -407,7 +437,7 @@ describe("MySqlEntityStorageConnector", () => {
 				password: TEST_MYSQL_CONFIG.password,
 				database: TEST_MYSQL_CONFIG.database
 			});
-			const indexCount = await countIndexesLeadingOnColumn(pool, tableName, "category");
+			const indexCount = await countIndexesCoveringColumn(pool, tableName, "category");
 			expect(indexCount).toBe(1);
 		} finally {
 			try {
@@ -442,15 +472,15 @@ describe("MySqlEntityStorageConnector", () => {
 				});
 
 				await pool.query(
-					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`id\` VARCHAR(255) PRIMARY KEY, \`category\` VARCHAR(255), \`value\` INT)`
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` VARCHAR(255) NOT NULL, \`id\` VARCHAR(255) NOT NULL, \`category\` VARCHAR(255), \`value\` INT, PRIMARY KEY (\`partitionId\`, \`id\`))`
 				);
 				await pool.query(
-					`CREATE INDEX \`manual_cat_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255))`
+					`CREATE INDEX \`manual_cat_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\`, \`category\`(255))`
 				);
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(pool, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(pool, tableName, "category");
 				expect(indexCount).toBe(1);
 			} finally {
 				try {
@@ -487,7 +517,7 @@ describe("MySqlEntityStorageConnector", () => {
 				});
 
 				await pool.query(
-					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`id\` VARCHAR(255) PRIMARY KEY, \`category\` VARCHAR(255), \`value\` INT)`
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` VARCHAR(255) NOT NULL, \`id\` VARCHAR(255) NOT NULL, \`category\` VARCHAR(255), \`value\` INT, PRIMARY KEY (\`partitionId\`, \`id\`))`
 				);
 				await pool.query(
 					`CREATE INDEX \`manual_value_category_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`value\`, \`category\`(255))`
@@ -495,7 +525,7 @@ describe("MySqlEntityStorageConnector", () => {
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(pool, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(pool, tableName, "category");
 				expect(indexCount).toBe(1);
 			} finally {
 				try {
@@ -532,10 +562,10 @@ describe("MySqlEntityStorageConnector", () => {
 				});
 
 				await pool.query(
-					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`id\` VARCHAR(255) PRIMARY KEY, \`category\` VARCHAR(255), \`value\` INT)`
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` VARCHAR(255) NOT NULL, \`id\` VARCHAR(255) NOT NULL, \`category\` VARCHAR(255), \`value\` INT, PRIMARY KEY (\`partitionId\`, \`id\`))`
 				);
 				await pool.query(
-					`CREATE INDEX \`manual_invisible_cat_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255))`
+					`CREATE INDEX \`manual_invisible_cat_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\`, \`category\`(255))`
 				);
 				await pool.query(
 					`ALTER TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` ALTER INDEX \`manual_invisible_cat_idx\` INVISIBLE`
@@ -543,7 +573,7 @@ describe("MySqlEntityStorageConnector", () => {
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(pool, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(pool, tableName, "category");
 				expect(indexCount).toBe(2);
 			} finally {
 				try {
@@ -580,7 +610,7 @@ describe("MySqlEntityStorageConnector", () => {
 				});
 
 				await pool.query(
-					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`id\` VARCHAR(255) PRIMARY KEY, \`category\` TEXT, \`value\` INT)`
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` VARCHAR(255) NOT NULL, \`id\` VARCHAR(255) NOT NULL, \`category\` TEXT, \`value\` INT, PRIMARY KEY (\`partitionId\`, \`id\`))`
 				);
 				await pool.query(
 					`CREATE FULLTEXT INDEX \`manual_fulltext_cat_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`)`
@@ -588,8 +618,14 @@ describe("MySqlEntityStorageConnector", () => {
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(pool, tableName, "category");
-				expect(indexCount).toBe(2);
+				// A FULLTEXT index serves neither the partition filter nor an equality lookup, so
+				// the connector still creates its own and leaves the operator's in place.
+				expect(await indexNamesCoveringColumn(pool, tableName, "category")).toEqual([
+					IndexHelper.generateName(tableName, "category")
+				]);
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+					"manual_fulltext_cat_idx"
+				]);
 			} finally {
 				try {
 					await pool?.end();
@@ -638,7 +674,7 @@ describe("MySqlEntityStorageConnector", () => {
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(pool, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(pool, tableName, "category");
 				expect(indexCount).toBe(1);
 			} finally {
 				try {
@@ -656,7 +692,7 @@ describe("MySqlEntityStorageConnector", () => {
 	);
 
 	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
-		"renames its legacy index to the current name",
+		"replaces its legacy index with one led by the partition key",
 		async () => {
 			const tableName = `${TEST_MYSQL_CONFIG.tableName}_legacyrename_${Date.now()}`;
 			const connector = new MySqlEntityStorageConnector<IndexedTestType>({
@@ -685,12 +721,13 @@ describe("MySqlEntityStorageConnector", () => {
 				);
 
 				await connector.bootstrap();
-				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+				expect(await indexNamesCoveringColumn(pool, tableName, "category")).toEqual([
 					currentIndexName
 				]);
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([]);
 
 				await connector.bootstrap();
-				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+				expect(await indexNamesCoveringColumn(pool, tableName, "category")).toEqual([
 					currentIndexName
 				]);
 			} finally {
@@ -733,12 +770,15 @@ describe("MySqlEntityStorageConnector", () => {
 				await pool.query(
 					`CREATE INDEX \`${legacyIndexName}\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255))`
 				);
-				expect(await countIndexesLeadingOnColumn(pool, tableName, "category")).toBe(2);
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+					legacyIndexName
+				]);
 
 				await connector.bootstrap();
-				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+				expect(await indexNamesCoveringColumn(pool, tableName, "category")).toEqual([
 					currentIndexName
 				]);
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([]);
 			} finally {
 				try {
 					await pool?.end();
@@ -773,15 +813,20 @@ describe("MySqlEntityStorageConnector", () => {
 					database: TEST_MYSQL_CONFIG.database
 				});
 				await pool.query(
-					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`id\` VARCHAR(255) PRIMARY KEY, \`category\` VARCHAR(255), \`value\` INT)`
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` VARCHAR(255) NOT NULL, \`id\` VARCHAR(255) NOT NULL, \`category\` VARCHAR(255), \`value\` INT, PRIMARY KEY (\`partitionId\`, \`id\`))`
 				);
 				await pool.query(
 					`CREATE INDEX \`manual_cat_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255))`
 				);
 
 				await connector.bootstrap();
+				// The operator's index does not lead with the partition key, so the connector adds
+				// its own alongside it rather than treating the column as already covered.
 				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
 					"manual_cat_idx"
+				]);
+				expect(await indexNamesCoveringColumn(pool, tableName, "category")).toEqual([
+					IndexHelper.generateName(tableName, "category")
 				]);
 			} finally {
 				try {
@@ -825,9 +870,12 @@ describe("MySqlEntityStorageConnector", () => {
 				);
 
 				await connector.bootstrap();
-				expect((await indexNamesLeadingOnColumn(pool, tableName, "category")).sort()).toEqual(
-					[currentIndexName, legacyIndexName].sort()
-				);
+				expect(await indexNamesCoveringColumn(pool, tableName, "category")).toEqual([
+					currentIndexName
+				]);
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+					legacyIndexName
+				]);
 			} finally {
 				try {
 					await pool?.end();
@@ -870,9 +918,12 @@ describe("MySqlEntityStorageConnector", () => {
 				);
 
 				await connector.bootstrap();
-				expect((await indexNamesLeadingOnColumn(pool, tableName, "category")).sort()).toEqual(
-					[currentIndexName, legacyIndexName].sort()
-				);
+				expect(await indexNamesCoveringColumn(pool, tableName, "category")).toEqual([
+					currentIndexName
+				]);
+				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toEqual([
+					legacyIndexName
+				]);
 			} finally {
 				try {
 					await pool?.end();
@@ -908,15 +959,15 @@ describe("MySqlEntityStorageConnector", () => {
 				});
 
 				await pool.query(
-					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`id\` VARCHAR(255) PRIMARY KEY, \`category\` VARCHAR(255), \`value\` INT)`
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` VARCHAR(255) NOT NULL, \`id\` VARCHAR(255) NOT NULL, \`category\` VARCHAR(255), \`value\` INT, PRIMARY KEY (\`partitionId\`, \`id\`))`
 				);
 				await pool.query(
-					`CREATE INDEX \`manual_desc_cat_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255) DESC)`
+					`CREATE INDEX \`manual_desc_cat_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\`, \`category\`(255) DESC)`
 				);
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(pool, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(pool, tableName, "category");
 				expect(indexCount).toBe(1);
 			} finally {
 				try {
@@ -953,15 +1004,15 @@ describe("MySqlEntityStorageConnector", () => {
 				});
 
 				await pool.query(
-					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`id\` VARCHAR(255) PRIMARY KEY, \`category\` VARCHAR(255), \`value\` INT)`
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` VARCHAR(255) NOT NULL, \`id\` VARCHAR(255) NOT NULL, \`category\` VARCHAR(255), \`value\` INT, PRIMARY KEY (\`partitionId\`, \`id\`))`
 				);
 				await pool.query(
-					`CREATE INDEX \`manual_cat_value_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`category\`(255), \`value\`)`
+					`CREATE INDEX \`manual_cat_value_idx\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\`, \`category\`(255), \`value\`)`
 				);
 
 				await connector.bootstrap();
 
-				const indexCount = await countIndexesLeadingOnColumn(pool, tableName, "category");
+				const indexCount = await countIndexesCoveringColumn(pool, tableName, "category");
 				expect(indexCount).toBe(1);
 			} finally {
 				try {
@@ -1003,11 +1054,11 @@ describe("MySqlEntityStorageConnector", () => {
 
 				// Create the table from a schema which does not index the category column.
 				expect(await unindexed.bootstrap()).toBe(true);
-				expect(await countIndexesLeadingOnColumn(pool, tableName, "category")).toBe(0);
+				expect(await countIndexesCoveringColumn(pool, tableName, "category")).toBe(0);
 
 				// Bootstrapping the same table from a schema which does index it must add the index.
 				expect(await indexed.bootstrap()).toBe(true);
-				expect(await indexNamesLeadingOnColumn(pool, tableName, "category")).toContain(
+				expect(await indexNamesCoveringColumn(pool, tableName, "category")).toContain(
 					IndexHelper.generateName(tableName, "category")
 				);
 
@@ -1018,7 +1069,7 @@ describe("MySqlEntityStorageConnector", () => {
 
 				// A further bootstrap must not create the index a second time.
 				expect(await indexed.bootstrap()).toBe(true);
-				expect(await countIndexesLeadingOnColumn(pool, tableName, "category")).toBe(1);
+				expect(await countIndexesCoveringColumn(pool, tableName, "category")).toBe(1);
 			} finally {
 				try {
 					await pool?.end();
@@ -1059,12 +1110,15 @@ describe("MySqlEntityStorageConnector", () => {
 				});
 				const indexColumns = await indexColumnsByName(pool, tableName);
 
-				// The group order and directions come from the index entries, not the schema order.
+				// The partition key leads the index, then the group order and directions come from
+				// the index entries, not the schema order.
 				expect(indexColumns[compositeIndexName(tableName, "categoryStatus")]).toEqual([
+					`${PARTITION_KEY} ASC`,
 					"category ASC",
 					"status DESC"
 				]);
 				expect(indexColumns[compositeIndexName(tableName, "statusValue")]).toEqual([
+					`${PARTITION_KEY} ASC`,
 					"value DESC",
 					"status ASC"
 				]);
