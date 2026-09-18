@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.1-next.4](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-file-v0.10.1-next.3...entity-storage-connector-file-v0.10.1-next.4) (2026-09-18)
+
+
+### Features
+
+* add StartsWith comparison operator to all connectors ([#282](https://github.com/iotaledger/twin-entity-storage/issues/282)) ([fbb0b4a](https://github.com/iotaledger/twin-entity-storage/commit/fbb0b4a1a3d3f8ba80e8371bd2ec3a75260b9dd3))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.10.1-next.3 to 0.10.1-next.4
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.10.1-next.3 to 0.10.1-next.4
+
 ## [0.10.1-next.3](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-file-v0.10.1-next.2...entity-storage-connector-file-v0.10.1-next.3) (2026-09-18)
 
 
