@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.1-next.3](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.10.1-next.2...entity-storage-service-v0.10.1-next.3) (2026-09-18)
+
+
+### Features
+
+* index include partitionid ([#280](https://github.com/iotaledger/twin-entity-storage/issues/280)) ([26d36e1](https://github.com/iotaledger/twin-entity-storage/commit/26d36e1c40207feb03c797b0ab00b485a1ae5cda))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.10.1-next.2 to 0.10.1-next.3
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.10.1-next.2 to 0.10.1-next.3
+
 ## [0.10.1-next.2](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.10.1-next.1...entity-storage-service-v0.10.1-next.2) (2026-09-17)
 
 
