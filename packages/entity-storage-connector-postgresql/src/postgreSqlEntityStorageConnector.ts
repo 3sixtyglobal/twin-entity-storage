@@ -37,10 +37,12 @@ import {
 import {
 	ConnectionHelper,
 	EntityStorageHelper,
-	IndexHelper,
-	MigrationHelper,
+	type IEntityStorageConnector,
+	type IEntityStorageJoinOptions,
 	type IEntityStorageMigrationConnector,
-	type IMigrationOptions
+	type IMigrationOptions,
+	IndexHelper,
+	MigrationHelper
 } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
@@ -89,6 +91,12 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
+	 * The column the group ranking is emitted as when picking one row per group.
+	 * @internal
+	 */
+	private static readonly _GROUP_RANK_COLUMN: string = "__groupRank";
 
 	/**
 	 * PostgreSQL's maximum identifier length in characters; longer names are silently truncated.
@@ -1203,6 +1211,54 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Find all the entities which match the conditions, attaching to each one the entities from a
+	 * second storage connector whose join property matches. The join behaves like a left join by
+	 * default, a primary entity with no matches is still returned with an empty joined list, unless
+	 * joinRequired asks for an inner join and those entities are left out altogether. Both connectors
+	 * must be PostgreSQL connectors reading from the same database so the work can be done in a
+	 * single statement.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The properties to join on, the conditions, sort order, projection and
+	 * paging for the primary entities, the optional grouping and group conditions, and the optional
+	 * conditions, sort order and projection for the joined entities.
+	 * @returns All the entities for the storage matching the conditions with their joined entities,
+	 * and a cursor which can be used to request more entities.
+	 * @throws GeneralError if the join connector does not read from the same server and database.
+	 */
+	public async queryJoin<U>(
+		joinConnector: IEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>
+	): Promise<{ entities: (Partial<T> & { joined: Partial<U>[] })[]; cursor?: string }> {
+		Guards.object<IEntityStorageConnector<U>>(
+			PostgreSqlEntityStorageConnector.CLASS_NAME,
+			nameof(joinConnector),
+			joinConnector
+		);
+
+		// The join runs as one statement against this connector's connection, so the other side has
+		// to be a PostgreSQL connector reading from the same server and database.
+		const typedJoinConnector = joinConnector as PostgreSqlEntityStorageConnector<U>;
+		if (
+			joinConnector.className?.() !== PostgreSqlEntityStorageConnector.CLASS_NAME ||
+			typedJoinConnector._config?.host !== this._config.host ||
+			typedJoinConnector._config?.port !== this._config.port ||
+			typedJoinConnector._config?.database !== this._config.database
+		) {
+			throw new GeneralError(PostgreSqlEntityStorageConnector.CLASS_NAME, "joinConnectorMismatch", {
+				database: this._config.database
+			});
+		}
+
+		EntityStorageHelper.validateJoinOptions(
+			this._entitySchema,
+			typedJoinConnector._entitySchema,
+			joinOptions
+		);
+
+		return this.queryJoinPage(typedJoinConnector, joinOptions, joinOptions.groupProperty);
+	}
+
+	/**
 	 * Count all the entities which match the conditions.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
@@ -1237,6 +1293,583 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				err
 			);
 		}
+	}
+
+	/**
+	 * Read a page of primary entities and their joined entities in a single statement. The page of
+	 * primary rows is selected in a derived table so the limit and the cursor apply to the primary
+	 * entities rather than to the rows the join multiplies them into. When grouping, the derived
+	 * table keeps only the first row of each group in the sort order, which makes one row stand for
+	 * the whole group and lets the same key set cursor step past every row the group holds.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The join configuration.
+	 * @param groupProperty The optional property to group the primary entities by.
+	 * @returns The entities with their joined entities, and the next page cursor.
+	 * @internal
+	 */
+	private async queryJoinPage<U>(
+		joinConnector: PostgreSqlEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>,
+		groupProperty: keyof T | undefined
+	): Promise<{ entities: (Partial<T> & { joined: Partial<U>[] })[]; cursor?: string }> {
+		const returnSize = joinOptions.limit ?? PostgreSqlEntityStorageConnector._DEFAULT_LIMIT;
+		const pkPropName = String(this._primaryKeyProperty.property);
+		const joinColumn = String(joinOptions.property);
+		const joinedPrimaryKey = String(joinConnector._primaryKeyProperty.property);
+
+		const normalizedOptions = EntityStorageHelper.normalizeJoinOptions(joinOptions);
+		const keySetValues = EntityStorageHelper.decodeCursor<T, U, unknown[]>(
+			normalizedOptions,
+			joinOptions.cursor
+		);
+
+		let sql = "";
+		try {
+			const keySetCols = this.buildKeySetColumns(joinOptions.sortProperties);
+
+			// The key set columns, the join column and the group column are needed to page, to join
+			// and to re-attach the members of a group, so they are read even when the caller did not
+			// ask for them, then removed from the entities.
+			const primary = this.buildColumnSelection(
+				this._entitySchema,
+				joinOptions.properties,
+				keySetCols
+					.map(c => c.prop)
+					.concat(joinColumn)
+					.concat(Is.empty(groupProperty) ? [] : [String(groupProperty)])
+			);
+			const joined = this.buildColumnSelection(
+				joinConnector._entitySchema,
+				joinOptions.joinProperties,
+				[joinedPrimaryKey]
+			);
+
+			const partitionKey = await this.resolvePartitionKey();
+			const values: ParameterOrJSON<never>[] = [];
+
+			// PostgreSQL numbers its placeholders, so every clause is built in the order it appears
+			// in the statement and its values are appended as it goes.
+			const where = this.buildWhereClause(
+				joinOptions.conditions,
+				partitionKey,
+				"t",
+				values.length + 1
+			);
+			values.push(...where.values);
+			const whereClauses = [...where.whereClauses];
+
+			if (!Is.empty(groupProperty)) {
+				whereClauses.push(`t."${String(groupProperty)}" IS NOT NULL`);
+			}
+
+			const narrowing = await this.buildNarrowingClauses(
+				joinConnector,
+				joinOptions,
+				groupProperty,
+				partitionKey,
+				"t",
+				values.length + 1
+			);
+			whereClauses.push(...narrowing.clauses);
+			values.push(...narrowing.values);
+
+			const columnList = primary.columns.map(c => `"${c}"`).join(", ");
+			const pageOrderBy = keySetCols.map(c => `"${c.prop}" ${c.asc ? "ASC" : "DESC"}`).join(", ");
+
+			const keySet = this.buildKeySetClause(keySetCols, keySetValues, values.length + 1);
+			values.push(...keySet.values);
+
+			let pageSql: string;
+			if (Is.empty(groupProperty)) {
+				pageSql = `SELECT ${columnList} FROM "${this._config.tableName}" AS t WHERE ${[...whereClauses, ...keySet.clauses].join(" AND ")} ORDER BY ${pageOrderBy} LIMIT ${returnSize + 1}`;
+			} else {
+				// Ranking inside each group and keeping the first row collapses the group to the one
+				// row the result stands on, so the ordering, the projection and the cursor all work
+				// on ordinary rows rather than on a distinct list of group values.
+				const rankedSql = `SELECT ${columnList}, ROW_NUMBER() OVER (PARTITION BY t."${String(groupProperty)}" ORDER BY ${keySetCols.map(c => `t."${c.prop}" ${c.asc ? "ASC" : "DESC"}`).join(", ")}) AS "${PostgreSqlEntityStorageConnector._GROUP_RANK_COLUMN}" FROM "${this._config.tableName}" AS t WHERE ${whereClauses.join(" AND ")}`;
+				const rankedWhere = [
+					`ranked."${PostgreSqlEntityStorageConnector._GROUP_RANK_COLUMN}" = 1`,
+					...keySet.clauses
+				];
+				pageSql = `SELECT ${columnList} FROM (${rankedSql}) AS ranked WHERE ${rankedWhere.join(" AND ")} ORDER BY ${pageOrderBy} LIMIT ${returnSize + 1}`;
+			}
+
+			// A group stands on one row for ordering and paging, but its joined list has to hold the
+			// matches of every entity in the group, so the other members are re-attached to the page
+			// and the join hangs off them. The same joined entity reached through more than one
+			// member is collapsed when the rows are collected.
+			let fromClause = `(${pageSql}) AS p`;
+			let joinFromAlias = "p";
+
+			if (!Is.empty(groupProperty)) {
+				const members = this.buildWhereClause(
+					joinOptions.conditions,
+					partitionKey,
+					"m",
+					values.length + 1
+				);
+				values.push(...members.values);
+				const memberNarrowing = await this.buildNarrowingClauses(
+					joinConnector,
+					joinOptions,
+					undefined,
+					partitionKey,
+					"m",
+					values.length + 1
+				);
+				values.push(...memberNarrowing.values);
+
+				fromClause += ` LEFT JOIN "${this._config.tableName}" AS m ON ${[
+					`m."${String(groupProperty)}" = p."${String(groupProperty)}"`,
+					...members.whereClauses,
+					...memberNarrowing.clauses
+				].join(" AND ")}`;
+				joinFromAlias = "m";
+			}
+
+			const join = await joinConnector.buildJoinClause(
+				String(joinOptions.joinProperty),
+				joinOptions.joinConditions,
+				"j",
+				joinFromAlias,
+				joinColumn,
+				values.length + 1
+			);
+			values.push(...join.values);
+
+			// PostgreSQL returns a flat row, so each column is aliased by position and mapped back
+			// afterwards rather than relying on the table it came from.
+			const selectClause = primary.columns
+				.map((c, i) => `p."${c}" AS "p${i}"`)
+				.concat(joined.columns.map((c, i) => `j."${c}" AS "j${i}"`))
+				.join(", ");
+
+			const outerOrderBy = keySetCols
+				.map(c => `p."${c.prop}" ${c.asc ? "ASC" : "DESC"}`)
+				.concat(this.buildJoinOrderBy(joinOptions, "j"))
+				.join(", ");
+
+			sql = `SELECT ${selectClause} FROM ${fromClause} LEFT JOIN "${joinConnector._config.tableName}" AS j ON ${join.clause} ORDER BY ${outerOrderBy}`;
+
+			const dbConnection = await this.getClient();
+			const rows = await dbConnection.unsafe(sql, values);
+
+			const groups = this.collectJoinRows(
+				rows as { [alias: string]: unknown }[],
+				primary.columns,
+				joined.columns,
+				pkPropName,
+				joinedPrimaryKey
+			);
+
+			const hasMore = groups.length > returnSize;
+			const pageGroups = hasMore ? groups.slice(0, returnSize) : groups;
+
+			const entities: (Partial<T> & { joined: Partial<U>[] })[] = [];
+			for (const group of pageGroups) {
+				const entity = this.prepareJoinEntity<T>(group.key, this._entitySchema, primary.internal);
+				entities.push({
+					...entity,
+					joined: group.joined.map(j =>
+						this.prepareJoinEntity<U>(j, joinConnector._entitySchema, joined.internal)
+					)
+				});
+			}
+
+			let nextCursor: string | undefined;
+			if (hasMore && pageGroups.length > 0) {
+				const lastRow = pageGroups[pageGroups.length - 1].key;
+				nextCursor = EntityStorageHelper.encodeCursor(
+					normalizedOptions,
+					keySetCols.map(c => lastRow[c.prop])
+				);
+			}
+
+			return { entities, cursor: nextCursor };
+		} catch (err) {
+			throw new GeneralError(
+				PostgreSqlEntityStorageConnector.CLASS_NAME,
+				"queryJoinFailed",
+				{ sql },
+				err
+			);
+		}
+	}
+
+	/**
+	 * Build the clauses which narrow the rows a page is built from, beyond the plain conditions.
+	 * An inner join requires the row to have at least one joined entity, and a group condition
+	 * requires the group the row belongs to to hold an entity which matches it.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The join configuration.
+	 * @param groupProperty The optional property the entities are grouped by.
+	 * @param partitionKey The partition key of this connector.
+	 * @param alias The alias of the row being narrowed.
+	 * @param startIndex The number the first placeholder takes.
+	 * @returns The clauses and their bound values.
+	 * @internal
+	 */
+	private async buildNarrowingClauses<U>(
+		joinConnector: PostgreSqlEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>,
+		groupProperty: keyof T | undefined,
+		partitionKey: string | undefined,
+		alias: string,
+		startIndex: number
+	): Promise<{ clauses: string[]; values: ParameterOrJSON<never>[] }> {
+		const clauses: string[] = [];
+		const values: ParameterOrJSON<never>[] = [];
+
+		if (joinOptions.joinRequired ?? false) {
+			const exists = await joinConnector.buildJoinExistsClause(
+				String(joinOptions.joinProperty),
+				joinOptions.joinConditions,
+				"jx",
+				alias,
+				String(joinOptions.property),
+				startIndex + values.length
+			);
+			clauses.push(exists.clause);
+			values.push(...exists.values);
+		}
+
+		if (!Is.empty(groupProperty) && Is.arrayValue(joinOptions.groupConditions)) {
+			const groupColumn = String(groupProperty);
+			for (let i = 0; i < joinOptions.groupConditions.length; i++) {
+				const memberAlias = `gx${i}`;
+				const group = this.buildWhereClause(
+					joinOptions.groupConditions[i],
+					partitionKey,
+					memberAlias,
+					startIndex + values.length
+				);
+				clauses.push(
+					`EXISTS (SELECT 1 FROM "${this._config.tableName}" AS ${memberAlias} WHERE ${memberAlias}."${groupColumn}" = ${alias}."${groupColumn}" AND ${group.whereClauses.join(" AND ")})`
+				);
+				values.push(...group.values);
+			}
+		}
+
+		return { clauses, values };
+	}
+
+	/**
+	 * Build the clause which requires a primary entity to have at least one joined entity. Called
+	 * on the connector holding the joined entities so its partition key and property types apply.
+	 * @param joinProperty The column on this connector's table to join to.
+	 * @param joinConditions The optional conditions to match for the joined entities.
+	 * @param alias The alias of the joined table inside the clause.
+	 * @param primaryAlias The alias of the primary entity being narrowed.
+	 * @param primaryColumn The column on the primary entity to join from.
+	 * @param startIndex The number the first placeholder takes.
+	 * @returns The clause and its bound values.
+	 * @internal
+	 */
+	private async buildJoinExistsClause(
+		joinProperty: string,
+		joinConditions: EntityCondition<T> | undefined,
+		alias: string,
+		primaryAlias: string,
+		primaryColumn: string,
+		startIndex: number
+	): Promise<{ clause: string; values: ParameterOrJSON<never>[] }> {
+		const partitionKey = await this.resolvePartitionKey();
+		const where = this.buildWhereClause(joinConditions, partitionKey, alias, startIndex);
+
+		return {
+			clause: `EXISTS (SELECT 1 FROM "${this._config.tableName}" AS ${alias} WHERE ${alias}."${joinProperty}" = ${primaryAlias}."${primaryColumn}" AND ${where.whereClauses.join(" AND ")})`,
+			values: where.values
+		};
+	}
+
+	/**
+	 * Build the ON clause which attaches the joined table, including its own partition key and any
+	 * conditions the caller supplied for the joined entities. Called on the connector holding the
+	 * joined entities so the partition key and the property types come from its own schema and
+	 * configuration.
+	 * @param joinProperty The column on this connector's table to join to.
+	 * @param joinConditions The optional conditions to match for the joined entities.
+	 * @param alias The alias of the joined table.
+	 * @param primaryAlias The alias of the table holding the primary entities.
+	 * @param primaryColumn The column on the primary table to join from.
+	 * @param startIndex The number the first placeholder takes.
+	 * @returns The ON clause and its bound values.
+	 * @internal
+	 */
+	private async buildJoinClause(
+		joinProperty: string,
+		joinConditions: EntityCondition<T> | undefined,
+		alias: string,
+		primaryAlias: string,
+		primaryColumn: string,
+		startIndex: number
+	): Promise<{ clause: string; values: ParameterOrJSON<never>[] }> {
+		const partitionKey = await this.resolvePartitionKey();
+		const where = this.buildWhereClause(joinConditions, partitionKey, alias, startIndex);
+
+		return {
+			clause: [
+				`${alias}."${joinProperty}" = ${primaryAlias}."${primaryColumn}"`,
+				...where.whereClauses
+			].join(" AND "),
+			values: where.values
+		};
+	}
+
+	/**
+	 * Build the ORDER BY fragments which order the joined entities within each primary entity.
+	 * @param joinOptions The join configuration.
+	 * @param alias The alias of the joined table.
+	 * @returns The order by fragments, empty when no sort order was requested.
+	 * @internal
+	 */
+	private buildJoinOrderBy<U>(
+		joinOptions: IEntityStorageJoinOptions<T, U>,
+		alias: string
+	): string[] {
+		return (joinOptions.joinSortProperties ?? []).map(
+			s =>
+				`${alias}."${String(s.property)}" ${s.sortDirection === SortDirection.Ascending ? "ASC" : "DESC"}`
+		);
+	}
+
+	/**
+	 * Build the ordered keySet columns used for the page order and the cursor, matching the
+	 * behaviour of query so both paginate the same way.
+	 * @param sortProperties The optional sort order.
+	 * @returns The ordered columns with their direction.
+	 * @internal
+	 */
+	private buildKeySetColumns(
+		sortProperties?: { property: keyof T; sortDirection: SortDirection }[]
+	): { prop: string; asc: boolean }[] {
+		const pkPropName = String(this._primaryKeyProperty.property);
+		const keySetCols: { prop: string; asc: boolean }[] = [];
+
+		for (const sortProperty of sortProperties ?? []) {
+			keySetCols.push({
+				prop: String(sortProperty.property),
+				asc: sortProperty.sortDirection === SortDirection.Ascending
+			});
+		}
+
+		if (!keySetCols.some(c => c.prop === pkPropName)) {
+			keySetCols.push({ prop: pkPropName, asc: true });
+		}
+
+		return keySetCols;
+	}
+
+	/**
+	 * Build the keySet condition which continues the page from a previous cursor.
+	 * @param keySetCols The ordered keySet columns.
+	 * @param lastValues The key set values of the last entity of the previous page.
+	 * @param startIndex The number the first placeholder takes.
+	 * @returns The clauses and their bound values.
+	 * @internal
+	 */
+	private buildKeySetClause(
+		keySetCols: { prop: string; asc: boolean }[],
+		lastValues: unknown[] | undefined,
+		startIndex: number
+	): { clauses: string[]; values: ParameterOrJSON<never>[] } {
+		if (!Is.arrayValue(lastValues)) {
+			return { clauses: [], values: [] };
+		}
+
+		const values: ParameterOrJSON<never>[] = [];
+		const orParts: string[] = [];
+
+		for (let i = 0; i < keySetCols.length; i++) {
+			const parts: string[] = [];
+			for (let j = 0; j < i; j++) {
+				values.push(lastValues[j] as ParameterOrJSON<never>);
+				parts.push(`"${keySetCols[j].prop}" = $${startIndex + values.length - 1}`);
+			}
+			const op = keySetCols[i].asc ? ">" : "<";
+			values.push(lastValues[i] as ParameterOrJSON<never>);
+			parts.push(`"${keySetCols[i].prop}" ${op} $${startIndex + values.length - 1}`);
+			orParts.push(parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`);
+		}
+
+		return { clauses: [`(${orParts.join(" OR ")})`], values };
+	}
+
+	/**
+	 * Work out which columns to read for one side of the join, honouring the caller's projection
+	 * but adding the columns the join itself needs.
+	 * @param schema The schema of the entities being read.
+	 * @param properties The optional projection requested by the caller.
+	 * @param required The columns the join needs regardless of the projection.
+	 * @returns The columns to read and the ones which were only added internally.
+	 * @internal
+	 */
+	private buildColumnSelection<E>(
+		schema: IEntitySchema<E>,
+		properties: (keyof E)[] | undefined,
+		required: string[]
+	): { columns: string[]; internal: string[] } {
+		const columns: string[] = [];
+		const internal: string[] = [];
+
+		if (Is.arrayValue(properties)) {
+			for (const prop of properties) {
+				const column = String(prop);
+				if (!columns.includes(column)) {
+					columns.push(column);
+				}
+			}
+			for (const column of required) {
+				if (!columns.includes(column)) {
+					columns.push(column);
+					internal.push(column);
+				}
+			}
+		} else {
+			for (const prop of schema.properties ?? []) {
+				const column = String(prop.property);
+				if (!columns.includes(column)) {
+					columns.push(column);
+				}
+			}
+		}
+
+		return { columns, internal };
+	}
+
+	/**
+	 * Collapse the flat rows returned by the join into one entry per primary entity, preserving the
+	 * order the database returned them in.
+	 * @param rows The rows from the join statement, whose columns are aliased by position.
+	 * @param primaryColumns The primary columns in the order they were aliased.
+	 * @param joinedColumns The joined columns in the order they were aliased.
+	 * @param identityColumn The column which identifies a primary entity.
+	 * @param joinedPrimaryKey The primary key column of the joined entities.
+	 * @returns One entry per primary entity with its joined entities.
+	 * @internal
+	 */
+	private collectJoinRows(
+		rows: { [alias: string]: unknown }[],
+		primaryColumns: string[],
+		joinedColumns: string[],
+		identityColumn: string,
+		joinedPrimaryKey: string
+	): { key: { [column: string]: unknown }; joined: { [column: string]: unknown }[] }[] {
+		const groups: {
+			key: { [column: string]: unknown };
+			joined: { [column: string]: unknown }[];
+		}[] = [];
+
+		if (!Is.array(rows)) {
+			return groups;
+		}
+
+		let current:
+			{ key: { [column: string]: unknown }; joined: { [column: string]: unknown }[] } | undefined;
+		let currentIdentity: string | undefined;
+		let seenJoined = new Set<string>();
+
+		for (const row of rows) {
+			const primaryRow: { [column: string]: unknown } = {};
+			for (let i = 0; i < primaryColumns.length; i++) {
+				primaryRow[primaryColumns[i]] = row[`p${i}`];
+			}
+
+			const identity = this.rowKey(primaryRow[identityColumn]);
+
+			if (Is.undefined(current) || identity !== currentIdentity) {
+				current = { key: primaryRow, joined: [] };
+				currentIdentity = identity;
+				seenJoined = new Set<string>();
+				groups.push(current);
+			}
+
+			const joinedRow: { [column: string]: unknown } = {};
+			for (let i = 0; i < joinedColumns.length; i++) {
+				joinedRow[joinedColumns[i]] = row[`j${i}`];
+			}
+
+			// A left join with no match produces a row whose joined columns are all null, and the
+			// same joined entity appears more than once when several primary rows in a group share
+			// the same join value.
+			if (!Is.empty(joinedRow[joinedPrimaryKey])) {
+				const joinedIdentity = this.rowKey(joinedRow[joinedPrimaryKey]);
+				if (!seenJoined.has(joinedIdentity)) {
+					seenJoined.add(joinedIdentity);
+					current.joined.push(joinedRow);
+				}
+			}
+		}
+
+		return groups;
+	}
+
+	/**
+	 * Turn a raw column value into a key which can be compared between rows.
+	 * @param value The value read from the storage.
+	 * @returns The key for the value.
+	 * @internal
+	 */
+	private rowKey(value: unknown): string {
+		return Is.string(value) ? value : JSON.stringify(value);
+	}
+
+	/**
+	 * Apply to a row read by a join the same clean up a plain query applies to its entities, then
+	 * remove the columns which were only read to satisfy the join.
+	 * @param row The raw row read from the storage.
+	 * @param schema The schema of the entity.
+	 * @param internal The columns to remove.
+	 * @returns The entity.
+	 * @internal
+	 */
+	private prepareJoinEntity<E>(
+		row: { [column: string]: unknown },
+		schema: IEntitySchema<E>,
+		internal: string[]
+	): Partial<E> {
+		const prepared: { [column: string]: unknown } = { ...row };
+
+		for (const prop of schema.properties ?? []) {
+			const column = String(prop.property);
+			if (
+				(prop.type === EntitySchemaPropertyType.Object ||
+					prop.type === EntitySchemaPropertyType.Array) &&
+				Is.string(prepared[column])
+			) {
+				try {
+					prepared[column] = JSON.parse(String(prepared[column]));
+				} catch {
+					// Text which is not JSON is left as it was read, matching what a plain query does.
+				}
+			}
+		}
+
+		return EntityStorageHelper.unPrepareEntity<E>(prepared as Partial<E>, [
+			PostgreSqlEntityStorageConnector._PARTITION_KEY,
+			...internal
+		]);
+	}
+
+	/**
+	 * Get the partition key for the current context.
+	 * @returns The partition key, or undefined when the connector is not partitioned.
+	 * @internal
+	 */
+	private async resolvePartitionKey(): Promise<string | undefined> {
+		const contextIds = await ContextIdStore.getContextIds();
+		return ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+	}
+
+	/**
+	 * Qualify a column with a table alias, needed when the statement reads from more than one table.
+	 * @param column The column name.
+	 * @param tableAlias The optional table alias.
+	 * @returns The quoted column, prefixed with the alias when one was supplied.
+	 * @internal
+	 */
+	private qualifiedColumn(column: string, tableAlias?: string): string {
+		return Is.stringValue(tableAlias) ? `${tableAlias}."${column}"` : `"${column}"`;
 	}
 
 	/**
@@ -1551,12 +2184,18 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * Build where clause arrays for a query, combining partition key and optional conditions.
 	 * @param conditions The optional entity conditions to include.
 	 * @param partitionKey The partition key value.
+	 * @param tableAlias The optional table alias to qualify the columns with, needed when the
+	 * clauses are used in a statement which reads from more than one table.
+	 * @param startIndex The number the first placeholder takes, so clauses can be added to a
+	 * statement which already holds values.
 	 * @returns The where clauses and bound values.
 	 * @internal
 	 */
 	private buildWhereClause(
 		conditions: EntityCondition<T> | undefined,
-		partitionKey: string | undefined
+		partitionKey: string | undefined,
+		tableAlias?: string,
+		startIndex: number = 1
 	): { whereClauses: string[]; values: ParameterOrJSON<never>[] } {
 		const whereClauses: string[] = [];
 		const values: ParameterOrJSON<never>[] = [];
@@ -1576,7 +2215,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			finalConditions.conditions.push(conditions);
 		}
 
-		this.buildQueryParameters("", finalConditions, whereClauses, values, 1);
+		this.buildQueryParameters("", finalConditions, whereClauses, values, startIndex, tableAlias);
 
 		return { whereClauses, values };
 	}
@@ -1588,6 +2227,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * @param whereClauses The where clauses to use in the query.
 	 * @param values The values to use in the query.
 	 * @param valueIndex The current value index.
+	 * @param tableAlias The optional table alias to qualify the columns with.
 	 * @internal
 	 */
 	private buildQueryParameters(
@@ -1595,7 +2235,8 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		condition: EntityCondition<T> | undefined,
 		whereClauses: string[],
 		values: unknown[],
-		valueIndex: number
+		valueIndex: number,
+		tableAlias?: string
 	): void {
 		if (Is.undefined(condition)) {
 			return;
@@ -1608,7 +2249,14 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			const joinConditions: string[] = condition.conditions.map(c => {
 				const subWhereClauses: string[] = [];
 				const subValues: unknown[] = [];
-				this.buildQueryParameters(objectPath, c, subWhereClauses, subValues, valueIndex);
+				this.buildQueryParameters(
+					objectPath,
+					c,
+					subWhereClauses,
+					subValues,
+					valueIndex,
+					tableAlias
+				);
 				values.push(...subValues);
 				valueIndex += subValues.length;
 				return subWhereClauses.join(" AND ");
@@ -1629,7 +2277,8 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			condition,
 			schemaProp?.type,
 			values,
-			valueIndex
+			valueIndex,
+			tableAlias
 		);
 		whereClauses.push(comparison);
 	}
@@ -1641,6 +2290,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * @param type The type of the property.
 	 * @param values The values to use in the query.
 	 * @param valueIndex The current value index.
+	 * @param tableAlias The optional table alias to qualify the columns with.
 	 * @returns The comparison expression.
 	 * @throws GeneralError if the comparison operator is not supported.
 	 * @internal
@@ -1650,7 +2300,8 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		comparator: IComparator,
 		type: EntitySchemaPropertyType | undefined,
 		values: unknown[],
-		valueIndex: number
+		valueIndex: number,
+		tableAlias?: string
 	): string {
 		let prop = objectPath;
 		if (prop.length > 0) {
@@ -1668,7 +2319,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			}
 			values.push(...inValues.map(val => this.propertyToDbValue(val, type)));
 			const placeholders = inValues.map((value, index) => `$${valueIndex + index}`).join(", ");
-			return `"${prop}" IN (${placeholders})`;
+			return `${this.qualifiedColumn(prop, tableAlias)} IN (${placeholders})`;
 		}
 
 		// null/undefined must use IS NULL / IS NOT NULL - never a parameterised placeholder.
@@ -1689,10 +2340,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 					const jsonPath = nestedParts
 						.map((p, i, arr) => (i === arr.length - 1 ? `->> '${p}'` : `-> '${p}'`))
 						.join("");
-					const jsonTextExpr = `("${rootProp}"::jsonb ${jsonPath})`;
+					const jsonTextExpr = `(${this.qualifiedColumn(rootProp, tableAlias)}::jsonb ${jsonPath})`;
 					return `${jsonTextExpr} ${nullCheck}`;
 				}
-				return `"${prop}" ${nullCheck}`;
+				return `${this.qualifiedColumn(prop, tableAlias)} ${nullCheck}`;
 			}
 		}
 
@@ -1707,7 +2358,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			const jsonPath = nestedParts
 				.map((p, i, arr) => (i === arr.length - 1 ? `->> '${p}'` : `-> '${p}'`))
 				.join("");
-			const jsonTextExpr = `("${rootProp}"::jsonb ${jsonPath})`;
+			const jsonTextExpr = `(${this.qualifiedColumn(rootProp, tableAlias)}::jsonb ${jsonPath})`;
 
 			switch (comparator.comparison) {
 				case ComparisonOperator.Includes: {
@@ -1717,7 +2368,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 						const elemPath = nestedParts
 							.map((p, i, arr) => (i === arr.length - 1 ? `->>'${p}'` : `->'${p}'`))
 							.join("");
-						return `EXISTS (SELECT 1 FROM jsonb_array_elements("${rootProp}") elem WHERE elem${elemPath} LIKE $${valueIndex})`;
+						return `EXISTS (SELECT 1 FROM jsonb_array_elements(${this.qualifiedColumn(rootProp, tableAlias)}) elem WHERE elem${elemPath} LIKE $${valueIndex})`;
 					}
 					return `${jsonTextExpr} LIKE $${valueIndex}`;
 				}
@@ -1728,7 +2379,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 						const elemPath = nestedParts
 							.map((p, i, arr) => (i === arr.length - 1 ? `->>'${p}'` : `->'${p}'`))
 							.join("");
-						return `NOT EXISTS (SELECT 1 FROM jsonb_array_elements("${rootProp}") elem WHERE elem${elemPath} LIKE $${valueIndex})`;
+						return `NOT EXISTS (SELECT 1 FROM jsonb_array_elements(${this.qualifiedColumn(rootProp, tableAlias)}) elem WHERE elem${elemPath} LIKE $${valueIndex})`;
 					}
 					return `${jsonTextExpr} NOT LIKE $${valueIndex}`;
 				}
@@ -1739,7 +2390,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 						const elemPath = nestedParts
 							.map((p, i, arr) => (i === arr.length - 1 ? `->>'${p}'` : `->'${p}'`))
 							.join("");
-						return `EXISTS (SELECT 1 FROM jsonb_array_elements("${rootProp}") elem WHERE elem${elemPath} LIKE $${valueIndex})`;
+						return `EXISTS (SELECT 1 FROM jsonb_array_elements(${this.qualifiedColumn(rootProp, tableAlias)}) elem WHERE elem${elemPath} LIKE $${valueIndex})`;
 					}
 					return `${jsonTextExpr} LIKE $${valueIndex}`;
 				}
@@ -1761,28 +2412,28 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		switch (comparator.comparison) {
 			case ComparisonOperator.Equals:
 				if (Is.object(comparator.value) || Is.array(comparator.value)) {
-					return `"${prop}" = $${valueIndex}::jsonb`;
+					return `${this.qualifiedColumn(prop, tableAlias)} = $${valueIndex}::jsonb`;
 				}
-				return `"${prop}" = $${valueIndex}`;
+				return `${this.qualifiedColumn(prop, tableAlias)} = $${valueIndex}`;
 			case ComparisonOperator.NotEquals:
 				if (Is.object(comparator.value) || Is.array(comparator.value)) {
-					return `"${prop}" != $${valueIndex}::jsonb`;
+					return `${this.qualifiedColumn(prop, tableAlias)} != $${valueIndex}::jsonb`;
 				}
-				return `"${prop}" <> $${valueIndex}`;
+				return `${this.qualifiedColumn(prop, tableAlias)} <> $${valueIndex}`;
 			case ComparisonOperator.GreaterThan:
-				return `"${prop}" > $${valueIndex}`;
+				return `${this.qualifiedColumn(prop, tableAlias)} > $${valueIndex}`;
 			case ComparisonOperator.LessThan:
-				return `"${prop}" < $${valueIndex}`;
+				return `${this.qualifiedColumn(prop, tableAlias)} < $${valueIndex}`;
 			case ComparisonOperator.GreaterThanOrEqual:
-				return `"${prop}" >= $${valueIndex}`;
+				return `${this.qualifiedColumn(prop, tableAlias)} >= $${valueIndex}`;
 			case ComparisonOperator.LessThanOrEqual:
-				return `"${prop}" <= $${valueIndex}`;
+				return `${this.qualifiedColumn(prop, tableAlias)} <= $${valueIndex}`;
 			case ComparisonOperator.Includes: {
 				if (type === EntitySchemaPropertyType.String) {
-					return `"${prop}" LIKE '%' || $${valueIndex} || '%'`;
+					return `${this.qualifiedColumn(prop, tableAlias)} LIKE '%' || $${valueIndex} || '%'`;
 				}
 				if (type === EntitySchemaPropertyType.Array || type === EntitySchemaPropertyType.Object) {
-					return `EXISTS (SELECT 1 FROM jsonb_array_elements("${prop}") elem WHERE elem @> $${valueIndex}::jsonb)`;
+					return `EXISTS (SELECT 1 FROM jsonb_array_elements(${this.qualifiedColumn(prop, tableAlias)}) elem WHERE elem @> $${valueIndex}::jsonb)`;
 				}
 				throw new GeneralError(
 					PostgreSqlEntityStorageConnector.CLASS_NAME,
@@ -1795,10 +2446,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			}
 			case ComparisonOperator.NotIncludes: {
 				if (type === EntitySchemaPropertyType.String) {
-					return `"${prop}" NOT LIKE '%' || $${valueIndex} || '%'`;
+					return `${this.qualifiedColumn(prop, tableAlias)} NOT LIKE '%' || $${valueIndex} || '%'`;
 				}
 				if (type === EntitySchemaPropertyType.Array || type === EntitySchemaPropertyType.Object) {
-					return `NOT EXISTS (SELECT 1 FROM jsonb_array_elements("${prop}") elem WHERE elem @> $${valueIndex}::jsonb)`;
+					return `NOT EXISTS (SELECT 1 FROM jsonb_array_elements(${this.qualifiedColumn(prop, tableAlias)}) elem WHERE elem @> $${valueIndex}::jsonb)`;
 				}
 				throw new GeneralError(
 					PostgreSqlEntityStorageConnector.CLASS_NAME,
@@ -1813,7 +2464,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				if (type === EntitySchemaPropertyType.String) {
 					values.pop();
 					values.push(`${this.escapeLike(String(comparator.value))}%`);
-					return `"${prop}" LIKE $${valueIndex}`;
+					return `${this.qualifiedColumn(prop, tableAlias)} LIKE $${valueIndex}`;
 				}
 				throw new GeneralError(
 					PostgreSqlEntityStorageConnector.CLASS_NAME,

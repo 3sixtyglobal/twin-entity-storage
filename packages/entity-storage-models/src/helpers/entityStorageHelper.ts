@@ -1,7 +1,17 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdHelper, type IContextIds } from "@twin.org/context";
-import { GeneralError, Guards, Is, ObjectHelper } from "@twin.org/core";
+import {
+	Converter,
+	GeneralError,
+	Guards,
+	Is,
+	type IValidationFailure,
+	JsonHelper,
+	ObjectHelper,
+	Validation
+} from "@twin.org/core";
+import { Blake2b } from "@twin.org/crypto";
 import {
 	ComparisonOperator,
 	type EntityCondition,
@@ -11,6 +21,8 @@ import {
 	type SortDirection
 } from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
+import type { IEntityStorageJoinOptions } from "../models/IEntityStorageJoinOptions.js";
+import type { INormalizedJoinOptions } from "../models/INormalizedJoinOptions.js";
 
 /**
  * Helper class for performing schema migrations between two connectors.
@@ -257,6 +269,160 @@ export class EntityStorageHelper {
 	}
 
 	/**
+	 * Validate the options for a join query against the schemas of both sides of the join.
+	 * @param schema The schema of the primary entities.
+	 * @param joinSchema The schema of the entities being joined to.
+	 * @param joinOptions The join options to validate.
+	 * @throws GuardError If the join options, or the properties to join on, are missing.
+	 * @throws ValidationError If the limit is not a positive integer.
+	 * @throws GeneralError If a property, condition or sort property is not valid for its schema, or
+	 * a group property is supplied along with properties or sort properties which reference anything
+	 * other than the group property.
+	 */
+	public static validateJoinOptions<T, U>(
+		schema: IEntitySchema<T>,
+		joinSchema: IEntitySchema<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>
+	): void {
+		Guards.object<IEntityStorageJoinOptions<T, U>>(
+			EntityStorageHelper.CLASS_NAME,
+			nameof(joinOptions),
+			joinOptions
+		);
+		Guards.stringValue(
+			EntityStorageHelper.CLASS_NAME,
+			nameof(joinOptions.property),
+			joinOptions.property
+		);
+		Guards.stringValue(
+			EntityStorageHelper.CLASS_NAME,
+			nameof(joinOptions.joinProperty),
+			joinOptions.joinProperty
+		);
+
+		const { groupProperty, sortProperties, properties, limit } = joinOptions;
+
+		EntityStorageHelper.validateProperties(schema, [joinOptions.property]);
+		EntityStorageHelper.validateConditionProperties(schema, joinOptions.conditions);
+		EntityStorageHelper.validateSortProperties(schema, sortProperties);
+
+		EntityStorageHelper.validateProperties(joinSchema, [joinOptions.joinProperty]);
+		EntityStorageHelper.validateProperties(joinSchema, joinOptions.joinProperties);
+		EntityStorageHelper.validateConditionProperties(joinSchema, joinOptions.joinConditions);
+		EntityStorageHelper.validateSortProperties(joinSchema, joinOptions.joinSortProperties);
+
+		if (!Is.empty(limit)) {
+			const validationFailures: IValidationFailure[] = [];
+			Validation.integer(nameof(joinOptions.limit), limit, validationFailures, undefined, {
+				minValue: 1
+			});
+			Validation.asValidationError(
+				EntityStorageHelper.CLASS_NAME,
+				nameof(joinOptions),
+				validationFailures
+			);
+		}
+
+		EntityStorageHelper.validateProperties(schema, properties);
+
+		if (Is.empty(groupProperty)) {
+			if (Is.arrayValue(joinOptions.groupConditions)) {
+				throw new GeneralError(EntityStorageHelper.CLASS_NAME, "groupConditionsWithoutGroup");
+			}
+		} else {
+			EntityStorageHelper.validateProperties(schema, [groupProperty]);
+			for (const groupCondition of joinOptions.groupConditions ?? []) {
+				EntityStorageHelper.validateConditionProperties(schema, groupCondition);
+			}
+		}
+	}
+
+	/**
+	 * Reduce a set of join options to the parts which decide where a page starts and ends, in a
+	 * stable form. Two queries which page the same way normalise to the same value, and anything
+	 * which moves the position a cursor refers to changes it.
+	 * @param joinOptions The join options the page was produced from.
+	 * @returns The normalised options.
+	 */
+	public static normalizeJoinOptions<T, U>(
+		joinOptions: IEntityStorageJoinOptions<T, U>
+	): INormalizedJoinOptions<T, U> {
+		return {
+			property: String(joinOptions.property),
+			joinProperty: String(joinOptions.joinProperty),
+			groupProperty: Is.empty(joinOptions.groupProperty)
+				? undefined
+				: String(joinOptions.groupProperty),
+			sortProperties: (joinOptions.sortProperties ?? []).map(
+				sortProperty => `${String(sortProperty.property)}:${sortProperty.sortDirection}`
+			),
+			conditions: joinOptions.conditions,
+			groupConditions: joinOptions.groupConditions,
+			joinConditions: joinOptions.joinConditions,
+			joinRequired: joinOptions.joinRequired ?? false
+		};
+	}
+
+	/**
+	 * Create the opaque cursor for the next page. The cursor carries the key set of the last entity
+	 * on the page rather than an offset, and is bound to the query which produced it
+	 * so it can be rejected rather than silently restarting somewhere else.
+	 * @param normalizedOptions The normalised options of the query, from normalizeJoinOptions.
+	 * @param position The position the next page starts at, which a connector reads back as it
+	 * wrote it, whether that is a key set or the cursor of the storage it paged.
+	 * @returns The encoded cursor.
+	 */
+	public static encodeCursor<T, U>(
+		normalizedOptions: INormalizedJoinOptions<T, U>,
+		position: unknown
+	): string {
+		return Converter.bytesToBase64(
+			ObjectHelper.toBytes({
+				f: EntityStorageHelper.optionsFingerprint(normalizedOptions),
+				p: position
+			})
+		);
+	}
+
+	/**
+	 * Decode a cursor produced by encodeCursor.
+	 * @param normalizedOptions The normalised options of the query, from normalizeJoinOptions.
+	 * @param cursor The cursor supplied by the caller.
+	 * @returns The position the page starts at, or undefined when no cursor was supplied.
+	 * @throws GeneralError with message key "cursorInvalid" when the cursor is malformed or was
+	 * produced by a different query.
+	 */
+	public static decodeCursor<T, U, P = unknown>(
+		normalizedOptions: INormalizedJoinOptions<T, U>,
+		cursor?: string
+	): P | undefined {
+		if (!Is.stringValue(cursor)) {
+			return undefined;
+		}
+
+		let payload: { f?: string; p?: P } | undefined;
+		if (Is.stringBase64(cursor)) {
+			try {
+				payload = ObjectHelper.fromBytes<{ f?: string; p?: P }>(Converter.base64ToBytes(cursor));
+			} catch {
+				// Anything which does not decode is just an invalid cursor, the parse failure
+				// itself tells the caller nothing useful.
+				payload = undefined;
+			}
+		}
+
+		if (
+			Is.empty(payload) ||
+			payload.f !== EntityStorageHelper.optionsFingerprint(normalizedOptions) ||
+			Is.empty(payload.p)
+		) {
+			throw new GeneralError(EntityStorageHelper.CLASS_NAME, "cursorInvalid");
+		}
+
+		return payload.p;
+	}
+
+	/**
 	 * Deep-clone condition tree and normalise null/undefined to undefined on Equals/NotEquals leaves
 	 * so in-memory evaluation matches stored-absent semantics (optional absent props are omitted/undefined).
 	 * @param condition The user-supplied condition (not mutated).
@@ -279,5 +445,18 @@ export class EntityStorageHelper {
 			return { ...leaf, value: undefined };
 		}
 		return { ...leaf };
+	}
+
+	/**
+	 * Reduce the normalised options of a query to a fixed size fingerprint, so a cursor stays the
+	 * same size however large the conditions it was produced from are.
+	 * @param normalizedOptions The normalised options of the query.
+	 * @returns The fingerprint.
+	 * @internal
+	 */
+	private static optionsFingerprint<T, U>(normalizedOptions: INormalizedJoinOptions<T, U>): string {
+		return Converter.bytesToBase64(
+			Blake2b.sum160(Converter.utf8ToBytes(JsonHelper.canonicalize(normalizedOptions)))
+		);
 	}
 }

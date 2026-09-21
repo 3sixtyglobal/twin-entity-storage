@@ -23,6 +23,8 @@
 			"getFailed": "Unable to get entity \"{id}\"",
 			"removeFailed": "Unable to remove entity \"{id}\"",
 			"queryFailed": "The query failed",
+			"queryJoinFailed": "The join query failed",
+			"joinConnectorMismatch": "The join connector must be a MySQL connector reading from the same server and database \"{database}\"",
 			"comparisonNotSupported": "Comparison operator \"{comparison}\" is not supported",
 			"conditionalNotSupported": "Conditional operator \"{operator}\" is not supported",
 			"entitySchemaPropertiesUndefined": "The entity schema properties are undefined",

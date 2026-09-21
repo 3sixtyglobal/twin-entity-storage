@@ -3,6 +3,7 @@
 export * from "./factories/entityStorageConnectorFactory.js";
 export * from "./factories/schemaMigrationFactory.js";
 export * from "./helpers/connectionHelper.js";
+export * from "./helpers/entityStorageCommon.js";
 export * from "./helpers/entityStorageHelper.js";
 export * from "./helpers/indexHelper.js";
 export * from "./helpers/migrationHelper.js";
@@ -21,7 +22,9 @@ export * from "./models/entityPropertyRemover.js";
 export * from "./models/entityPropertyTransformer.js";
 export * from "./models/IEntityStorageComponent.js";
 export * from "./models/IEntityStorageConnector.js";
+export * from "./models/IEntityStorageJoinOptions.js";
 export * from "./models/IEntityStorageMigrationConnector.js";
 export * from "./models/IMigrationOptions.js";
+export * from "./models/INormalizedJoinOptions.js";
 export * from "./models/IResolvedMigrationStep.js";
 export * from "./models/ISchemaMigration.js";

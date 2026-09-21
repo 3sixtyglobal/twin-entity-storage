@@ -27,7 +27,13 @@ import {
 	type IEntitySchema,
 	type IEntitySchemaProperty
 } from "@twin.org/entity";
-import { ConnectionHelper, EntityStorageHelper } from "@twin.org/entity-storage-models";
+import {
+	ConnectionHelper,
+	EntityStorageCommon,
+	EntityStorageHelper,
+	type IEntityStorageConnector,
+	type IEntityStorageJoinOptions
+} from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import { types as CassandraTypes, Client } from "cassandra-driver";
@@ -383,7 +389,9 @@ export abstract class AbstractScyllaDBConnector<T> {
 						filterOnlyProperties.push(comparator.property);
 					}
 				}
-				sql = sql.replace("*", fields.join(","));
+				// CQL folds an unquoted identifier to lower case, so a camel case column has to be
+				// quoted here the same way it is when the table is created.
+				sql = sql.replace("*", fields.map(field => `"${field}"`).join(","));
 			}
 
 			sql += ` WHERE ${whereClause}`;
@@ -459,6 +467,29 @@ export abstract class AbstractScyllaDBConnector<T> {
 				error
 			);
 		}
+	}
+
+	/**
+	 * Find all the entities which match the conditions, attaching to each one the entities from a
+	 * second storage connector whose join property matches. The join behaves like a left join by
+	 * default, a primary entity with no matches is still returned with an empty joined list, unless
+	 * joinRequired asks for an inner join and those entities are left out altogether.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The properties to join on, the conditions, sort order, projection and
+	 * paging for the primary entities, the optional grouping and group conditions, and the optional
+	 * conditions, sort order and projection for the joined entities.
+	 * @returns All the entities for the storage matching the conditions with their joined entities,
+	 * and a cursor which can be used to request more entities.
+	 */
+	public async queryJoin<U>(
+		joinConnector: IEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>
+	): Promise<{ entities: (Partial<T> & { joined: Partial<U>[] })[]; cursor?: string }> {
+		return EntityStorageCommon.queryJoin(
+			this as unknown as IEntityStorageConnector<T>,
+			joinConnector,
+			joinOptions
+		);
 	}
 
 	/**
