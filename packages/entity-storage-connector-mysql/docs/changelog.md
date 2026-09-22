@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.1-next.9](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.10.1-next.8...entity-storage-connector-mysql-v0.10.1-next.9) (2026-09-22)
+
+
+### Bug Fixes
+
+* swap the migrated table into place atomically and fail loudly after an interrupted finalize ([#300](https://github.com/iotaledger/twin-entity-storage/issues/300)) ([0a59fb4](https://github.com/iotaledger/twin-entity-storage/commit/0a59fb452bafee9acfb730c0a3a3779a58fd1f3d))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.10.1-next.8 to 0.10.1-next.9
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.10.1-next.8 to 0.10.1-next.9
+
 ## [0.10.1-next.8](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.10.1-next.7...entity-storage-connector-mysql-v0.10.1-next.8) (2026-09-22)
 
 

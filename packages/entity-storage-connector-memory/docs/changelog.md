@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.1-next.9](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-memory-v0.10.1-next.8...entity-storage-connector-memory-v0.10.1-next.9) (2026-09-22)
+
+
+### Miscellaneous Chores
+
+* **entity-storage-connector-memory:** Synchronize repo versions
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.10.1-next.8 to 0.10.1-next.9
+
 ## [0.10.1-next.8](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-memory-v0.10.1-next.7...entity-storage-connector-memory-v0.10.1-next.8) (2026-09-22)
 
 
