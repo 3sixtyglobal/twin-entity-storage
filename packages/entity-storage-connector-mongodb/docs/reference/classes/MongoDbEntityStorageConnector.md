@@ -552,7 +552,7 @@ Connector for performing the migration.
 
 > **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`MongoDbEntityStorageConnector`\<`U`\>\>
 
-Finalize the migration by dropping the source collection and renaming the migration collection to the original name.
+Finalize the migration by renaming each migration collection over its source collection in one command.
 
 #### Type Parameters
 

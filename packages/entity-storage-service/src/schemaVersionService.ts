@@ -36,10 +36,9 @@ import type { ISchemaVersionServiceConstructorOptions } from "./models/ISchemaVe
  * SchemaMigrationFactory under the key "Base_from_to" (e.g. "MyEntity_0_1").
  *
  * Crash-window note: finalizeMigration and the subsequent version-record write are two
- * separate operations. If the process dies between them the next boot re-runs the chain
- * over already-migrated data. applyEntityTransform is NOT idempotent for structural changes
- * (newly-added optional fields would be dropped on re-run). A transaction spanning both
- * writes is a precondition for production; track this in the concurrency follow-up.
+ * separate operations, and applyEntityTransform is not idempotent for structural changes.
+ * A finalizing marker record is therefore written before finalizeMigration and removed after
+ * the version write; a start-up that finds one refuses to run (migrationInterrupted).
  */
 export class SchemaVersionService implements IComponent {
 	/**
@@ -59,6 +58,12 @@ export class SchemaVersionService implements IComponent {
 	 * @internal
 	 */
 	private static readonly _CONNECTOR_VERSION_KEY = "connectorVersion";
+
+	/**
+	 * Suffix of the record written while a schema's migration is being finalized.
+	 * @internal
+	 */
+	private static readonly _FINALIZING_SUFFIX = ":finalizing";
 
 	/**
 	 * The connector used to read and write SchemaVersion records.
@@ -151,7 +156,16 @@ export class SchemaVersionService implements IComponent {
 			);
 			for (const record of queryResult.entities ?? []) {
 				if (Is.object<SchemaVersion>(record)) {
-					if (record.schemaName === SchemaVersionService._CONNECTOR_VERSION_KEY) {
+					if (record.schemaName.endsWith(SchemaVersionService._FINALIZING_SUFFIX)) {
+						throw new GeneralError(SchemaVersionService.CLASS_NAME, "migrationInterrupted", {
+							schemaName: record.schemaName.slice(
+								0,
+								-SchemaVersionService._FINALIZING_SUFFIX.length
+							),
+							version: record.version,
+							marker: record.schemaName
+						});
+					} else if (record.schemaName === SchemaVersionService._CONNECTOR_VERSION_KEY) {
 						storedConnectorVersion = record.version;
 					} else {
 						storedVersions.set(record.schemaName, record.version);
@@ -396,12 +410,16 @@ export class SchemaVersionService implements IComponent {
 		if (Is.function(boundGetPartitionContextIds)) {
 			partitions = await boundGetPartitionContextIds(loggingComponentType);
 		}
+		const finalizingMarker = `${schemaName}${SchemaVersionService._FINALIZING_SUFFIX}`;
 		const { finalConnector } = await MigrationHelper.migrateWithChain(
 			migrationConnector,
 			schemaName,
 			partitions,
 			steps,
-			migrationOptions,
+			{
+				...migrationOptions,
+				onFinalizing: async () => this.writeVersion(finalizingMarker, currentVersion)
+			},
 			loggingComponentType
 		);
 
@@ -422,6 +440,7 @@ export class SchemaVersionService implements IComponent {
 		// Advance the stored version only after finalizeMigration has succeeded.
 		// See crash-window note in the class comment.
 		await this.writeVersion(schemaName, currentVersion);
+		await this._versionConnector.remove(finalizingMarker);
 	}
 
 	/**

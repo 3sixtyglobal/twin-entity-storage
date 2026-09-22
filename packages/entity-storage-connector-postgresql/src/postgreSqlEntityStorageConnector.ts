@@ -989,7 +989,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Finalize the migration by renaming the migration table to the original table name.
+	 * Finalize the migration by dropping the source table and renaming the migration table into its name in one transaction.
 	 * @param targetConnector The connector pointing to the migration table.
 	 * @param options The optional migration options.
 	 * @param loggingComponentType The node logging component type.
@@ -1000,13 +1000,15 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<PostgreSqlEntityStorageConnector<U>> {
-		// Teardown the existing table with the original name to free up the name for the new table
-		await this.teardown(loggingComponentType);
-
-		const dbConnection = await targetConnector.getClient();
-		await dbConnection.unsafe(
-			`ALTER TABLE "${targetConnector._config.tableName}" RENAME TO "${this._config.tableName}"`
-		);
+		// One transaction drops the source and renames the migration table, so a failure or a
+		// process death leaves either the untouched source or the complete migrated table in place.
+		const dbConnection = await this.getClient();
+		await dbConnection.begin(async transaction => {
+			await transaction.unsafe(`DROP TABLE "${this._config.tableName}"`);
+			await transaction.unsafe(
+				`ALTER TABLE "${targetConnector._config.tableName}" RENAME TO "${this._config.tableName}"`
+			);
+		});
 		const finalConnector = new PostgreSqlEntityStorageConnector<U>({
 			entitySchema: targetConnector._entitySchemaName,
 			config: this._config,

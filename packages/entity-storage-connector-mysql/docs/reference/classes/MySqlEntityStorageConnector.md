@@ -558,7 +558,7 @@ Connector for performing the migration.
 
 > **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`MySqlEntityStorageConnector`\<`U`\>\>
 
-Finalize the migration by dropping the source table and renaming the migration table to the original name.
+Finalize the migration by swapping the migration table into the original name and dropping the old table.
 
 #### Type Parameters
 

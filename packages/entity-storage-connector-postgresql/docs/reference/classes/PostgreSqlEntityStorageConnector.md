@@ -423,7 +423,7 @@ A new connector configured with a migration table name.
 
 > **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`PostgreSqlEntityStorageConnector`\<`U`\>\>
 
-Finalize the migration by renaming the migration table to the original table name.
+Finalize the migration by dropping the source table and renaming the migration table into its name in one transaction.
 
 #### Type Parameters
 

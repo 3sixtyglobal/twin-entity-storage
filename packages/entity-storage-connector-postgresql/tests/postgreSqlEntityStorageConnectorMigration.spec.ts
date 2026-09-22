@@ -1035,5 +1035,22 @@ describe("PostgreSqlEntityStorageConnector - partitioning and migration", () => 
 			expect(await finalConnector.get("1")).toBeDefined();
 			expect(await finalConnector.get("2")).toBeDefined();
 		});
+
+		test("finalizeMigration: a failed swap leaves the source and its entities in place", async () => {
+			const source = (await createConnector(
+				nameof<MigV1>()
+			)) as IEntityStorageMigrationConnector<MigV1>;
+			await source.set({ id: "1", legacyField: "a" });
+			await source.set({ id: "2", legacyField: "b" });
+			await source.set({ id: "3", legacyField: "c" });
+
+			// The migration table was never created, so the swap cannot complete.
+			const target = await source.createTargetConnector<MigV2>(nameof<MigV2>());
+
+			await expect(source.finalizeMigration(target)).rejects.toThrow();
+
+			expect(await source.count()).toBe(3);
+			expect(await source.get("1")).toBeDefined();
+		});
 	});
 });

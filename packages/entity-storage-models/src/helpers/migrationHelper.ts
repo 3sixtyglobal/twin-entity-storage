@@ -144,6 +144,8 @@ export class MigrationHelper {
 				}
 			});
 
+			await options?.onFinalizing?.();
+
 			const finalConnector = await sourceConnector.finalizeMigration(
 				targetConnector,
 				options,

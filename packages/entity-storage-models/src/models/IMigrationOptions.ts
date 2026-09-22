@@ -28,4 +28,10 @@ export interface IMigrationOptions {
 		itemTotal: number,
 		itemIndex: number
 	) => Promise<void>;
+
+	/**
+	 * Called once every partition has been copied, immediately before the source connector
+	 * finalizes the migration.
+	 */
+	onFinalizing?: () => Promise<void>;
 }

@@ -827,6 +827,28 @@ describe("MigrationHelper.migrateWithChain", () => {
 		expect(migrated).toBe(0);
 	});
 
+	test("calls onFinalizing after the copy and before finalizeMigration", async () => {
+		const target = makeTargetConnector();
+		const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+		const onFinalizing = vi.fn().mockResolvedValue(undefined);
+
+		await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			await source.getPartitionContextIds(),
+			[singleStep],
+			{ onFinalizing }
+		);
+
+		expect(onFinalizing).toHaveBeenCalledTimes(1);
+		expect(onFinalizing.mock.invocationCallOrder[0]).toBeGreaterThan(
+			vi.mocked(target.setBatch).mock.invocationCallOrder[0]
+		);
+		expect(onFinalizing.mock.invocationCallOrder[0]).toBeLessThan(
+			vi.mocked(source.finalizeMigration).mock.invocationCallOrder[0]
+		);
+	});
+
 	test("calls createTargetConnector with the target schema name", async () => {
 		const target = makeTargetConnector();
 		const source = makeSourceConnector([], target);

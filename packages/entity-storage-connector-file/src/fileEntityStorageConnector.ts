@@ -871,7 +871,7 @@ export class FileEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Finalize the migration by tearing down the old connector and replacing it with the target connector.
+	 * Finalize the migration by replacing the source store with the migrated store and removing the migration directory.
 	 * @param targetConnector The target connector to finalize the migration with.
 	 * @param options The options to control how the migration is finalized.
 	 * @param loggingComponentType The optional component type to use for logging the migration progress.
@@ -882,14 +882,11 @@ export class FileEntityStorageConnector<T = unknown>
 		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<IEntityStorageConnector<U>> {
-		const originalDir = this._directory;
-		const migrationDir = targetConnector._directory;
-
-		// Teardown the original connector, removing the entire source directory.
-		await this.teardown(loggingComponentType);
-
-		// Rename the migration directory into the original location.
-		await rename(migrationDir, originalDir);
+		// writeStore replaces the source store atomically, so a failure or a process death leaves
+		// either the untouched source or the complete migrated store in place.
+		const migratedStore = await targetConnector.readStoreWithLock();
+		await this.withLock(async () => this.writeStore(migratedStore as unknown as T[]));
+		await rm(targetConnector._directory, { recursive: true, force: true });
 
 		return new FileEntityStorageConnector<U>({
 			entitySchema: targetConnector._entitySchemaName,

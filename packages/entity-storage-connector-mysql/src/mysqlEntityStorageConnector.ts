@@ -1223,7 +1223,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Finalize the migration by dropping the source table and renaming the migration table to the original name.
+	 * Finalize the migration by swapping the migration table into the original name and dropping the old table.
 	 * @param targetConnector The connector holding the migrated data in a temporary table.
 	 * @param options The options to control how the migration is finalized.
 	 * @param loggingComponentType The logging component type to use during finalization.
@@ -1234,15 +1234,24 @@ export class MySqlEntityStorageConnector<T = unknown>
 		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<MySqlEntityStorageConnector<U>> {
-		// Teardown the existing table with the original name to free up the name for the new table
-		await this.teardown(loggingComponentType);
-
-		// RENAME TABLE is an atomic metadata-only operation in MySQL - no data copying needed.
+		// One statement swaps the two tables through a transient third name, so a failure or a
+		// process death leaves either the untouched source or the complete migrated table in place.
+		const swapTable = `${this._config.database}.${MigrationHelper.generateTargetName(
+			targetConnector._config.tableName,
+			MySqlEntityStorageConnector._MAX_IDENTIFIER_LENGTH
+		)}`;
 		const pool = await this.getPool();
-		await pool.query("RENAME TABLE ?? TO ??", [
+		await pool.query("RENAME TABLE ?? TO ??, ?? TO ??, ?? TO ??", [
+			this.qualifiedTable(),
+			swapTable,
 			targetConnector.qualifiedTable(),
-			this.qualifiedTable()
+			this.qualifiedTable(),
+			swapTable,
+			targetConnector.qualifiedTable()
 		]);
+
+		// The migration table now holds the old rows.
+		await targetConnector.teardown(loggingComponentType);
 
 		const finalConnector = new MySqlEntityStorageConnector<U>({
 			entitySchema: targetConnector._entitySchemaName,

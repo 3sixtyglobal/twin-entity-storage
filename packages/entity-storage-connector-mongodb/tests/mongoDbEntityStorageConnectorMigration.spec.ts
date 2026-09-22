@@ -10,6 +10,7 @@ import {
 	type IResolvedMigrationStep
 } from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
+import { Collection } from "mongodb";
 import { TEST_MONGODB_CONFIG } from "./setupTestEnv.js";
 import { MongoDbEntityStorageConnector } from "../src/mongoDbEntityStorageConnector.js";
 
@@ -1034,6 +1035,28 @@ describe("MongoDbEntityStorageConnector - partitioning and migration", () => {
 			expect(await finalConnector.count()).toBe(2);
 			expect(await finalConnector.get("1")).toBeDefined();
 			expect(await finalConnector.get("2")).toBeDefined();
+		});
+
+		test("finalizeMigration: a failed swap leaves the source and its entities in place", async () => {
+			const source = (await createConnector(
+				nameof<MigV1>()
+			)) as IEntityStorageMigrationConnector<MigV1>;
+			await source.set({ id: "1", legacyField: "a" });
+			await source.set({ id: "2", legacyField: "b" });
+			await source.set({ id: "3", legacyField: "c" });
+
+			const target = await source.createTargetConnector<MigV2>(nameof<MigV2>());
+			await target.bootstrap?.();
+			trackedConnectors.push(target);
+			await target.set({ id: "1", newField: "a" });
+
+			// The server refuses the rename command.
+			vi.spyOn(Collection.prototype, "rename").mockRejectedValueOnce(new Error("rename refused"));
+
+			await expect(source.finalizeMigration(target)).rejects.toThrow();
+
+			expect(await source.count()).toBe(3);
+			expect(await source.get("1")).toBeDefined();
 		});
 	});
 });

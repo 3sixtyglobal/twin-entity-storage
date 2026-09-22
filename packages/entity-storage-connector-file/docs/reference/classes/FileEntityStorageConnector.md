@@ -530,7 +530,7 @@ Connector for performing the migration.
 
 > **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`IEntityStorageConnector`\<`U`\>\>
 
-Finalize the migration by tearing down the old connector and replacing it with the target connector.
+Finalize the migration by replacing the source store with the migrated store and removing the migration directory.
 
 #### Type Parameters
 

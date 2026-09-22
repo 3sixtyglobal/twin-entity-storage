@@ -957,7 +957,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Finalize the migration by dropping the source collection and renaming the migration collection to the original name.
+	 * Finalize the migration by renaming each migration collection over its source collection in one command.
 	 * @param targetConnector The connector holding the migrated data in a temporary collection.
 	 * @param options The options to control how the migration is finalized.
 	 * @param loggingComponentType The logging component type to use during finalization.
@@ -975,8 +975,6 @@ export class MongoDbEntityStorageConnector<T = unknown>
 		const sourceBase = this._config.collection;
 		const targetClient = await targetConnector.getClient();
 		const targetDb = targetClient.db(targetConnector._config.database);
-		const sourceClient = await this.getClient();
-		const sourceDb = sourceClient.db(this._config.database);
 
 		// Find all collections the target connector wrote to (exact base name or with a _suffix).
 		const allCollections = await targetDb.listCollections().toArray();
@@ -989,12 +987,9 @@ export class MongoDbEntityStorageConnector<T = unknown>
 			const suffix = col.name.slice(targetBase.length);
 			const finalName = `${sourceBase}${suffix}`;
 
-			// Drop the existing source collection to free up the name.
-			try {
-				await sourceDb.collection(finalName).drop();
-			} catch {} // collection may not exist yet
-
-			await targetDb.collection(col.name).rename(finalName);
+			// The server drops the source collection and renames inside one command, so the source
+			// is never gone while the migrated collection still sits under its own name.
+			await targetDb.collection(col.name).rename(finalName, { dropTarget: true });
 		}
 
 		const finalConnector = new MongoDbEntityStorageConnector<U>({
