@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.1-next.8](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.10.1-next.7...entity-storage-connector-mysql-v0.10.1-next.8) (2026-09-22)
+
+
+### Bug Fixes
+
+* index bounded string columns with a prefix so tables created by earlier releases bootstrap ([#292](https://github.com/iotaledger/twin-entity-storage/issues/292)) ([91c3601](https://github.com/iotaledger/twin-entity-storage/commit/91c3601682d3715de5b1523aa676d8c28ff4f1f5))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.10.1-next.7 to 0.10.1-next.8
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.10.1-next.7 to 0.10.1-next.8
+
 ## [0.10.1-next.7](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.10.1-next.6...entity-storage-connector-mysql-v0.10.1-next.7) (2026-09-22)
 
 

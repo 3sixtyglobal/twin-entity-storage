@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.1-next.8](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.10.1-next.7...entity-storage-service-v0.10.1-next.8) (2026-09-22)
+
+
+### Features
+
+* add a whole-entity transform hook to schema migration steps ([#299](https://github.com/iotaledger/twin-entity-storage/issues/299)) ([815155c](https://github.com/iotaledger/twin-entity-storage/commit/815155c77911b0c6e09eb93a0e428935b8da924f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.10.1-next.7 to 0.10.1-next.8
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.10.1-next.7 to 0.10.1-next.8
+
 ## [0.10.1-next.7](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-service-v0.10.1-next.6...entity-storage-service-v0.10.1-next.7) (2026-09-22)
 
 

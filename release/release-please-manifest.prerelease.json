@@ -1,14 +1,14 @@
 {
-	"packages/entity-storage-models": "0.10.1-next.7",
-	"packages/entity-storage-connector-memory": "0.10.1-next.7",
-	"packages/entity-storage-service": "0.10.1-next.7",
-	"packages/entity-storage-rest-client": "0.10.1-next.7",
-	"packages/entity-storage-connector-file": "0.10.1-next.7",
-	"packages/entity-storage-connector-scylladb": "0.10.1-next.7",
-	"packages/entity-storage-connector-dynamodb": "0.10.1-next.7",
-	"packages/entity-storage-connector-gcp-firestore": "0.10.1-next.7",
-	"packages/entity-storage-connector-mysql": "0.10.1-next.7",
-	"packages/entity-storage-connector-mongodb": "0.10.1-next.7",
-	"packages/entity-storage-connector-postgresql": "0.10.1-next.7",
-	"packages/entity-storage-connector-cosmosdb": "0.10.1-next.7"
+	"packages/entity-storage-models": "0.10.1-next.8",
+	"packages/entity-storage-connector-memory": "0.10.1-next.8",
+	"packages/entity-storage-service": "0.10.1-next.8",
+	"packages/entity-storage-rest-client": "0.10.1-next.8",
+	"packages/entity-storage-connector-file": "0.10.1-next.8",
+	"packages/entity-storage-connector-scylladb": "0.10.1-next.8",
+	"packages/entity-storage-connector-dynamodb": "0.10.1-next.8",
+	"packages/entity-storage-connector-gcp-firestore": "0.10.1-next.8",
+	"packages/entity-storage-connector-mysql": "0.10.1-next.8",
+	"packages/entity-storage-connector-mongodb": "0.10.1-next.8",
+	"packages/entity-storage-connector-postgresql": "0.10.1-next.8",
+	"packages/entity-storage-connector-cosmosdb": "0.10.1-next.8"
 }
