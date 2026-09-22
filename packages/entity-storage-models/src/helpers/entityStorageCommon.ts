@@ -90,7 +90,10 @@ export class EntityStorageCommon {
 		const primaryProjection = EntityStorageCommon.projection<T>(schema, joinOptions.properties, [
 			joinOptions.property,
 			...(Is.empty(groupProperty) ? [] : [groupProperty]),
-			...(joinOptions.sortProperties ?? []).map(sortProperty => sortProperty.property)
+			...(joinOptions.sortProperties ?? []).map(sortProperty => sortProperty.property),
+			...(joinOptions.groupConditions ?? []).flatMap(groupCondition =>
+				EntityStorageCommon.conditionProperties<T>(groupCondition)
+			)
 		]);
 		const joinedProjection = EntityStorageCommon.projection<U>(
 			joinSchema,
@@ -565,6 +568,24 @@ export class EntityStorageCommon {
 		}
 
 		return keys;
+	}
+
+	/**
+	 * Collect the properties a condition reads, so a condition checked against what was read back
+	 * is not left testing properties the projection dropped. A dot-notation path reads inside a
+	 * value, so the value holding it is what has to be read.
+	 * @param condition The condition to walk.
+	 * @returns The properties the condition reads.
+	 * @internal
+	 */
+	private static conditionProperties<E>(condition: EntityCondition<E>): (keyof E)[] {
+		if ("conditions" in condition) {
+			return condition.conditions.flatMap(child =>
+				EntityStorageCommon.conditionProperties<E>(child)
+			);
+		}
+
+		return [String(condition.property).split(".")[0] as keyof E];
 	}
 
 	/**

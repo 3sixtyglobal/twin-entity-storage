@@ -634,6 +634,31 @@ describe("ScyllaDBTableConnector queryJoin", () => {
 		}
 	);
 
+	test.skipIf(!SUPPORT_GROUP_CONDITIONS)(
+		"can join and group with a group condition on a property the caller did not ask for",
+		async () => {
+			const { orders, shipments } = await createPair();
+			await orders.set({ id: "o1", region: "eu", customerId: "c1" });
+			await orders.set({ id: "o2", region: "us", customerId: "c2" });
+			await shipments.set({ id: "s1", orderId: "o1" });
+			await shipments.set({ id: "s2", orderId: "o2" });
+
+			const result = await orders.queryJoin(shipments, {
+				property: "id",
+				joinProperty: "orderId",
+				groupProperty: "region",
+				properties: ["region"],
+				groupConditions: [
+					{ property: "customerId", comparison: ComparisonOperator.Equals, value: "c2" }
+				]
+			});
+
+			expect(result.entities.map(e => e.region)).toEqual(["us"]);
+			// The property the condition tested is read to check it and dropped again afterwards.
+			expect(result.entities[0].customerId).toBeUndefined();
+		}
+	);
+
 	test("can join and group returning each joined entity once however many entities reach it", async () => {
 		const { orders, shipments } = await createPair();
 		// Every order in the group points at the same joined entity.
