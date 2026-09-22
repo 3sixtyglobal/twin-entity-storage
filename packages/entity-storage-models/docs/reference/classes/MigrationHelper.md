@@ -125,9 +125,9 @@ The number of entities migrated.
 > `static` **applyEntityChain**(`entity`, `steps`): `Promise`\<`unknown`\>
 
 Transforms a single entity through an ordered chain of fully-resolved migration steps.
-For each step the method diffs fromProperties against toProperties, then applies
-applyEntityTransform. Each step's output feeds the next step's input so that
-per-step transformEntityProperty hooks are honoured throughout the chain.
+For each step the method applies transformEntity, if present, to the source entity, then
+diffs fromProperties against toProperties and applies applyEntityTransform, feeding each
+step's output to the next.
 
 #### Parameters
 
@@ -193,7 +193,7 @@ Optional per-property transform hook for object/array properties.
 
 [`EntityPropertyRemover`](../type-aliases/EntityPropertyRemover.md)\<`T`\>
 
-Optional hook called with the original entity and dropped property schemas.
+Optional hook called with the entity and dropped property schemas.
 
 #### Returns
 

@@ -55,6 +55,26 @@ Optional property renames for this step, forwarded to EntitySchemaDiffHelper.dif
 
 ***
 
+### transformEntity? {#transformentity}
+
+> `optional` **transformEntity?**: [`EntityTransformer`](../type-aliases/EntityTransformer.md)\<`T`\>
+
+Optional whole-entity transform applied to the source entity before the diff runs,
+so a step can supply a value for a property the source shape does not carry. Its output
+is the entity the diff and the other two hooks receive.
+
+#### Param
+
+**entity**
+
+The entity in the step's source shape.
+
+#### Returns
+
+The entity, still in the step's source shape.
+
+***
+
 ### transformEntityProperty? {#transformentityproperty}
 
 > `optional` **transformEntityProperty?**: [`EntityPropertyTransformer`](../type-aliases/EntityPropertyTransformer.md)\<`T`, `U`\>
@@ -90,14 +110,14 @@ The transformed value to match the new schema.
 > `optional` **removeEntityProperty?**: [`EntityPropertyRemover`](../type-aliases/EntityPropertyRemover.md)\<`T`\>
 
 Optional hook called when properties are dropped during migration.
-Receives the original entity and the list of removed property schemas,
-allowing callers to observe or record values before they are discarded.
+Receives the entity and the list of removed property schemas, allowing callers to
+observe or record values before they are discarded.
 
 #### Param
 
 **entity**
 
-The original entity before transformation.
+The entity being migrated, after transformEntity when one is set.
 
 #### Param
 

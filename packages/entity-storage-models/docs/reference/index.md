@@ -34,6 +34,7 @@
 
 - [EntityPropertyRemover](type-aliases/EntityPropertyRemover.md)
 - [EntityPropertyTransformer](type-aliases/EntityPropertyTransformer.md)
+- [EntityTransformer](type-aliases/EntityTransformer.md)
 
 ## Variables
 
