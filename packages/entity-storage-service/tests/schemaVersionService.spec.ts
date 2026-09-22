@@ -394,6 +394,55 @@ describe("SchemaVersionService", () => {
 		}
 	});
 
+	test("start() passes the transformEntity override through to the migration step", async () => {
+		const schemaName = "Widget";
+		const overrideKey = `${schemaName}_0_1`;
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		const hook = vi.fn().mockImplementation(entity => entity);
+		SchemaMigrationFactory.register(overrideKey, () => ({
+			transformEntity: hook
+		}));
+
+		try {
+			await new SchemaVersionService().start();
+
+			expect(migrateWithChainSpy).toHaveBeenCalledWith(
+				connector,
+				schemaName,
+				undefined,
+				expect.arrayContaining([expect.objectContaining({ transformEntity: hook })]),
+				expect.any(Object),
+				undefined
+			);
+		} finally {
+			try {
+				SchemaMigrationFactory.unregister(overrideKey);
+			} catch {
+				/* ignore */
+			}
+		}
+	});
+
 	// -------------------------------------------------------------------------
 	// start() - storedVersionNewer
 	// -------------------------------------------------------------------------

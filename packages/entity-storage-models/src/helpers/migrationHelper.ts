@@ -235,9 +235,9 @@ export class MigrationHelper {
 
 	/**
 	 * Transforms a single entity through an ordered chain of fully-resolved migration steps.
-	 * For each step the method diffs fromProperties against toProperties, then applies
-	 * applyEntityTransform. Each step's output feeds the next step's input so that
-	 * per-step transformEntityProperty hooks are honoured throughout the chain.
+	 * For each step the method applies transformEntity, if present, to the source entity, then
+	 * diffs fromProperties against toProperties and applies applyEntityTransform, feeding each
+	 * step's output to the next.
 	 * @param entity The entity to transform (at the shape described by steps[0].fromProperties).
 	 * @param steps Ordered, fully-resolved migration steps from stored version to current version.
 	 * Each step's fromProperties and toProperties are resolved by the caller before invocation.
@@ -249,6 +249,10 @@ export class MigrationHelper {
 	): Promise<unknown> {
 		let current: unknown = entity;
 		for (const step of steps) {
+			if (Is.function(step.transformEntity)) {
+				current = await step.transformEntity(current);
+			}
+
 			const diff = EntitySchemaDiffHelper.diff(
 				step.fromProperties,
 				step.toProperties,
@@ -270,7 +274,7 @@ export class MigrationHelper {
 	 * @param entity The entity to transform.
 	 * @param schemaDiff The schema diff between the old and new schemas.
 	 * @param transformEntityProperty Optional per-property transform hook for object/array properties.
-	 * @param removeEntityProperty Optional hook called with the original entity and dropped property schemas.
+	 * @param removeEntityProperty Optional hook called with the entity and dropped property schemas.
 	 * @returns The transformed entity ready to be written to the new schema.
 	 * @throws GeneralError if a transformation is required for an object or array property but no transformEntityProperty function is provided.
 	 * @throws GeneralError if coercion of a modified property results in undefined for a non-optional target property.

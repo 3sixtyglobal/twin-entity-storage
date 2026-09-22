@@ -20,6 +20,7 @@ export * from "./models/api/IEntityStorageSetBatchRequest.js";
 export * from "./models/api/IEntityStorageSetRequest.js";
 export * from "./models/entityPropertyRemover.js";
 export * from "./models/entityPropertyTransformer.js";
+export * from "./models/entityTransformer.js";
 export * from "./models/IEntityStorageComponent.js";
 export * from "./models/IEntityStorageConnector.js";
 export * from "./models/IEntityStorageJoinOptions.js";

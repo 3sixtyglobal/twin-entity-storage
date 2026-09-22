@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0.
 import type { EntityPropertyRemover } from "./entityPropertyRemover.js";
 import type { EntityPropertyTransformer } from "./entityPropertyTransformer.js";
+import type { EntityTransformer } from "./entityTransformer.js";
 
 /**
  * Optional per-step override for a single version-to-version migration.
  * Only register an entry in SchemaMigrationFactory when a step requires property
- * renames or a custom object/array transform. For purely structural changes
- * (add/remove/type-change fields) no entry is needed - the runner diffs the two
- * versioned schema classes (e.g. MyEntityV0 vs MyEntityV1) from EntitySchemaFactory
- * automatically.
+ * renames, a custom object/array transform, or a value the source row does not
+ * carry at all. For purely structural changes (add/remove/type-change fields) no
+ * entry is needed - the runner diffs the two versioned schema classes (e.g.
+ * MyEntityV0 vs MyEntityV1) from EntitySchemaFactory automatically.
  *
  * Register under the key "BaseSchemaName_fromVersion_toVersion"
  * e.g. "MyEntity_0_1" for the step that migrates from version 0 to version 1.
@@ -22,8 +23,18 @@ export interface ISchemaMigration<T = unknown, U = unknown> {
 	renames?: { from: string; to: string }[];
 
 	/**
+	 * Optional whole-entity transform applied to the source entity before the diff runs,
+	 * so a step can supply a value for a property the source shape does not carry. Its output
+	 * is the entity the diff and the other two hooks receive. Runs inside the partition's
+	 * context, so it can read the context ids of the partition being migrated.
+	 * @param entity The entity in the step's source shape.
+	 * @returns The entity, still in the step's source shape.
+	 */
+	transformEntity?: EntityTransformer<T>;
+
+	/**
 	 * Optional transformation for properties, usually only called for object and array types.
-	 * @param entity The original entity before transformation.
+	 * @param entity The entity being migrated, after transformEntity when one is set.
 	 * @param schema1Property The property schema in the old schema.
 	 * @param schemaProperty2 The property schema in the new schema.
 	 * @param value The value of the property in the old schema.
@@ -33,9 +44,9 @@ export interface ISchemaMigration<T = unknown, U = unknown> {
 
 	/**
 	 * Optional hook called when properties are dropped during migration.
-	 * Receives the original entity and the list of removed property schemas,
-	 * allowing callers to observe or record values before they are discarded.
-	 * @param entity The original entity before transformation.
+	 * Receives the entity and the list of removed property schemas, allowing callers to
+	 * observe or record values before they are discarded.
+	 * @param entity The entity being migrated, after transformEntity when one is set.
 	 * @param removedProperties The property schemas that were dropped.
 	 */
 	removeEntityProperty?: EntityPropertyRemover<T>;

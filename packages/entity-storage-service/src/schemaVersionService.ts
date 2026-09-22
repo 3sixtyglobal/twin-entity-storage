@@ -379,6 +379,7 @@ export class SchemaVersionService implements IComponent {
 				fromProperties: fromSchema.properties ?? [],
 				toProperties: toSchema.properties ?? [],
 				renames: override?.renames,
+				transformEntity: override?.transformEntity,
 				transformEntityProperty: override?.transformEntityProperty,
 				removeEntityProperty: override?.removeEntityProperty
 			});

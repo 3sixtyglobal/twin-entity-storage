@@ -589,6 +589,89 @@ describe("MigrationHelper.applyEntityChain", () => {
 		expect(result.quantity).toBe("5");
 		expect(result.qty).toBeUndefined();
 	});
+
+	test("applies the step's transformEntity to the source entity before the diff", async () => {
+		const step: IResolvedMigrationStep = {
+			fromProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["code", EntitySchemaPropertyType.String, true]
+			),
+			toProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["code", EntitySchemaPropertyType.String]
+			),
+			transformEntity: entity => {
+				const source = entity as { [key: string]: unknown };
+				return { ...source, code: source.legacyCode };
+			}
+		};
+
+		const result = (await MigrationHelper.applyEntityChain({ id: "1", legacyCode: "abc" }, [
+			step
+		])) as { [key: string]: unknown };
+
+		expect(result.code).toBe("abc");
+		expect(result.legacyCode).toBeUndefined();
+	});
+
+	test("awaits an async transformEntity", async () => {
+		const step: IResolvedMigrationStep = {
+			fromProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["code", EntitySchemaPropertyType.String, true]
+			),
+			toProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["code", EntitySchemaPropertyType.String]
+			),
+			transformEntity: async entity => {
+				await new Promise(resolve => setTimeout(resolve, 0));
+				const source = entity as { [key: string]: unknown };
+				return { ...source, code: source.legacyCode };
+			}
+		};
+
+		const result = (await MigrationHelper.applyEntityChain({ id: "1", legacyCode: "abc" }, [
+			step
+		])) as { [key: string]: unknown };
+
+		expect(result.code).toBe("abc");
+	});
+
+	test("feeds each step's output to the next step's transformEntity", async () => {
+		const step1: IResolvedMigrationStep = {
+			fromProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["qty", EntitySchemaPropertyType.String]
+			),
+			toProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["quantity", EntitySchemaPropertyType.String]
+			),
+			renames: [{ from: "qty", to: "quantity" }]
+		};
+
+		let received: { [key: string]: unknown } | undefined;
+		const step2: IResolvedMigrationStep = {
+			fromProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["quantity", EntitySchemaPropertyType.String]
+			),
+			toProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["quantity", EntitySchemaPropertyType.String]
+			),
+			transformEntity: entity => {
+				received = entity as { [key: string]: unknown };
+				return entity;
+			}
+		};
+
+		await MigrationHelper.applyEntityChain({ id: "1", qty: "5" }, [step1, step2]);
+
+		expect(received?.quantity).toBe("5");
+		expect(received?.qty).toBeUndefined();
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -876,6 +959,34 @@ describe("MigrationHelper.migrateWithChain", () => {
 			expect(contextSeenByCount?.[ContextIdKeys.Node]).toBe(
 				`${TestContextIdHandler.INTERNAL_PREFIX}shortNodeId`
 			);
+		});
+
+		test("runs transformEntity inside the partition context", async () => {
+			const target = makeTargetConnector();
+			const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+
+			const seenNodes: (string | undefined)[] = [];
+			const step: IResolvedMigrationStep = {
+				fromProperties: v0Props,
+				toProperties: v1Props,
+				transformEntity: async entity => {
+					const contextIds = await ContextIdStore.getContextIds();
+					seenNodes.push(contextIds?.[ContextIdKeys.Node]);
+					return entity;
+				}
+			};
+
+			await MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				[{ [ContextIdKeys.Node]: "partitionA" }, { [ContextIdKeys.Node]: "partitionB" }],
+				[step]
+			);
+
+			expect(seenNodes).toEqual([
+				`${TestContextIdHandler.INTERNAL_PREFIX}partitionA`,
+				`${TestContextIdHandler.INTERNAL_PREFIX}partitionB`
+			]);
 		});
 
 		test("runs a single pass with empty context when partitions is undefined (non-partitioned table)", async () => {

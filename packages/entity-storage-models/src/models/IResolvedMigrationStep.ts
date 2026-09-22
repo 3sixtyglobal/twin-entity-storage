@@ -3,6 +3,7 @@
 import type { IEntitySchemaProperty } from "@twin.org/entity";
 import type { EntityPropertyRemover } from "./entityPropertyRemover.js";
 import type { EntityPropertyTransformer } from "./entityPropertyTransformer.js";
+import type { EntityTransformer } from "./entityTransformer.js";
 
 /**
  * A fully-resolved single migration step used by MigrationHelper.
@@ -32,6 +33,15 @@ export interface IResolvedMigrationStep<T = unknown, U = unknown> {
 	renames?: { from: string; to: string }[];
 
 	/**
+	 * Optional whole-entity transform applied to the source entity before the diff runs,
+	 * so a step can supply a value for a property the source shape does not carry. Its output
+	 * is the entity the diff and the other two hooks receive.
+	 * @param entity The entity in the step's source shape.
+	 * @returns The entity, still in the step's source shape.
+	 */
+	transformEntity?: EntityTransformer<T>;
+
+	/**
 	 * Optional transformation for properties, usually only called for object and array types.
 	 * @param schema1Property The property schema in the old schema.
 	 * @param schemaProperty2 The property schema in the new schema.
@@ -42,9 +52,9 @@ export interface IResolvedMigrationStep<T = unknown, U = unknown> {
 
 	/**
 	 * Optional hook called when properties are dropped during migration.
-	 * Receives the original entity and the list of removed property schemas,
-	 * allowing callers to observe or record values before they are discarded.
-	 * @param entity The original entity before transformation.
+	 * Receives the entity and the list of removed property schemas, allowing callers to
+	 * observe or record values before they are discarded.
+	 * @param entity The entity being migrated, after transformEntity when one is set.
 	 * @param removedProperties The property schemas that were dropped.
 	 */
 	removeEntityProperty?: EntityPropertyRemover<T>;
