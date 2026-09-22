@@ -1,6 +1,7 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
+import { Coerce } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -126,6 +127,25 @@ async function indexColumnsByName(
 	return indexColumns;
 }
 
+/**
+ * Read the index prefix length recorded for a column that follows the partition key in an index.
+ * @param pool The pool to query with.
+ * @param tableName The table to inspect.
+ * @param columnName The column that must be the second key column of the index.
+ * @returns The prefix length, or undefined when the column is indexed in full.
+ */
+async function indexPrefixLength(
+	pool: Pool,
+	tableName: string,
+	columnName: string
+): Promise<number | undefined> {
+	const [rows] = await pool.query(
+		"SELECT sub_part AS subPart FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND column_name = ? AND seq_in_index = 2 LIMIT 1",
+		[TEST_MYSQL_CONFIG.database, tableName, columnName]
+	);
+	return Coerce.number((rows as { subPart: number | null }[])[0]?.subPart);
+}
+
 @entity()
 class IndexedTestType {
 	@property({ type: "string", isPrimary: true })
@@ -227,6 +247,53 @@ class WideCompositeIndexedTestType {
 	public third!: string;
 }
 
+@entity()
+class BoundedIndexedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", isSecondary: true, maxLength: 32 })
+	public code!: string;
+
+	@property({ type: "string", isSecondary: true, maxLength: 255 })
+	public atPrefixLimit!: string;
+
+	@property({ type: "string", isSecondary: true, maxLength: 256 })
+	public abovePrefixLimit!: string;
+}
+
+@entity()
+class FormatIndexedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", format: "date-time", sortDirection: SortDirection.Descending })
+	public created!: string;
+
+	@property({ type: "string", format: "uuid", isSecondary: true })
+	public ref!: string;
+}
+
+@entity()
+class BoundedCompositeIndexedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		maxLength: 32,
+		indexGroup: [{ name: "codeStatus", direction: SortDirection.Ascending, index: 0 }]
+	})
+	public code!: string;
+
+	@property({
+		type: "string",
+		maxLength: 64,
+		indexGroup: [{ name: "codeStatus", direction: SortDirection.Descending, index: 1 }]
+	})
+	public status!: string;
+}
+
 function createIndexedConnector(): MySqlEntityStorageConnector<IndexedTestType> {
 	return new MySqlEntityStorageConnector<IndexedTestType>({
 		entitySchema: nameof<IndexedTestType>(),
@@ -263,6 +330,15 @@ describe("MySqlEntityStorageConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<WideCompositeIndexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(WideCompositeIndexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<BoundedIndexedTestType>(), () =>
+			EntitySchemaHelper.getSchema(BoundedIndexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<FormatIndexedTestType>(), () =>
+			EntitySchemaHelper.getSchema(FormatIndexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<BoundedCompositeIndexedTestType>(), () =>
+			EntitySchemaHelper.getSchema(BoundedCompositeIndexedTestType)
 		);
 
 		ContextIdStore.getContextIds = vi
@@ -1015,6 +1091,172 @@ describe("MySqlEntityStorageConnector", () => {
 	);
 
 	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"bootstraps a table created by an earlier release whose bounded indexed columns are still LONGTEXT",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_legacybounded_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<BoundedIndexedTestType>({
+				entitySchema: nameof<BoundedIndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const qualifiedTable = `\`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\``;
+				const columns = ["code", "atPrefixLimit", "abovePrefixLimit"];
+
+				// The table as a release before the string lengths were declared created it.
+				await pool.query(
+					`CREATE TABLE ${qualifiedTable} (\`partitionId\` LONGTEXT NOT NULL, \`id\` LONGTEXT NOT NULL, \`code\` LONGTEXT NOT NULL, \`atPrefixLimit\` LONGTEXT NOT NULL, \`abovePrefixLimit\` LONGTEXT NOT NULL, PRIMARY KEY (\`partitionId\`(255), \`id\`(255)))`
+				);
+				for (const column of columns) {
+					await pool.query(
+						`CREATE INDEX \`${IndexHelper.generateName(tableName, column)}\` ON ${qualifiedTable} (\`${column}\`(255))`
+					);
+				}
+
+				expect(await connector.bootstrap()).toBe(true);
+				for (const column of columns) {
+					expect(await indexNamesCoveringColumn(pool, tableName, column)).toEqual([
+						IndexHelper.generateName(tableName, column)
+					]);
+					expect(await indexNamesLeadingOnColumn(pool, tableName, column)).toEqual([]);
+				}
+				expect(await indexPrefixLength(pool, tableName, "code")).toEqual(32);
+				expect(await indexPrefixLength(pool, tableName, "atPrefixLimit")).toEqual(255);
+				expect(await indexPrefixLength(pool, tableName, "abovePrefixLimit")).toEqual(255);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"bootstraps a table created by an earlier release whose format-mapped indexed columns are still LONGTEXT",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_legacyformat_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<FormatIndexedTestType>({
+				entitySchema: nameof<FormatIndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const qualifiedTable = `\`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\``;
+				const columns = ["created", "ref"];
+
+				// No maxLength declared anywhere; the format defaults alone trigger the legacy prefix.
+				await pool.query(
+					`CREATE TABLE ${qualifiedTable} (\`partitionId\` LONGTEXT NOT NULL, \`id\` LONGTEXT NOT NULL, \`created\` LONGTEXT NOT NULL, \`ref\` LONGTEXT NOT NULL, PRIMARY KEY (\`partitionId\`(255), \`id\`(255)))`
+				);
+				for (const column of columns) {
+					await pool.query(
+						`CREATE INDEX \`${IndexHelper.generateName(tableName, column)}\` ON ${qualifiedTable} (\`${column}\`(255))`
+					);
+				}
+
+				expect(await connector.bootstrap()).toBe(true);
+				for (const column of columns) {
+					expect(await indexNamesCoveringColumn(pool, tableName, column)).toEqual([
+						IndexHelper.generateName(tableName, column)
+					]);
+					expect(await indexNamesLeadingOnColumn(pool, tableName, column)).toEqual([]);
+				}
+				expect(await indexPrefixLength(pool, tableName, "created")).toEqual(64);
+				expect(await indexPrefixLength(pool, tableName, "ref")).toEqual(36);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
+		"bootstraps a table whose indexed columns are shorter than the lengths the schema now declares",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_raisedlength_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<BoundedIndexedTestType>({
+				entitySchema: nameof<BoundedIndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const qualifiedTable = `\`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\``;
+				const columns = ["code", "atPrefixLimit", "abovePrefixLimit"];
+
+				// Bounded columns as an earlier release created them, each shorter than the length the
+				// schema declares now, so the prefix has to come from the column rather than the schema.
+				await pool.query(
+					`CREATE TABLE ${qualifiedTable} (\`partitionId\` VARCHAR(255) NOT NULL, \`id\` VARCHAR(255) NOT NULL, \`code\` VARCHAR(16) NOT NULL, \`atPrefixLimit\` VARCHAR(100) NOT NULL, \`abovePrefixLimit\` VARCHAR(200) NOT NULL, PRIMARY KEY (\`partitionId\`, \`id\`))`
+				);
+				for (const column of columns) {
+					await pool.query(
+						`CREATE INDEX \`${IndexHelper.generateName(tableName, column)}\` ON ${qualifiedTable} (\`${column}\`)`
+					);
+				}
+
+				expect(await connector.bootstrap()).toBe(true);
+				for (const column of columns) {
+					expect(await indexNamesCoveringColumn(pool, tableName, column)).toEqual([
+						IndexHelper.generateName(tableName, column)
+					]);
+					// A prefix covering the whole column is recorded as a full index.
+					expect(await indexPrefixLength(pool, tableName, column)).toBeUndefined();
+				}
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_NAMED_INDEX_OBJECTS)(
 		"does not create a duplicate index when the column is already covered by a descending index",
 		async () => {
 			const tableName = `${TEST_MYSQL_CONFIG.tableName}_desc_${Date.now()}`;
@@ -1296,6 +1538,120 @@ describe("MySqlEntityStorageConnector", () => {
 					`${PARTITION_KEY} ASC`,
 					"value DESC",
 					"status ASC"
+				]);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstraps a composite index group on a table created by an earlier release whose bounded indexed columns are still LONGTEXT",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_group_legacybounded_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<BoundedCompositeIndexedTestType>({
+				entitySchema: nameof<BoundedCompositeIndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const indexGroups = EntitySchemaHelper.getIndexGroups(
+					EntitySchemaHelper.getSchema(BoundedCompositeIndexedTestType)
+				);
+				const codeStatusIndexName = IndexHelper.generateCompositeName(
+					tableName,
+					indexGroups.codeStatus
+				);
+
+				// The table and composite index exactly as a release before the partition key led the indexes created them.
+				await pool.query(
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` LONGTEXT NOT NULL, \`id\` LONGTEXT NOT NULL, \`code\` LONGTEXT NOT NULL, \`status\` LONGTEXT NOT NULL, PRIMARY KEY (\`partitionId\`(255), \`id\`(255)))`
+				);
+				await pool.query(
+					`CREATE INDEX \`${codeStatusIndexName}\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`code\`(255) ASC, \`status\`(255) DESC)`
+				);
+
+				expect(await connector.bootstrap()).toBe(true);
+
+				const indexColumns = await indexColumnsByName(pool, tableName);
+				expect(indexColumns[codeStatusIndexName]).toEqual([
+					`${PARTITION_KEY} ASC`,
+					"code ASC",
+					"status DESC"
+				]);
+			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstraps a composite index group whose columns are shorter than the lengths the schema now declares",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_group_raisedlength_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<BoundedCompositeIndexedTestType>({
+				entitySchema: nameof<BoundedCompositeIndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			let pool: Pool | undefined;
+
+			try {
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const indexGroups = EntitySchemaHelper.getIndexGroups(
+					EntitySchemaHelper.getSchema(BoundedCompositeIndexedTestType)
+				);
+				const codeStatusIndexName = IndexHelper.generateCompositeName(
+					tableName,
+					indexGroups.codeStatus
+				);
+
+				// Both grouped columns are shorter than the lengths the schema declares now.
+				await pool.query(
+					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` VARCHAR(255) NOT NULL, \`id\` VARCHAR(255) NOT NULL, \`code\` VARCHAR(16) NOT NULL, \`status\` VARCHAR(32) NOT NULL, PRIMARY KEY (\`partitionId\`, \`id\`))`
+				);
+				await pool.query(
+					`CREATE INDEX \`${codeStatusIndexName}\` ON \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`code\` ASC, \`status\` DESC)`
+				);
+
+				expect(await connector.bootstrap()).toBe(true);
+
+				const indexColumns = await indexColumnsByName(pool, tableName);
+				expect(indexColumns[codeStatusIndexName]).toEqual([
+					`${PARTITION_KEY} ASC`,
+					"code ASC",
+					"status DESC"
 				]);
 			} finally {
 				try {

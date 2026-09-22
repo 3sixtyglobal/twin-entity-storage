@@ -113,7 +113,8 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private static readonly _MAX_VARCHAR_LENGTH: number = 16383;
 
 	/**
-	 * The prefix length used when indexing a column which is too long to index in full.
+	 * The longest prefix a string column is indexed with, matching the bound on the partition key
+	 * so it can lead an index without one. MySQL itself allows more, up to the 3072 byte key limit.
 	 * @internal
 	 */
 	private static readonly _INDEX_PREFIX_LENGTH: number = 255;
@@ -390,6 +391,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 			}
 
 			const indexes = await this.readIndexes(pool);
+			const columnLengths = await this.readColumnLengths(pool);
 
 			for (const prop of this._entitySchema.properties ?? []) {
 				if (
@@ -397,13 +399,13 @@ export class MySqlEntityStorageConnector<T = unknown>
 					prop.type !== EntitySchemaPropertyType.Object &&
 					prop.type !== EntitySchemaPropertyType.Array
 				) {
-					await this.ensureIndex(pool, indexes, prop, nodeLogging);
+					await this.ensureIndex(pool, indexes, columnLengths, prop, nodeLogging);
 				}
 			}
 
 			const indexGroups = EntitySchemaHelper.getIndexGroups(this._entitySchema);
 			for (const indexProperties of Object.values(indexGroups)) {
-				await this.ensureCompositeIndex(pool, indexes, indexProperties);
+				await this.ensureCompositeIndex(pool, indexes, columnLengths, indexProperties);
 			}
 		} catch (error) {
 			await nodeLogging?.log({
@@ -1894,11 +1896,65 @@ export class MySqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Read the character length of every column on the table.
+	 * @param pool The pool to query with.
+	 * @returns The character length of each column, keyed by column name, absent for a non-string column.
+	 * @internal
+	 */
+	private async readColumnLengths(pool: Pool): Promise<{ [columnName: string]: number }> {
+		const [columnRows] = await pool.query(
+			"SELECT column_name AS columnName, character_maximum_length AS characterMaximumLength FROM INFORMATION_SCHEMA.COLUMNS WHERE table_schema = ? AND table_name = ?",
+			[this._config.database, this._config.tableName]
+		);
+
+		const columnLengths: { [columnName: string]: number } = {};
+
+		for (const row of Is.array(columnRows) ? columnRows : []) {
+			const columnName = ObjectHelper.propertyGet<string>(row, "columnName");
+			const characterMaximumLength = Coerce.integer(
+				ObjectHelper.propertyGet(row, "characterMaximumLength")
+			);
+			if (Is.stringValue(columnName) && Is.integer(characterMaximumLength)) {
+				columnLengths[columnName] = characterMaximumLength;
+			}
+		}
+
+		return columnLengths;
+	}
+
+	/**
+	 * Build the column reference for an index key, with a prefix which is legal on the column as it
+	 * exists rather than as the schema declares it. A table created by an earlier release can hold
+	 * the column as LONGTEXT, or shorter than a length the schema has since raised, and either way
+	 * the index has to be created before the schema version rebuild can convert the column.
+	 * @param prop The indexed property.
+	 * @param columnLengths The character length of each column on the table.
+	 * @returns The quoted column reference.
+	 * @internal
+	 */
+	private indexKeyColumn<U>(
+		prop: IEntitySchemaProperty<U>,
+		columnLengths: { [columnName: string]: number }
+	): string {
+		const columnName = String(prop.property);
+		const declaredPrefixLength = this.mapSqlColumn(prop).indexPrefixLength;
+		const columnLength = columnLengths[columnName];
+
+		return this.indexColumn(
+			columnName,
+			Is.integer(declaredPrefixLength) && Is.integer(columnLength)
+				? Math.min(declaredPrefixLength, columnLength)
+				: declaredPrefixLength
+		);
+	}
+
+	/**
 	 * Ensure the secondary index for a property exists, dropping a legacy-named index if present.
 	 * Every query is scoped to a single partition, so the index leads with the partition key and
 	 * the property follows it, letting one index serve both the partition filter and the sort.
 	 * @param pool The pool to query with.
 	 * @param indexes The indexes already on the table, keyed by index name.
+	 * @param columnLengths The character length of each column on the table.
 	 * @param prop The indexed property.
 	 * @param nodeLogging Optional logging component.
 	 * @internal
@@ -1906,6 +1962,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private async ensureIndex(
 		pool: Pool,
 		indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } },
+		columnLengths: { [columnName: string]: number },
 		prop: IEntitySchemaProperty<T>,
 		nodeLogging?: ILoggingComponent
 	): Promise<void> {
@@ -1915,8 +1972,8 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		if (!this.isIndexCovered(indexes, keyColumns)) {
 			const indexCols = [
-				this.partitionKeyIndexColumn(),
-				this.indexColumn(columnName, this.mapSqlColumn(prop).indexPrefixLength)
+				this.partitionKeyIndexColumn(columnLengths),
+				this.indexKeyColumn(prop, columnLengths)
 			];
 
 			// An index of ours under the same name but with a different shape predates the partition
@@ -1951,12 +2008,14 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * The partition key leads the index for the same reason it leads a single property index.
 	 * @param pool The pool to query with.
 	 * @param indexes The indexes already on the table, keyed by index name.
+	 * @param columnLengths The character length of each column on the table.
 	 * @param indexProperties The properties in the group, ordered by their index position.
 	 * @internal
 	 */
 	private async ensureCompositeIndex(
 		pool: Pool,
 		indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } },
+		columnLengths: { [columnName: string]: number },
 		indexProperties: { property: IEntitySchemaProperty<T>; direction: SortDirection }[]
 	): Promise<void> {
 		const indexName = IndexHelper.generateCompositeName(this._config.tableName, indexProperties);
@@ -1970,12 +2029,9 @@ export class MySqlEntityStorageConnector<T = unknown>
 		}
 
 		const indexCols = [
-			`${this.partitionKeyIndexColumn()} ASC`,
+			`${this.partitionKeyIndexColumn(columnLengths)} ASC`,
 			...indexProperties.map(indexProperty => {
-				const column = this.indexColumn(
-					String(indexProperty.property.property),
-					this.mapSqlColumn(indexProperty.property).indexPrefixLength
-				);
+				const column = this.indexKeyColumn(indexProperty.property, columnLengths);
 				return `${column} ${indexProperty.direction === SortDirection.Descending ? "DESC" : "ASC"}`;
 			})
 		];
@@ -2487,7 +2543,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * over the format mapping. A format which has a default length in EntitySchemaHelper.FORMAT_MAX_LENGTHS
 	 * and no dedicated column type is also bounded to that length.
 	 * @param prop The property to map.
-	 * @returns The MySQL column type, and the prefix length needed to index it, if any.
+	 * @returns The MySQL column type, and the prefix length to index it with, undefined for a non-string column.
 	 * @internal
 	 */
 	private mapSqlColumn<U>(prop: IEntitySchemaProperty<U>): {
@@ -2575,16 +2631,20 @@ export class MySqlEntityStorageConnector<T = unknown>
 			sqlType = `VARCHAR(${columnLength})`;
 		}
 
-		// A column which cannot be indexed in full needs a prefix, anything which is not text
-		// is always indexable in full.
-		const needsPrefix = Is.integer(columnLength)
-			? columnLength > MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH
-			: isUnboundedText;
+		// Every string column is indexed with a prefix, so the same DDL is legal on the VARCHAR or
+		// CHAR the schema creates and on the LONGTEXT a table from an earlier release still has.
+		// MySQL records a prefix that covers the whole column as a full index.
+		const indexPrefixLength =
+			prop.type === EntitySchemaPropertyType.String
+				? Math.min(
+						Is.integer(columnLength)
+							? columnLength
+							: MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH,
+						MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH
+					)
+				: undefined;
 
-		return {
-			sqlType,
-			indexPrefixLength: needsPrefix ? MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH : undefined
-		};
+		return { sqlType, indexPrefixLength };
 	}
 
 	/**
@@ -2603,16 +2663,12 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 	/**
 	 * Build the column reference for the partition key when it leads an index.
-	 * The prefix is always applied: a table created by an earlier release still has a LONGTEXT
-	 * partition column, and on the VARCHAR(255) column the prefix indexes it in full.
+	 * @param columnLengths The character length of each column on the table.
 	 * @returns The quoted column reference.
 	 * @internal
 	 */
-	private partitionKeyIndexColumn(): string {
-		return this.indexColumn(
-			MySqlEntityStorageConnector._PARTITION_KEY,
-			MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH
-		);
+	private partitionKeyIndexColumn(columnLengths: { [columnName: string]: number }): string {
+		return this.indexKeyColumn(this.partitionKeyProperty(), columnLengths);
 	}
 
 	/**

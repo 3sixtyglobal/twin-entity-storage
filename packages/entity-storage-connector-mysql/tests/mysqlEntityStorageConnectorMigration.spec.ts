@@ -1,15 +1,17 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdStore, type IContextIds } from "@twin.org/context";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import { ComponentFactory, Is } from "@twin.org/core";
 import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
 import {
+	IndexHelper,
 	MigrationHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IResolvedMigrationStep
 } from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
+import { createPool } from "mysql2/promise";
 import { TEST_MYSQL_CONFIG } from "./setupTestEnv.js";
 import { MySqlEntityStorageConnector } from "../src/mysqlEntityStorageConnector.js";
 
@@ -180,6 +182,35 @@ class MigMultiFieldB {
 	public renamedB!: string;
 }
 
+/**
+ * V1 with a bounded secondary index - a table from an earlier release still holds it as LONGTEXT.
+ * MySQL-only: exercises the connector's legacy-DDL bootstrap, which cannot be expressed generically
+ * for other backends, so this entity/test pair is not duplicated to the other connectors.
+ */
+@entity()
+class MigBoundedV1 {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", isSecondary: true, maxLength: 32 })
+	public code!: string;
+}
+
+/**
+ * V2 adds an optional note to MigBoundedV1.
+ */
+@entity()
+class MigBoundedV2 {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", isSecondary: true, maxLength: 32 })
+	public code!: string;
+
+	@property({ type: "string", optional: true })
+	public note?: string;
+}
+
 let currentUser = "user";
 let currentConnector: IEntityStorageMigrationConnector | undefined;
 const originalMigrateWithChain = MigrationHelper.migrateWithChain.bind(MigrationHelper);
@@ -232,6 +263,12 @@ describe("MySqlEntityStorageConnector - partitioning and migration", () => {
 		);
 		EntitySchemaFactory.register(nameof<MigMultiFieldB>(), () =>
 			EntitySchemaHelper.getSchema(MigMultiFieldB)
+		);
+		EntitySchemaFactory.register(nameof<MigBoundedV1>(), () =>
+			EntitySchemaHelper.getSchema(MigBoundedV1)
+		);
+		EntitySchemaFactory.register(nameof<MigBoundedV2>(), () =>
+			EntitySchemaHelper.getSchema(MigBoundedV2)
 		);
 
 		createConnector = async (entitySchema, partitionContextIds, storageId) => {
@@ -464,6 +501,63 @@ describe("MySqlEntityStorageConnector - partitioning and migration", () => {
 			expect((item1 as MigV2).newField).toBeUndefined();
 			const item2 = await finalConnector.get("2");
 			expect(item2).toBeDefined();
+		});
+
+		test("migrates a table created by an earlier release whose bounded indexed column is still LONGTEXT", async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_legacybounded_${Date.now()}`;
+			const qualifiedTable = `\`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\``;
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				await ContextIdStore.getContextIds(),
+				["user"]
+			);
+			const pool = createPool({
+				host: TEST_MYSQL_CONFIG.host,
+				port: TEST_MYSQL_CONFIG.port,
+				user: TEST_MYSQL_CONFIG.user,
+				password: TEST_MYSQL_CONFIG.password,
+				database: TEST_MYSQL_CONFIG.database
+			});
+
+			// Tracked before the raw DDL so a failed setup still tears the table down.
+			const source = new MySqlEntityStorageConnector<MigBoundedV1>({
+				entitySchema: nameof<MigBoundedV1>(),
+				partitionContextIds: ["user"],
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			trackedConnectors.push(source);
+
+			try {
+				// The table and index exactly as a release before the string length was declared created them.
+				await pool.query(
+					`CREATE TABLE ${qualifiedTable} (\`partitionId\` LONGTEXT NOT NULL, \`id\` LONGTEXT NOT NULL, \`code\` LONGTEXT NOT NULL, PRIMARY KEY (\`partitionId\`(255), \`id\`(255)))`
+				);
+				await pool.query(
+					`CREATE INDEX \`${IndexHelper.generateName(tableName, "code")}\` ON ${qualifiedTable} (\`code\`(255))`
+				);
+				await pool.query(
+					`INSERT INTO ${qualifiedTable} (\`partitionId\`, \`id\`, \`code\`) VALUES (?, ?, ?)`,
+					[partitionKey, "1", "c-1"]
+				);
+
+				const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+					source,
+					nameof<MigBoundedV2>(),
+					await source.getPartitionContextIds(),
+					[makeStep(source, nameof<MigBoundedV2>())]
+				);
+
+				expect(migrated).toBe(1);
+				const item = (await finalConnector.get("1")) as MigBoundedV2 | undefined;
+				expect(item?.code).toEqual("c-1");
+
+				const [rows] = await pool.query(
+					"SELECT data_type AS dataType, character_maximum_length AS maxLength FROM INFORMATION_SCHEMA.COLUMNS WHERE table_schema = ? AND table_name = ? AND column_name = 'code'",
+					[TEST_MYSQL_CONFIG.database, tableName]
+				);
+				expect(rows).toEqual([{ dataType: "varchar", maxLength: 32 }]);
+			} finally {
+				await pool.end();
+			}
 		});
 
 		test("preserves entity count across migration", async () => {
