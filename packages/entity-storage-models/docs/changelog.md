@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1-next.11](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.10.1-next.10...entity-storage-models-v0.10.1-next.11) (2026-09-23)
+
+
+### Features
+
+* name the partition and the row when a schema migration fails on it ([#306](https://github.com/iotaledger/twin-entity-storage/issues/306)) ([827483c](https://github.com/iotaledger/twin-entity-storage/commit/827483cdf9cab9039108b03b5ea92b28bb9a2843))
+
 ## [0.10.1-next.10](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.10.1-next.9...entity-storage-models-v0.10.1-next.10) (2026-09-23)
 
 

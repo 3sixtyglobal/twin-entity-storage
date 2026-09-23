@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-connector-gcp-firestore",
-	"version": "0.10.1-next.10",
+	"version": "0.10.1-next.11",
 	"description": "Google Cloud Firestore connector for document-based persistence.",
 	"repository": {
 		"type": "git",
@@ -33,13 +33,13 @@
 		"@twin.org/context": "next",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.10.1-next.10",
+		"@twin.org/entity-storage-models": "0.10.1-next.11",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next",
 		"google-auth-library": "11.1.0"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.10.1-next.10",
+		"@twin.org/entity-storage-connector-memory": "0.10.1-next.11",
 		"@twin.org/logging-connector-entity-storage": "next",
 		"@twin.org/logging-service": "next",
 		"@twin.org/nameof-transformer": "next",
