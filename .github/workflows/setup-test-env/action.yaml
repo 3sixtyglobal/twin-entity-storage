@@ -39,7 +39,10 @@ runs:
     - name: Start MySQL Service
       if: inputs.package == 'packages/entity-storage-connector-mysql' || inputs.package == 'all'
       shell: bash
-      run: docker pull mysql:latest && docker run -d --name twin-entity-storage-mysql -e MYSQL_ROOT_PASSWORD=password -p 3306:3306 mysql:latest
+      run: |
+        docker pull mysql:latest && docker run -d --name twin-entity-storage-mysql -e MYSQL_ROOT_PASSWORD=password -p 3306:3306 mysql:latest
+        echo "Waiting for MySQL to be ready..."
+        timeout 120 bash -c 'until docker exec twin-entity-storage-mysql mysql -h 127.0.0.1 --protocol=TCP -uroot -ppassword -e "SELECT 1" > /dev/null 2>&1; do sleep 2; done'
 
     # Start MongoDB service only for MongoDB package
     - name: Start MongoDB Service
