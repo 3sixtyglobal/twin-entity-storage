@@ -32,6 +32,21 @@ The schema for the entities.
 
 ***
 
+### getPartitionKeySeparator()? {#getpartitionkeyseparator}
+
+> `optional` **getPartitionKeySeparator**(): `string`
+
+The separator this connector joins context id parts with to form a partition key.
+Defaults to "/" when not implemented.
+
+#### Returns
+
+`string`
+
+The separator.
+
+***
+
 ### set() {#set}
 
 > **set**(`entity`, `conditions?`): `Promise`\<`void`\>

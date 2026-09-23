@@ -32,6 +32,25 @@ The schema for the entities.
 
 ***
 
+### getPartitionKeySeparator()? {#getpartitionkeyseparator}
+
+> `optional` **getPartitionKeySeparator**(): `string`
+
+The separator this connector joins context id parts with to form a partition key.
+Defaults to "/" when not implemented.
+
+#### Returns
+
+`string`
+
+The separator.
+
+#### Inherited from
+
+[`IEntityStorageConnector`](IEntityStorageConnector.md).[`getPartitionKeySeparator`](IEntityStorageConnector.md#getpartitionkeyseparator)
+
+***
+
 ### set() {#set}
 
 > **set**(`entity`, `conditions?`): `Promise`\<`void`\>

@@ -121,6 +121,25 @@ The schema for the entities.
 
 ***
 
+### getPartitionKeySeparator() {#getpartitionkeyseparator}
+
+> **getPartitionKeySeparator**(): `string`
+
+The separator this connector joins context id parts with to form a partition key.
+
+#### Returns
+
+`string`
+
+The separator, ":" instead of the default "/" since Firestore interprets "/" as a
+path separator in collection names.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.getPartitionKeySeparator`
+
+***
+
 ### bootstrap() {#bootstrap}
 
 > **bootstrap**(`nodeLoggingComponentType?`): `Promise`\<`boolean`\>
