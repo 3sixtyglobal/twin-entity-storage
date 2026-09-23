@@ -1,0 +1,32 @@
+packages:
+  - 'packages/*'
+  - 'apps/*'
+
+# Intra-repo dependencies are pinned to exact versions instead of the workspace:
+# protocol, so pnpm has to be told to resolve them from the workspace.
+linkWorkspacePackages: true
+preferWorkspacePackages: true
+
+# Every dependency in the repo is pinned to an exact version.
+saveExact: true
+
+# The @twin.org packages are released continuously as next builds and consumed
+# across the repos, so they are exempt from the release age hold pnpm applies to
+# everything else.
+minimumReleaseAgeExclude:
+  - '@twin.org/*'
+
+# Dependencies that pnpm update leaves alone. The toolchain is pinned deliberately,
+# the @iota packages have to match the versions the published @twin.org packages
+# depend on, and the @twin.org packages are pinned to a release tag rather than a
+# version, so they are refreshed by the second half of the package:update script.
+update:
+  ignoreDeps:
+    - typescript
+    - '@iota/*'
+    - '@twin.org/*'
+
+allowBuilds:
+  esbuild: true
+  protobufjs: true
+  unrs-resolver: true

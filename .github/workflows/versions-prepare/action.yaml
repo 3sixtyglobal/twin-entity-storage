@@ -114,11 +114,15 @@ runs:
         cd "$TARGET_DIR"
         git diff --binary origin/next origin/main | git apply --index
 
-    # Set up Node.js environment for running npm commands
+    # Set up Node.js environment for running the package manager commands
     - name: Setup Node.js
       uses: actions/setup-node@v6
       with:
         node-version: 24
+
+    # Setup pnpm after node, the runners have no system node for its installer to use.
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v6
 
     # Hotfix mode: instead of the content alignment, sync only the release
     # artifacts from main: the prod manifest (so the version script continues
@@ -148,6 +152,30 @@ runs:
         cd "$TARGET_DIR"
         git checkout -b $BRANCH_NAME
         echo "BRANCH_NAME=$BRANCH_NAME" >> $GITHUB_ENV
+
+    # The version script asks pnpm for the workspace project list, which needs the
+    # dependencies in place. Scripts are skipped because nothing is built here, and
+    # it is retried to handle transient registry failures. After Align Next to Main
+    # the target may still be an npm workspace, and there the script reads the
+    # workspaces field instead, so there is nothing to install.
+    - name: Install dependencies for the workspace graph
+      shell: bash
+      run: |
+        cd "$TARGET_DIR"
+        if [ ! -f pnpm-workspace.yaml ]; then
+          echo "Not a pnpm workspace, the version script reads the workspaces field instead"
+          exit 0
+        fi
+        for i in {1..5}; do
+          pnpm install --frozen-lockfile --ignore-scripts && break || {
+            if [ $i -eq 5 ]; then
+              echo "pnpm install failed after 5 attempts"
+              exit 1
+            fi
+            echo "pnpm install failed, retrying in 30 seconds (attempt $i/5)..."
+            sleep 30
+          }
+        done
 
     # Run the custom script to align package versions for the target release type.
     # Use the script from GITHUB_WORKSPACE (the triggering branch) rather than
@@ -208,21 +236,21 @@ runs:
           echo "Version changes detected. Proceeding with build and PR creation."
         fi
 
-    # Install dependencies with retry to handle transient registry failures.
-    # Uses npm install (not npm ci) because package.json versions have just been
-    # updated and the lockfile needs to be regenerated to match.
+    # Uses a non-frozen install because package.json versions have just been
+    # updated and the lockfile needs to be regenerated to match. Retried to handle
+    # transient registry failures.
     - name: Install dependencies
       if: ${{ steps.check-changes.outputs.has_changes == 'true' }}
       shell: bash
       run: |
         cd "$TARGET_DIR"
         for i in {1..5}; do
-          npm install --no-audit --no-fund && break || {
+          pnpm install --no-frozen-lockfile && break || {
             if [ $i -eq 5 ]; then
-              echo "npm install failed after 5 attempts"
+              echo "pnpm install failed after 5 attempts"
               exit 1
             fi
-            echo "npm install failed, retrying in 30 seconds (attempt $i/5)..."
+            echo "pnpm install failed, retrying in 30 seconds (attempt $i/5)..."
             sleep 30
           }
         done
@@ -234,9 +262,7 @@ runs:
       shell: bash
       run: |
         cd "$TARGET_DIR"
-        npm run format
-        npm run lint
-        npm run dist:no-test
+        pnpm run quality:no-test
 
     # Commit all version and lockfile changes together so the PR is self-contained.
     - name: Commit Changes

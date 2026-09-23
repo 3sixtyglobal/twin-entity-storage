@@ -13,7 +13,13 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { execAsync, loadJson, loadNextPrereleaseManifest, saveJson } from './common.mjs';
+import {
+	execAsync,
+	loadJson,
+	loadNextPrereleaseManifest,
+	loadWorkspaceDirs,
+	saveJson
+} from './common.mjs';
 
 const MANIFEST_PRODUCTION_FILENAME = 'release/release-please-manifest.prod.json';
 const MANIFEST_PRERELEASE_FILENAME = 'release/release-please-manifest.prerelease.json';
@@ -208,21 +214,21 @@ async function run() {
 		}
 	}
 
-	// Load the root package.json to get the list of workspaces
-	const repoPackageJson = await loadJson('package.json');
+	// Get the list of workspaces for the repo
+	const workspaces = await loadWorkspaceDirs();
 
 	// Collect all in-repo workspace package names up front so dependency processing
 	// can distinguish them from external @twin.org packages regardless of the order
 	// the workspaces are processed in.
 	const workspaceNames = new Set();
-	for (const workspace of repoPackageJson.workspaces) {
+	for (const workspace of workspaces) {
 		const workspacePackageJson = await loadJson(path.join(workspace, 'package.json'));
 		workspaceNames.add(workspacePackageJson.name);
 	}
 
 	const versionCache = {};
 
-	for (const workspace of repoPackageJson.workspaces) {
+	for (const workspace of workspaces) {
 		const workspacePackageJsonFilename = path.join(workspace, 'package.json');
 		process.stdout.write(`Processing: ${workspacePackageJsonFilename}\n`);
 

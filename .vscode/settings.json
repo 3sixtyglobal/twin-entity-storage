@@ -17,10 +17,6 @@
 	"prettier.configPath": "prettier.config.mjs",
 	"cSpell.autoFormatConfigFile": true,
 	"vitest.disableWorkspaceWarning": true,
-	"markdownlint.lintWorkspaceGlobs": [
-		"**/*.{md,mkd,mdwn,mdown,markdown,markdn,mdtxt,mdtext,workbook}",
-		"!**/node_modules",
-		"!**/docs/reference/**",
-		"!**/changelog.md"
-	]
+	"coverage-gutters.coverageFileNames": ["lcov.info"],
+	"coverage-gutters.coverageBaseDir": "{packages,apps}/*/coverage"
 }
