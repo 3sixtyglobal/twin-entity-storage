@@ -246,7 +246,7 @@ importers:
         version: 4.10.1(supports-color@5.5.0)
       '@twin.org/api-models':
         specifier: next
-        version: 0.10.1-next.5
+        version: 0.10.1-next.6
       '@twin.org/context':
         specifier: next
         version: 0.10.1-next.10
@@ -261,7 +261,7 @@ importers:
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof':
         specifier: next
         version: 0.10.1-next.10
@@ -271,7 +271,7 @@ importers:
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof-vitest-plugin':
         specifier: next
         version: 0.10.1-next.10(@opentelemetry/api@1.9.1)(@types/node@26.6.2)(@vitest/coverage-v8@5.0.1)(vite@8.3.0(@types/node@26.6.2)(jiti@2.6.1))
@@ -328,7 +328,7 @@ importers:
         version: 3.996.9(@aws-sdk/client-dynamodb@3.1137.0)
       '@twin.org/api-models':
         specifier: next
-        version: 0.10.1-next.5
+        version: 0.10.1-next.6
       '@twin.org/context':
         specifier: next
         version: 0.10.1-next.10
@@ -343,7 +343,7 @@ importers:
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof':
         specifier: next
         version: 0.10.1-next.10
@@ -353,10 +353,10 @@ importers:
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/logging-service':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof-transformer':
         specifier: next
         version: 0.10.1-next.10
@@ -407,7 +407,7 @@ importers:
     dependencies:
       '@twin.org/api-models':
         specifier: next
-        version: 0.10.1-next.5
+        version: 0.10.1-next.6
       '@twin.org/context':
         specifier: next
         version: 0.10.1-next.10
@@ -422,7 +422,7 @@ importers:
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof':
         specifier: next
         version: 0.10.1-next.10
@@ -432,10 +432,10 @@ importers:
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/logging-service':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof-transformer':
         specifier: next
         version: 0.10.1-next.10
@@ -489,7 +489,7 @@ importers:
         version: 9.2.0(supports-color@10.2.2)
       '@twin.org/api-models':
         specifier: next
-        version: 0.10.1-next.5
+        version: 0.10.1-next.6
       '@twin.org/context':
         specifier: next
         version: 0.10.1-next.10
@@ -504,7 +504,7 @@ importers:
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof':
         specifier: next
         version: 0.10.1-next.10
@@ -517,10 +517,10 @@ importers:
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/logging-service':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof-transformer':
         specifier: next
         version: 0.10.1-next.10
@@ -568,7 +568,7 @@ importers:
     dependencies:
       '@twin.org/api-models':
         specifier: next
-        version: 0.10.1-next.5
+        version: 0.10.1-next.6
       '@twin.org/context':
         specifier: next
         version: 0.10.1-next.10
@@ -583,7 +583,7 @@ importers:
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof':
         specifier: next
         version: 0.10.1-next.10
@@ -638,7 +638,7 @@ importers:
     dependencies:
       '@twin.org/api-models':
         specifier: next
-        version: 0.10.1-next.5
+        version: 0.10.1-next.6
       '@twin.org/context':
         specifier: next
         version: 0.10.1-next.10
@@ -653,7 +653,7 @@ importers:
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof':
         specifier: next
         version: 0.10.1-next.10
@@ -666,10 +666,10 @@ importers:
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/logging-service':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof-transformer':
         specifier: next
         version: 0.10.1-next.10
@@ -720,7 +720,7 @@ importers:
     dependencies:
       '@twin.org/api-models':
         specifier: next
-        version: 0.10.1-next.5
+        version: 0.10.1-next.6
       '@twin.org/context':
         specifier: next
         version: 0.10.1-next.10
@@ -738,7 +738,7 @@ importers:
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof':
         specifier: next
         version: 0.10.1-next.10
@@ -751,10 +751,10 @@ importers:
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/logging-service':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof-transformer':
         specifier: next
         version: 0.10.1-next.10
@@ -805,7 +805,7 @@ importers:
     dependencies:
       '@twin.org/api-models':
         specifier: next
-        version: 0.10.1-next.5
+        version: 0.10.1-next.6
       '@twin.org/context':
         specifier: next
         version: 0.10.1-next.10
@@ -820,7 +820,7 @@ importers:
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof':
         specifier: next
         version: 0.10.1-next.10
@@ -833,10 +833,10 @@ importers:
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/logging-service':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof-transformer':
         specifier: next
         version: 0.10.1-next.10
@@ -887,7 +887,7 @@ importers:
     dependencies:
       '@twin.org/api-models':
         specifier: next
-        version: 0.10.1-next.5
+        version: 0.10.1-next.6
       '@twin.org/context':
         specifier: next
         version: 0.10.1-next.10
@@ -902,7 +902,7 @@ importers:
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof':
         specifier: next
         version: 0.10.1-next.10
@@ -915,10 +915,10 @@ importers:
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/logging-service':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof-transformer':
         specifier: next
         version: 0.10.1-next.10
@@ -981,7 +981,7 @@ importers:
         version: 0.10.1-next.10
       '@twin.org/logging-models':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof':
         specifier: next
         version: 0.10.1-next.10
@@ -1030,10 +1030,10 @@ importers:
     dependencies:
       '@twin.org/api-core':
         specifier: next
-        version: 0.10.1-next.5(supports-color@10.2.2)
+        version: 0.10.1-next.6(supports-color@10.2.2)
       '@twin.org/api-models':
         specifier: next
-        version: 0.10.1-next.5
+        version: 0.10.1-next.6
       '@twin.org/core':
         specifier: next
         version: 0.10.1-next.10
@@ -1094,7 +1094,7 @@ importers:
     dependencies:
       '@twin.org/api-models':
         specifier: next
-        version: 0.10.1-next.5
+        version: 0.10.1-next.6
       '@twin.org/context':
         specifier: next
         version: 0.10.1-next.10
@@ -1109,7 +1109,7 @@ importers:
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
-        version: 0.10.1-next.2
+        version: 0.10.1-next.3
       '@twin.org/nameof':
         specifier: next
         version: 0.10.1-next.10
@@ -2125,12 +2125,12 @@ packages:
     peerDependencies:
       eslint: '>=7.7.0'
 
-  '@twin.org/api-core@0.10.1-next.5':
-    resolution: {integrity: sha512-Yelkl8WiqJSxtSHatzCcpnJRG73R+S+mKfXhr74+zjgltINxgvzLH5UBp0o7cBkGubfFelOR6lAacfPhrHN0TA==}
+  '@twin.org/api-core@0.10.1-next.6':
+    resolution: {integrity: sha512-mu4E9GHBQueBy5CmlBLEgcRGJqhErdHysbxKdiDvexnXYGjeXZzGh+Xz2hj6Z8f5SFRzn6hXY1+AyuEcn3ymCw==}
     engines: {node: '>=24.0.0'}
 
-  '@twin.org/api-models@0.10.1-next.5':
-    resolution: {integrity: sha512-JpUka41YqxNjhxPjdwkt6wweAAaB29+oWkVWzSfiREMoS/428rrAnpqDPkyIkM2VQzlSIrkBeu3IZiiplo5vlQ==}
+  '@twin.org/api-models@0.10.1-next.6':
+    resolution: {integrity: sha512-tHWC0gBPtl5YaqHNWNi/h3svoKnZq4xByOILQ81ORODJnaXhiDrA9hK06IYHccmtYydGnwCTjFP8JJGSuscN0Q==}
     engines: {node: '>=24.0.0'}
 
   '@twin.org/cli-core@0.10.1-next.10':
@@ -2157,24 +2157,24 @@ packages:
     resolution: {integrity: sha512-Ebsuj7QRvoZnk6RFl6XaMkmmaz1tlhavbtDW9utQ1sPn+VvZTdEiUAK/r+qUQ7pwqqeJd93Yy8kbIvr+76k/Dw==}
     engines: {node: '>=24.0.0'}
 
-  '@twin.org/entity-storage-models@0.10.1-next.9':
-    resolution: {integrity: sha512-RDHwYjU7dNX9HK+vZDNVtmxFO+AOutoJhklm/moqjral3+lzXHNS9OQUZgpC3iLpGpxBqEYgFUR8RRgfFGo+AA==}
+  '@twin.org/entity-storage-models@0.10.1-next.10':
+    resolution: {integrity: sha512-NNvQiIsL/JHgk4vruhRuY6LxzpJpSH6S+9xwRgAma2qLpRMlS0NEON2Np/9QWRCekNN2VeAG92SDFGDhap45tA==}
     engines: {node: '>=24.0.0'}
 
   '@twin.org/entity@0.10.1-next.10':
     resolution: {integrity: sha512-7EWfC+XyXgyNEf1DVB8IAmgqfIArWUhsLVwAbfsCkCo3TNtJlse32fQND49QHt4FNIC5QOpuO4v9N4Q61GjiLQ==}
     engines: {node: '>=24.0.0'}
 
-  '@twin.org/logging-connector-entity-storage@0.10.1-next.2':
-    resolution: {integrity: sha512-lWUaL6ogGZrKK6M5M8QUnxrZ2lLIz9jZrp0QFU+3kN20fIGFvyvpHgRR+8dKgt4M7fC+aZ8H6QtBTaOTq7QtFw==}
+  '@twin.org/logging-connector-entity-storage@0.10.1-next.3':
+    resolution: {integrity: sha512-DbEaibAKAh2eKTeFrEApLMjLcjseYUuxz/4W9BNw0vS1VYtZUxT95o9q6ZxxF4DYP4EVpGQkW8fnoJGsaq2cYQ==}
     engines: {node: '>=24.0.0'}
 
-  '@twin.org/logging-models@0.10.1-next.2':
-    resolution: {integrity: sha512-6R3oOKw0qS91S2lxcshKxD1XAkj8lv4fKVOmo/QvWMjaekW3TEzmgJ4ekUM2tVigaUUoxx/IuVcfa9ZSRyLPKA==}
+  '@twin.org/logging-models@0.10.1-next.3':
+    resolution: {integrity: sha512-UCy/SQCuHu5h+QwVXeeomSU1qJ86QoaPhAwdqaQQzNNfDgj121AEzGv/pY5p9uVRr+2lEdi3z+s+nAD5U7ynTQ==}
     engines: {node: '>=24.0.0'}
 
-  '@twin.org/logging-service@0.10.1-next.2':
-    resolution: {integrity: sha512-NKlKBNzEZJM1ZQ5taNUv7WUeB9StJk1tTpjabEO1IX0v6DnjhQkcTODRSLcHcHWg4KcbDN/QnSw8k+XLkbjkfA==}
+  '@twin.org/logging-service@0.10.1-next.3':
+    resolution: {integrity: sha512-kmfON3y2pN85a/px6kKvMxUUX5RnO2OTvxBLCk2p4t0lNZP6MnKT8LjfWuD4dLf6BnQMILRLchLF3wGvY2zgzQ==}
     engines: {node: '>=24.0.0'}
 
   '@twin.org/nameof-transformer@0.10.1-next.10':
@@ -6029,9 +6029,9 @@ snapshots:
     dependencies:
       eslint: 10.11.0(jiti@2.6.1)(supports-color@10.2.2)
 
-  '@twin.org/api-core@0.10.1-next.5(supports-color@10.2.2)':
+  '@twin.org/api-core@0.10.1-next.6(supports-color@10.2.2)':
     dependencies:
-      '@twin.org/api-models': 0.10.1-next.5
+      '@twin.org/api-models': 0.10.1-next.6
       '@twin.org/core': 0.10.1-next.10
       '@twin.org/nameof': 0.10.1-next.10
       '@twin.org/web': 0.10.1-next.10
@@ -6041,7 +6041,7 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@twin.org/api-models@0.10.1-next.5':
+  '@twin.org/api-models@0.10.1-next.6':
     dependencies:
       '@twin.org/context': 0.10.1-next.10
       '@twin.org/core': 0.10.1-next.10
@@ -6100,13 +6100,13 @@ snapshots:
       '@types/jsonld': 1.5.15
       jsonld: 9.0.0
 
-  '@twin.org/entity-storage-models@0.10.1-next.9':
+  '@twin.org/entity-storage-models@0.10.1-next.10':
     dependencies:
       '@twin.org/context': 0.10.1-next.10
       '@twin.org/core': 0.10.1-next.10
       '@twin.org/crypto': 0.10.1-next.10
       '@twin.org/entity': 0.10.1-next.10
-      '@twin.org/logging-models': 0.10.1-next.2
+      '@twin.org/logging-models': 0.10.1-next.3
       '@twin.org/nameof': 0.10.1-next.10
 
   '@twin.org/entity@0.10.1-next.10':
@@ -6116,28 +6116,28 @@ snapshots:
       reflect-metadata: 0.2.2
       tslib: 2.8.1
 
-  '@twin.org/logging-connector-entity-storage@0.10.1-next.2':
+  '@twin.org/logging-connector-entity-storage@0.10.1-next.3':
     dependencies:
-      '@twin.org/api-models': 0.10.1-next.5
+      '@twin.org/api-models': 0.10.1-next.6
       '@twin.org/context': 0.10.1-next.10
       '@twin.org/core': 0.10.1-next.10
       '@twin.org/entity': 0.10.1-next.10
-      '@twin.org/entity-storage-models': 0.10.1-next.9
-      '@twin.org/logging-models': 0.10.1-next.2
+      '@twin.org/entity-storage-models': 0.10.1-next.10
+      '@twin.org/logging-models': 0.10.1-next.3
       '@twin.org/nameof': 0.10.1-next.10
 
-  '@twin.org/logging-models@0.10.1-next.2':
+  '@twin.org/logging-models@0.10.1-next.3':
     dependencies:
       '@twin.org/core': 0.10.1-next.10
       '@twin.org/entity': 0.10.1-next.10
       '@twin.org/nameof': 0.10.1-next.10
 
-  '@twin.org/logging-service@0.10.1-next.2':
+  '@twin.org/logging-service@0.10.1-next.3':
     dependencies:
-      '@twin.org/api-models': 0.10.1-next.5
+      '@twin.org/api-models': 0.10.1-next.6
       '@twin.org/core': 0.10.1-next.10
       '@twin.org/entity': 0.10.1-next.10
-      '@twin.org/logging-models': 0.10.1-next.2
+      '@twin.org/logging-models': 0.10.1-next.3
       '@twin.org/nameof': 0.10.1-next.10
       '@twin.org/web': 0.10.1-next.10
 
