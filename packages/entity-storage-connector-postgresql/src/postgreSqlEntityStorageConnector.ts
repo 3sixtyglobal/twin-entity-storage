@@ -141,6 +141,12 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	private readonly _versionKey?: string;
 
 	/**
+	 * The properties which are optional in the schema.
+	 * @internal
+	 */
+	private readonly _nullableProperties: Set<string>;
+
+	/**
 	 * The configuration for the connector.
 	 * @internal
 	 */
@@ -237,6 +243,9 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKeyProperty = EntitySchemaHelper.getPrimaryKey(this._entitySchema);
 		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
+		this._nullableProperties = new Set(
+			(this._entitySchema.properties ?? []).filter(p => p.optional).map(p => String(p.property))
+		);
 
 		this._config = options.config;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
@@ -1081,21 +1090,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 
 			const pkPropName = String(this._primaryKeyProperty.property);
 
-			const sortsByPK =
-				Is.array(sortProperties) && sortProperties.some(s => String(s.property) === pkPropName);
-
-			const keySetCols: { prop: string; asc: boolean }[] = [];
-			if (Is.array(sortProperties)) {
-				for (const s of sortProperties) {
-					keySetCols.push({
-						prop: String(s.property),
-						asc: s.sortDirection === SortDirection.Ascending
-					});
-				}
-			}
-			if (!sortsByPK) {
-				keySetCols.push({ prop: pkPropName, asc: true });
-			}
+			const keySetCols = this.buildKeySetColumns(sortProperties);
 
 			const requestedProps = properties ? new Set(properties.map(p => String(p))) : undefined;
 			const internallyAdded = new Set<string>();
@@ -1114,7 +1109,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				selectClause = "*";
 			}
 
-			const orderByClause = `ORDER BY ${keySetCols.map(c => `"${c.prop}" ${c.asc ? "ASC" : "DESC"}`).join(", ")}`;
+			const orderByClause = `ORDER BY ${this.buildKeySetOrderBy(keySetCols)}`;
 
 			const { whereClauses, values } = this.buildWhereClause(conditions, partitionKey);
 
@@ -1123,19 +1118,9 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 					Converter.base64ToBytes(cursor)
 				);
 				const lastValues: unknown[] = [...(parsedCursor.sv ?? []), parsedCursor.i];
-				const orParts: string[] = [];
-				for (let i = 0; i < keySetCols.length; i++) {
-					const parts: string[] = [];
-					for (let j = 0; j < i; j++) {
-						values.push(lastValues[j] as ParameterOrJSON<never>);
-						parts.push(`"${keySetCols[j].prop}" = $${values.length}`);
-					}
-					const op = keySetCols[i].asc ? ">" : "<";
-					values.push(lastValues[i] as ParameterOrJSON<never>);
-					parts.push(`"${keySetCols[i].prop}" ${op} $${values.length}`);
-					orParts.push(parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`);
-				}
-				whereClauses.push(`(${orParts.join(" OR ")})`);
+				const keySet = this.buildKeySetClause(keySetCols, lastValues, values.length + 1);
+				values.push(...keySet.values);
+				whereClauses.push(...keySet.clauses);
 			}
 
 			sql = `SELECT ${selectClause} FROM "${this._config.tableName}"`;
@@ -1377,7 +1362,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 			values.push(...narrowing.values);
 
 			const columnList = primary.columns.map(c => `"${c}"`).join(", ");
-			const pageOrderBy = keySetCols.map(c => `"${c.prop}" ${c.asc ? "ASC" : "DESC"}`).join(", ");
+			const pageOrderBy = this.buildKeySetOrderBy(keySetCols);
 
 			const keySet = this.buildKeySetClause(keySetCols, keySetValues, values.length + 1);
 			values.push(...keySet.values);
@@ -1447,10 +1432,10 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				.concat(joined.columns.map((c, i) => `j."${c}" AS "j${i}"`))
 				.join(", ");
 
-			const outerOrderBy = keySetCols
-				.map(c => `p."${c.prop}" ${c.asc ? "ASC" : "DESC"}`)
-				.concat(this.buildJoinOrderBy(joinOptions, "j"))
-				.join(", ");
+			const outerOrderBy = [
+				this.buildKeySetOrderBy(keySetCols, "p"),
+				...this.buildJoinOrderBy(joinOptions, "j")
+			].join(", ");
 
 			sql = `SELECT ${selectClause} FROM ${fromClause} LEFT JOIN "${joinConnector._config.tableName}" AS j ON ${join.clause} ORDER BY ${outerOrderBy}`;
 
@@ -1645,22 +1630,47 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 */
 	private buildKeySetColumns(
 		sortProperties?: { property: keyof T; sortDirection: SortDirection }[]
-	): { prop: string; asc: boolean }[] {
+	): { prop: string; asc: boolean; nullable: boolean }[] {
 		const pkPropName = String(this._primaryKeyProperty.property);
-		const keySetCols: { prop: string; asc: boolean }[] = [];
+		const keySetCols: { prop: string; asc: boolean; nullable: boolean }[] = [];
 
 		for (const sortProperty of sortProperties ?? []) {
 			keySetCols.push({
 				prop: String(sortProperty.property),
-				asc: sortProperty.sortDirection === SortDirection.Ascending
+				asc: sortProperty.sortDirection === SortDirection.Ascending,
+				nullable: this._nullableProperties.has(String(sortProperty.property))
 			});
 		}
 
 		if (!keySetCols.some(c => c.prop === pkPropName)) {
-			keySetCols.push({ prop: pkPropName, asc: true });
+			keySetCols.push({ prop: pkPropName, asc: true, nullable: false });
 		}
 
 		return keySetCols;
+	}
+
+	/**
+	 * Build the ORDER BY fragment for the keySet columns.
+	 * @param keySetCols The ordered keySet columns.
+	 * @param alias The optional alias qualifying the columns.
+	 * @returns The order by fragment.
+	 * @internal
+	 */
+	private buildKeySetOrderBy(
+		keySetCols: { prop: string; asc: boolean; nullable: boolean }[],
+		alias?: string
+	): string {
+		const prefix = Is.stringValue(alias) ? `${alias}.` : "";
+		// NULLs sort after all other values.
+		return keySetCols
+			.map(c => {
+				const dir = c.asc ? "ASC" : "DESC";
+				const col = `${prefix}"${c.prop}"`;
+				return c.nullable
+					? `${col} ${dir} ${c.asc ? "NULLS LAST" : "NULLS FIRST"}`
+					: `${col} ${dir}`;
+			})
+			.join(", ");
 	}
 
 	/**
@@ -1672,7 +1682,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private buildKeySetClause(
-		keySetCols: { prop: string; asc: boolean }[],
+		keySetCols: { prop: string; asc: boolean; nullable: boolean }[],
 		lastValues: unknown[] | undefined,
 		startIndex: number
 	): { clauses: string[]; values: ParameterOrJSON<never>[] } {
@@ -1684,15 +1694,35 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		const orParts: string[] = [];
 
 		for (let i = 0; i < keySetCols.length; i++) {
-			const parts: string[] = [];
-			for (let j = 0; j < i; j++) {
-				values.push(lastValues[j] as ParameterOrJSON<never>);
-				parts.push(`"${keySetCols[j].prop}" = $${startIndex + values.length - 1}`);
+			// Nothing sorts after NULL when ascending, so such a branch can never match.
+			if (!keySetCols[i].asc || !Is.empty(lastValues[i])) {
+				const parts: string[] = [];
+				for (let j = 0; j < i; j++) {
+					if (Is.empty(lastValues[j])) {
+						parts.push(`"${keySetCols[j].prop}" IS NULL`);
+					} else {
+						values.push(lastValues[j] as ParameterOrJSON<never>);
+						parts.push(`"${keySetCols[j].prop}" = $${startIndex + values.length - 1}`);
+					}
+				}
+				const col = `"${keySetCols[i].prop}"`;
+				if (Is.empty(lastValues[i])) {
+					parts.push(`${col} IS NOT NULL`);
+				} else {
+					values.push(lastValues[i] as ParameterOrJSON<never>);
+					const placeholder = `$${startIndex + values.length - 1}`;
+					if (keySetCols[i].asc) {
+						parts.push(
+							keySetCols[i].nullable
+								? `(${col} > ${placeholder} OR ${col} IS NULL)`
+								: `${col} > ${placeholder}`
+						);
+					} else {
+						parts.push(`${col} < ${placeholder}`);
+					}
+				}
+				orParts.push(parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`);
 			}
-			const op = keySetCols[i].asc ? ">" : "<";
-			values.push(lastValues[i] as ParameterOrJSON<never>);
-			parts.push(`"${keySetCols[i].prop}" ${op} $${startIndex + values.length - 1}`);
-			orParts.push(parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`);
 		}
 
 		return { clauses: [`(${orParts.join(" OR ")})`], values };

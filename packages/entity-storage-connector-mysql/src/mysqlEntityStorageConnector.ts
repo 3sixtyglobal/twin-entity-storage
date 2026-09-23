@@ -162,6 +162,12 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private readonly _versionKey?: string;
 
 	/**
+	 * The properties which are optional in the schema.
+	 * @internal
+	 */
+	private readonly _nullableProperties: Set<string>;
+
+	/**
 	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
 	 * @internal
 	 */
@@ -256,6 +262,9 @@ export class MySqlEntityStorageConnector<T = unknown>
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKeyProperty = EntitySchemaHelper.getPrimaryKey(this._entitySchema);
 		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
+		this._nullableProperties = new Set(
+			(this._entitySchema.properties ?? []).filter(p => p.optional).map(p => String(p.property))
+		);
 
 		this._config = options.config;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
@@ -938,25 +947,9 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 			const pkPropName = String(this._primaryKeyProperty.property);
 
-			// Decide whether the caller's sort already includes the PK.  When it does we
-			// skip appending a second PK clause so we never emit "ORDER BY id ..., id ...".
-			const sortsByPK =
-				Is.array(sortProperties) && sortProperties.some(s => String(s.property) === pkPropName);
-
 			// Full ordered column list used for both ORDER BY and the keySet condition.
 			// Format: [user sort cols…] + [pk tie-breaker if not already present].
-			const keySetCols: { prop: string; asc: boolean }[] = [];
-			if (Is.array(sortProperties)) {
-				for (const s of sortProperties) {
-					keySetCols.push({
-						prop: String(s.property),
-						asc: s.sortDirection === SortDirection.Ascending
-					});
-				}
-			}
-			if (!sortsByPK) {
-				keySetCols.push({ prop: pkPropName, asc: true });
-			}
+			const keySetCols = this.buildKeySetColumns(sortProperties);
 
 			// When the caller projects specific columns we must still SELECT the PK and any
 			// sort columns so we can build the next-page cursor.  Track which columns we add
@@ -978,7 +971,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 				selectClause = "*";
 			}
 
-			const orderByClause = `ORDER BY ${keySetCols.map(c => `\`${c.prop}\` ${c.asc ? "ASC" : "DESC"}`).join(", ")}`;
+			const orderByClause = `ORDER BY ${this.buildKeySetOrderBy(keySetCols)}`;
 
 			const { whereClauses, values } = this.buildWhereClause(conditions, partitionKey);
 
@@ -991,20 +984,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 				// Reconstruct the ordered last-value list: [sort-col values…, pk].
 				const lastValues: unknown[] = [...(parsedCursor.sv ?? []), parsedCursor.i];
 
-				// Build: (col0 op last0) OR (col0=last0 AND col1 op last1) OR …
-				const orParts: string[] = [];
-				for (let i = 0; i < keySetCols.length; i++) {
-					const parts: string[] = [];
-					for (let j = 0; j < i; j++) {
-						values.push(lastValues[j]);
-						parts.push(`\`${keySetCols[j].prop}\` = ?`);
-					}
-					const op = keySetCols[i].asc ? ">" : "<";
-					values.push(lastValues[i]);
-					parts.push(`\`${keySetCols[i].prop}\` ${op} ?`);
-					orParts.push(parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`);
-				}
-				whereClauses.push(`(${orParts.join(" OR ")})`);
+				this.appendKeySetClause(keySetCols, lastValues, whereClauses, values);
 			}
 
 			sql = `SELECT ${selectClause} FROM ??`;
@@ -1371,7 +1351,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 			values.push(...narrowing.values);
 
 			const columnList = primary.columns.map(c => `\`${c}\``).join(", ");
-			const pageOrderBy = keySetCols.map(c => `\`${c.prop}\` ${c.asc ? "ASC" : "DESC"}`).join(", ");
+			const pageOrderBy = this.buildKeySetOrderBy(keySetCols);
 
 			const keySetClauses: string[] = [];
 			this.appendKeySetClause(keySetCols, keySetValues, keySetClauses, values);
@@ -1432,10 +1412,10 @@ export class MySqlEntityStorageConnector<T = unknown>
 				.concat(joined.columns.map(c => `j.\`${c}\``))
 				.join(", ");
 
-			const outerOrderBy = keySetCols
-				.map(c => `p.\`${c.prop}\` ${c.asc ? "ASC" : "DESC"}`)
-				.concat(this.buildJoinOrderBy(joinOptions, "j"))
-				.join(", ");
+			const outerOrderBy = [
+				this.buildKeySetOrderBy(keySetCols, "p"),
+				...this.buildJoinOrderBy(joinOptions, "j")
+			].join(", ");
 
 			sql = `SELECT ${selectClause} FROM ${fromClause} LEFT JOIN ?? AS j ON ${join.clause} ORDER BY ${outerOrderBy}`;
 
@@ -1625,22 +1605,45 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 */
 	private buildKeySetColumns(
 		sortProperties?: { property: keyof T; sortDirection: SortDirection }[]
-	): { prop: string; asc: boolean }[] {
+	): { prop: string; asc: boolean; nullable: boolean }[] {
 		const pkPropName = String(this._primaryKeyProperty.property);
-		const keySetCols: { prop: string; asc: boolean }[] = [];
+		const keySetCols: { prop: string; asc: boolean; nullable: boolean }[] = [];
 
 		for (const sortProperty of sortProperties ?? []) {
 			keySetCols.push({
 				prop: String(sortProperty.property),
-				asc: sortProperty.sortDirection === SortDirection.Ascending
+				asc: sortProperty.sortDirection === SortDirection.Ascending,
+				nullable: this._nullableProperties.has(String(sortProperty.property))
 			});
 		}
 
 		if (!keySetCols.some(c => c.prop === pkPropName)) {
-			keySetCols.push({ prop: pkPropName, asc: true });
+			keySetCols.push({ prop: pkPropName, asc: true, nullable: false });
 		}
 
 		return keySetCols;
+	}
+
+	/**
+	 * Build the ORDER BY fragment for the keySet columns.
+	 * @param keySetCols The ordered keySet columns.
+	 * @param alias The optional alias qualifying the columns.
+	 * @returns The order by fragment.
+	 * @internal
+	 */
+	private buildKeySetOrderBy(
+		keySetCols: { prop: string; asc: boolean; nullable: boolean }[],
+		alias?: string
+	): string {
+		const prefix = Is.stringValue(alias) ? `${alias}.` : "";
+		// NULLs sort after all other values.
+		return keySetCols
+			.map(c => {
+				const dir = c.asc ? "ASC" : "DESC";
+				const col = `${prefix}\`${c.prop}\``;
+				return c.nullable ? `${col} IS NULL ${dir}, ${col} ${dir}` : `${col} ${dir}`;
+			})
+			.join(", ");
 	}
 
 	/**
@@ -1652,7 +1655,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @internal
 	 */
 	private appendKeySetClause(
-		keySetCols: { prop: string; asc: boolean }[],
+		keySetCols: { prop: string; asc: boolean; nullable: boolean }[],
 		lastValues: unknown[] | undefined,
 		whereClauses: string[],
 		values: unknown[]
@@ -1663,15 +1666,30 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		const orParts: string[] = [];
 		for (let i = 0; i < keySetCols.length; i++) {
-			const parts: string[] = [];
-			for (let j = 0; j < i; j++) {
-				values.push(lastValues[j]);
-				parts.push(`\`${keySetCols[j].prop}\` = ?`);
+			// Nothing sorts after NULL when ascending, so such a branch can never match.
+			if (!keySetCols[i].asc || !Is.empty(lastValues[i])) {
+				const parts: string[] = [];
+				for (let j = 0; j < i; j++) {
+					if (Is.empty(lastValues[j])) {
+						parts.push(`\`${keySetCols[j].prop}\` IS NULL`);
+					} else {
+						values.push(lastValues[j]);
+						parts.push(`\`${keySetCols[j].prop}\` = ?`);
+					}
+				}
+				const col = `\`${keySetCols[i].prop}\``;
+				if (Is.empty(lastValues[i])) {
+					parts.push(`${col} IS NOT NULL`);
+				} else {
+					values.push(lastValues[i]);
+					if (keySetCols[i].asc) {
+						parts.push(keySetCols[i].nullable ? `(${col} > ? OR ${col} IS NULL)` : `${col} > ?`);
+					} else {
+						parts.push(`${col} < ?`);
+					}
+				}
+				orParts.push(parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`);
 			}
-			const op = keySetCols[i].asc ? ">" : "<";
-			values.push(lastValues[i]);
-			parts.push(`\`${keySetCols[i].prop}\` ${op} ?`);
-			orParts.push(parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`);
 		}
 		whereClauses.push(`(${orParts.join(" OR ")})`);
 	}

@@ -28,6 +28,8 @@ import { MongoDbEntityStorageConnector } from "../src/mongoDbEntityStorageConnec
 const SUPPORT_NULLABLE_SECONDARY_INDEX = true;
 // Does the connector support sorting by properties other than the primary key.
 const SUPPORT_SECONDARY_INDEX_SORT = true;
+// Does the connector support sorting by a nullable property.
+const SUPPORT_NULLABLE_SORT_PROPERTY = true;
 // Does the connector support a condition which narrows on the group property and another property
 // at the same time, which is what a group condition asks of it.
 const SUPPORT_GROUP_CONDITIONS = true;
@@ -964,6 +966,44 @@ describe("MongoDbEntityStorageConnector queryJoin", () => {
 				{ carrier: "a" },
 				{ carrier: "c" }
 			]);
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT || !SUPPORT_NULLABLE_SORT_PROPERTY)(
+		"can join and page over a nullable sort property with no skips or duplicates",
+		async () => {
+			const { orders, shipments } = await createPair();
+			for (let i = 1; i <= 6; i++) {
+				// Half the orders leave the sort property unset.
+				await orders.set({ id: `o${i}`, region: i % 2 === 0 ? undefined : `r${i}` });
+				await shipments.set({ id: `s${i}`, orderId: `o${i}` });
+			}
+
+			for (const sortDirection of [SortDirection.Ascending, SortDirection.Descending]) {
+				const pageOptions: JoinOptions = {
+					property: "id",
+					joinProperty: "orderId",
+					sortProperties: [{ property: "region", sortDirection }],
+					limit: 2
+				};
+
+				const seen = new Set<string>();
+				let cursor: string | undefined;
+				let pages = 0;
+				do {
+					const page = await orders.queryJoin(shipments, { ...pageOptions, cursor });
+					for (const e of page.entities) {
+						expect(seen.has(e.id as string), `duplicate id ${e.id}`).toBe(false);
+						seen.add(e.id as string);
+					}
+					cursor = page.cursor;
+					expect(++pages).toBeLessThan(100);
+				} while (cursor !== undefined);
+
+				for (let i = 1; i <= 6; i++) {
+					expect(seen.has(`o${i}`), `id o${i} missing from cursor walk`).toBe(true);
+				}
+			}
 		}
 	);
 

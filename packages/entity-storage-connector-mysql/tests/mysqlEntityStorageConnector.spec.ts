@@ -34,6 +34,8 @@ const SUPPORT_NOT_INCLUDES = true;
 const SUPPORT_NULLABLE_SECONDARY_INDEX = true;
 // Does the connector support sorting by secondary index properties.
 const SUPPORT_SECONDARY_INDEX_SORT = true;
+// Does the connector support sorting by a nullable property.
+const SUPPORT_NULLABLE_SORT_PROPERTY = true;
 // Does the connector honour trailing tiebreaker sort properties within ties of the
 // first sort property.
 const SUPPORT_MULTI_SORT_TIEBREAKER_ORDER = true;
@@ -749,6 +751,43 @@ describe("MySqlEntityStorageConnector", () => {
 				expect(seen.has(item.id), `id ${item.id} missing from cursor walk`).toBe(true);
 			}
 			expect(seen.size).toBe(BATCH);
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT || !SUPPORT_NULLABLE_SORT_PROPERTY)(
+		"paginated cursor walk over a nullable sort property has no skips or duplicates",
+		async () => {
+			const PAGE = 2;
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			const seeded = [
+				{ id: "001", value1: "val001", value2: 0, value4: "sort001" },
+				{ id: "002", value1: "val002", value2: 1 },
+				{ id: "003", value1: "val003", value2: 2, value4: "sort003" },
+				{ id: "004", value1: "val004", value2: 3 },
+				{ id: "005", value1: "val005", value2: 4, value4: "sort005" },
+				{ id: "006", value1: "val006", value2: 5 }
+			];
+			await connector.setBatch(seeded);
+
+			for (const sortDirection of [SortDirection.Ascending, SortDirection.Descending]) {
+				const sort = [{ property: "value4" as keyof TestType, sortDirection }];
+				const seen = new Set<string>();
+				let cursor: string | undefined;
+				let pages = 0;
+				do {
+					const page = await connector.query(undefined, sort, undefined, cursor, PAGE);
+					for (const e of page.entities) {
+						expect(seen.has(e.id as string), `duplicate id ${e.id}`).toBe(false);
+						seen.add(e.id as string);
+					}
+					cursor = page.cursor;
+					expect(++pages).toBeLessThan(100);
+				} while (cursor !== undefined);
+
+				for (const item of seeded) {
+					expect(seen.has(item.id), `id ${item.id} missing from cursor walk`).toBe(true);
+				}
+			}
 		}
 	);
 
