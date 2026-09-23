@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-service",
-	"version": "0.10.1-next.9",
+	"version": "0.10.1-next.10",
 	"description": "Service layer exposing storage contracts and REST endpoint definitions.",
 	"repository": {
 		"type": "git",
@@ -33,13 +33,13 @@
 		"@twin.org/context": "next",
 		"@twin.org/core": "next",
 		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.10.1-next.9",
+		"@twin.org/entity-storage-models": "0.10.1-next.10",
 		"@twin.org/logging-models": "next",
 		"@twin.org/nameof": "next",
 		"@twin.org/web": "next"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.10.1-next.9",
+		"@twin.org/entity-storage-connector-memory": "0.10.1-next.10",
 		"@twin.org/nameof-transformer": "next",
 		"@twin.org/nameof-vitest-plugin": "next",
 		"@twin.org/ts-to-openapi": "next",
