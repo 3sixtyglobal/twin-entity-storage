@@ -1070,22 +1070,26 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		}
 		try {
 			const container = await this.getContainer();
-			const { resources: partitionIds } = await container.items
-				.query<string>({
-					query: `SELECT DISTINCT VALUE c.${CosmosDbEntityStorageConnector._PARTITION_KEY} FROM c`
+			const partitionProperty = CosmosDbEntityStorageConnector._PARTITION_KEY;
+			const { resources: rows } = await container.items
+				.query<{ [key: string]: string | number }>({
+					query: `SELECT c.${partitionProperty}, COUNT(1) AS count FROM c GROUP BY c.${partitionProperty}`
 				})
 				.fetchAll();
 			const contextIds: IContextIds[] = [];
-			const skipped: string[] = [];
-			for (const partitionId of partitionIds.filter(id => Is.stringValue(id))) {
-				const split = EntityStorageHelper.tryShortSplit(partitionContextIds, partitionId);
-				if (Is.undefined(split)) {
-					skipped.push(partitionId);
-				} else {
-					contextIds.push(split);
+			const skipped = new Map<string, number>();
+			for (const row of rows) {
+				const partitionId = row[partitionProperty];
+				if (Is.stringValue(partitionId)) {
+					const split = EntityStorageHelper.tryShortSplit(partitionContextIds, partitionId);
+					if (Is.undefined(split)) {
+						skipped.set(partitionId, Number(row.count));
+					} else {
+						contextIds.push(split);
+					}
 				}
 			}
-			if (Is.arrayValue(skipped)) {
+			if (skipped.size > 0) {
 				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
 				await nodeLogging?.log({
 					level: "warn",
@@ -1094,7 +1098,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 					message: "partitionIdsSkipped",
 					data: {
 						expected: partitionContextIds.length,
-						partitionIds: skipped.join(", ")
+						partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 					}
 				});
 			}

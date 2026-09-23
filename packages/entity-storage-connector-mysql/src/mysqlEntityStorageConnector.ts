@@ -1148,27 +1148,28 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		try {
 			const pool = await this.getPool();
+			const partitionColumn = MySqlEntityStorageConnector._PARTITION_KEY;
 			const [rows] = await pool.query(
-				`SELECT DISTINCT \`${MySqlEntityStorageConnector._PARTITION_KEY}\` FROM ??`,
+				`SELECT \`${partitionColumn}\`, COUNT(*) AS count FROM ?? GROUP BY \`${partitionColumn}\``,
 				[this.qualifiedTable()]
 			);
-			const partitionIds = (rows as { [key: string]: string }[])
-				.map(row => row[MySqlEntityStorageConnector._PARTITION_KEY])
-				.filter((id): id is string => Is.stringValue(id));
 			const contextIds: IContextIds[] = [];
-			const skipped: string[] = [];
-			for (const partitionId of partitionIds) {
-				const split = EntityStorageHelper.tryShortSplit(
-					this._partitionContextIds ?? [],
-					partitionId
-				);
-				if (Is.undefined(split)) {
-					skipped.push(partitionId);
-				} else {
-					contextIds.push(split);
+			const skipped = new Map<string, number>();
+			for (const row of rows as { [key: string]: string | number }[]) {
+				const partitionId = row[partitionColumn];
+				if (Is.stringValue(partitionId)) {
+					const split = EntityStorageHelper.tryShortSplit(
+						this._partitionContextIds ?? [],
+						partitionId
+					);
+					if (Is.undefined(split)) {
+						skipped.set(partitionId, Number(row.count));
+					} else {
+						contextIds.push(split);
+					}
 				}
 			}
-			if (Is.arrayValue(skipped)) {
+			if (skipped.size > 0) {
 				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
 				await nodeLogging?.log({
 					level: "warn",
@@ -1177,7 +1178,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 					message: "partitionIdsSkipped",
 					data: {
 						expected: this._partitionContextIds?.length,
-						partitionIds: skipped.join(", ")
+						partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 					}
 				});
 			}

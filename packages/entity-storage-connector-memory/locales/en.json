@@ -7,7 +7,7 @@
 	},
 	"warn": {
 		"memoryEntityStorageConnector": {
-			"partitionIdsSkipped": "Skipping partition ids whose depth does not match the {expected} configured partition keys: {partitionIds}. Entities in these partitions are ignored by migration."
+			"partitionIdsSkipped": "Partition ids whose depth does not match the {expected} configured partition keys are not migrated and their entities are removed when the rebuilt storage replaces the original (partition id: entity count): {partitionIds}"
 		}
 	},
 	"error": {

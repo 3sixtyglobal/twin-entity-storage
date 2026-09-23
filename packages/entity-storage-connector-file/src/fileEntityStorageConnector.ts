@@ -808,7 +808,7 @@ export class FileEntityStorageConnector<T = unknown>
 			return undefined;
 		}
 		const contextIds: { [id: string]: IContextIds } = {};
-		const skipped = new Set<string>();
+		const skipped = new Map<string, number>();
 
 		const store = await this.readStoreWithLock();
 
@@ -823,7 +823,7 @@ export class FileEntityStorageConnector<T = unknown>
 					partitionId
 				);
 				if (Is.undefined(split)) {
-					skipped.add(partitionId);
+					skipped.set(partitionId, (skipped.get(partitionId) ?? 0) + 1);
 				} else {
 					contextIds[partitionId] = split;
 				}
@@ -839,7 +839,7 @@ export class FileEntityStorageConnector<T = unknown>
 				message: "partitionIdsSkipped",
 				data: {
 					expected: this._partitionContextIds?.length,
-					partitionIds: Array.from(skipped).join(", ")
+					partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 				}
 			});
 		}

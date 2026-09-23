@@ -924,26 +924,27 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		}
 		try {
 			const dbConnection = await this.getClient();
+			const partitionColumn = PostgreSqlEntityStorageConnector._PARTITION_KEY;
 			const rows = await dbConnection.unsafe(
-				`SELECT DISTINCT "${PostgreSqlEntityStorageConnector._PARTITION_KEY}" FROM "${this._config.tableName}"`
+				`SELECT "${partitionColumn}", COUNT(*) AS count FROM "${this._config.tableName}" GROUP BY "${partitionColumn}"`
 			);
-			const partitionIds = (rows as { [key: string]: string }[])
-				.map(row => row[PostgreSqlEntityStorageConnector._PARTITION_KEY])
-				.filter((id): id is string => Is.stringValue(id));
 			const contextIds: IContextIds[] = [];
-			const skipped: string[] = [];
-			for (const partitionId of partitionIds) {
-				const split = EntityStorageHelper.tryShortSplit(
-					this._partitionContextIds ?? [],
-					partitionId
-				);
-				if (Is.undefined(split)) {
-					skipped.push(partitionId);
-				} else {
-					contextIds.push(split);
+			const skipped = new Map<string, number>();
+			for (const row of rows as { [key: string]: string | number }[]) {
+				const partitionId = row[partitionColumn];
+				if (Is.stringValue(partitionId)) {
+					const split = EntityStorageHelper.tryShortSplit(
+						this._partitionContextIds ?? [],
+						partitionId
+					);
+					if (Is.undefined(split)) {
+						skipped.set(partitionId, Number(row.count));
+					} else {
+						contextIds.push(split);
+					}
 				}
 			}
-			if (Is.arrayValue(skipped)) {
+			if (skipped.size > 0) {
 				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
 				await nodeLogging?.log({
 					level: "warn",
@@ -952,7 +953,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 					message: "partitionIdsSkipped",
 					data: {
 						expected: this._partitionContextIds?.length,
-						partitionIds: skipped.join(", ")
+						partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 					}
 				});
 			}

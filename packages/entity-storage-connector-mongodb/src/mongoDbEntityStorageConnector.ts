@@ -886,7 +886,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 			const db = client.db(this._config.database);
 			const collections = await this.listPartitionCollections();
 			const result: IContextIds[] = [];
-			const skipped: string[] = [];
+			const skipped = new Map<string, number>();
 			for (const col of collections) {
 				const count = await db.collection(col.name).estimatedDocumentCount();
 				if (count > 0) {
@@ -896,13 +896,13 @@ export class MongoDbEntityStorageConnector<T = unknown>
 						partitionId
 					);
 					if (Is.undefined(split)) {
-						skipped.push(partitionId);
+						skipped.set(partitionId, count);
 					} else {
 						result.push(split);
 					}
 				}
 			}
-			if (Is.arrayValue(skipped)) {
+			if (skipped.size > 0) {
 				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
 				await nodeLogging?.log({
 					level: "warn",
@@ -911,7 +911,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 					message: "partitionIdsSkipped",
 					data: {
 						expected: this._partitionContextIds?.length,
-						partitionIds: skipped.join(", ")
+						partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 					}
 				});
 			}

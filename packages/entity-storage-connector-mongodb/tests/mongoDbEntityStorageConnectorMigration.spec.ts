@@ -355,6 +355,7 @@ describe("MongoDbEntityStorageConnector - partitioning and migration", () => {
 				storageId
 			)) as IEntityStorageMigrationConnector<MigV1>;
 			await legacyStorage.set({ id: "1", legacyField: "a" });
+			await legacyStorage.set({ id: "3", legacyField: "c" });
 
 			const entityStorage = (await createConnector(
 				nameof<MigV1>(),
@@ -376,7 +377,7 @@ describe("MongoDbEntityStorageConnector - partitioning and migration", () => {
 					expect.objectContaining({
 						level: "warn",
 						message: "partitionIdsSkipped",
-						data: expect.objectContaining({ partitionIds: "user" })
+						data: expect.objectContaining({ partitionIds: "user: 2" })
 					})
 				);
 			} finally {

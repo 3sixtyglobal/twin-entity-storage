@@ -1171,7 +1171,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 		}
 
 		const contextIdsMap: { [id: string]: IContextIds } = {};
-		const skipped = new Set<string>();
+		const skipped = new Map<string, number>();
 
 		try {
 			const docClient = await this.getDocClient();
@@ -1197,7 +1197,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 							partitionId
 						);
 						if (Is.undefined(split)) {
-							skipped.add(partitionId);
+							skipped.set(partitionId, (skipped.get(partitionId) ?? 0) + 1);
 						} else {
 							contextIdsMap[partitionId] = split;
 						}
@@ -1224,7 +1224,7 @@ export class DynamoDbEntityStorageConnector<T = unknown>
 				message: "partitionIdsSkipped",
 				data: {
 					expected: this._partitionContextIds?.length,
-					partitionIds: Array.from(skipped).join(", ")
+					partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 				}
 			});
 		}

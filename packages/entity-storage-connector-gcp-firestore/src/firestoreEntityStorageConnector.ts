@@ -762,7 +762,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 			const prefix = `${this._config.collectionName}_`;
 			const collections = await client.listCollections();
 			const result: IContextIds[] = [];
-			const skipped: string[] = [];
+			const skipped = new Map<string, number>();
 			for (const col of collections) {
 				if (col.id.startsWith(prefix)) {
 					const partitionKey = col.id.slice(prefix.length);
@@ -773,14 +773,15 @@ export class FirestoreEntityStorageConnector<T = unknown>
 							FirestoreEntityStorageConnector._PARTITION_SEPARATOR
 						);
 						if (Is.undefined(split)) {
-							skipped.push(partitionKey);
+							const snapshot = await col.count().get();
+							skipped.set(partitionKey, snapshot.data().count);
 						} else {
 							result.push(split);
 						}
 					}
 				}
 			}
-			if (Is.arrayValue(skipped)) {
+			if (skipped.size > 0) {
 				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
 				await nodeLogging?.log({
 					level: "warn",
@@ -789,7 +790,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 					message: "partitionIdsSkipped",
 					data: {
 						expected: partitionContextIds.length,
-						partitionIds: skipped.join(", ")
+						partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 					}
 				});
 			}
