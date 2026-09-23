@@ -59,7 +59,8 @@ The optional conditions to match for the primary entities.
 > `optional` **sortProperties?**: `object`[]
 
 The optional sort order for the primary entities. When a group property is supplied this also
-decides which entity of each group the result takes its values from.
+decides which entity of each group the result takes its values from. Defaults to the primary
+key ascending, so that paging with a cursor reads a stable order.
 
 #### property
 
