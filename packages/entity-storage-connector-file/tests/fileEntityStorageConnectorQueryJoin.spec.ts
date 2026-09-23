@@ -451,6 +451,7 @@ describe("FileEntityStorageConnector queryJoin", () => {
 				property: "id",
 				joinProperty: "orderId",
 				groupProperty: "region",
+				sortProperties: [{ property: "id", sortDirection: SortDirection.Ascending }],
 				joinSortProperties: [{ property: "position", sortDirection: SortDirection.Ascending }],
 				limit: 2
 			});
@@ -506,7 +507,8 @@ describe("FileEntityStorageConnector queryJoin", () => {
 		const result = await orders.queryJoin(shipments, {
 			property: "id",
 			joinProperty: "orderId",
-			joinRequired: true
+			joinRequired: true,
+			sortProperties: [{ property: "id", sortDirection: SortDirection.Ascending }]
 		});
 
 		expect(result.entities.map(e => e.id)).toEqual(["o1", "o3"]);
@@ -546,6 +548,7 @@ describe("FileEntityStorageConnector queryJoin", () => {
 			property: "id",
 			joinProperty: "orderId",
 			joinRequired: true,
+			sortProperties: [{ property: "id", sortDirection: SortDirection.Ascending }],
 			limit: 2
 		});
 
@@ -556,6 +559,7 @@ describe("FileEntityStorageConnector queryJoin", () => {
 			property: "id",
 			joinProperty: "orderId",
 			joinRequired: true,
+			sortProperties: [{ property: "id", sortDirection: SortDirection.Ascending }],
 			limit: 2,
 			cursor: result.cursor
 		});
@@ -1286,6 +1290,7 @@ describe("FileEntityStorageConnector queryJoin", () => {
 			property: "id",
 			joinProperty: "orderId",
 			groupProperty: "region",
+			sortProperties: [{ property: "id", sortDirection: SortDirection.Ascending }],
 			limit: 2
 		};
 
