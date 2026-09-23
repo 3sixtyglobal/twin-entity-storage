@@ -285,6 +285,75 @@ describe("MigrationHelper.applyEntityTransform", () => {
 		expect(result.tags).toEqual(["a", "b", "c"]);
 	});
 
+	test("modified property: string rename uses the transformEntityProperty return value instead of coercion", async () => {
+		const d = diff({
+			modified: [
+				{
+					from: prop("hash", EntitySchemaPropertyType.String),
+					to: prop("integrity", EntitySchemaPropertyType.String)
+				}
+			]
+		});
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ hash: "sha256:abc" },
+			d,
+			(entity, f, t, v) => (v as string).replace("sha256:", "sha256-")
+		);
+		expect(result.integrity).toBe("sha256-abc");
+		expect(result.hash).toBeUndefined();
+	});
+
+	test("modified property: number target uses the transformEntityProperty return value instead of coercion", async () => {
+		const d = diff({
+			modified: [
+				{
+					from: prop("count", EntitySchemaPropertyType.String),
+					to: prop("count", EntitySchemaPropertyType.Number)
+				}
+			]
+		});
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ count: "three" },
+			d,
+			() => 3
+		);
+		expect(result.count).toBe(3);
+	});
+
+	test("modified property: boolean target uses the transformEntityProperty return value instead of coercion", async () => {
+		const d = diff({
+			modified: [
+				{
+					from: prop("flag", EntitySchemaPropertyType.String),
+					to: prop("flag", EntitySchemaPropertyType.Boolean)
+				}
+			]
+		});
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ flag: "nope" },
+			d,
+			() => false
+		);
+		expect(result.flag).toBe(false);
+	});
+
+	test("modified property: scalar target falls back to coercion when transformEntityProperty returns undefined", async () => {
+		const d = diff({
+			modified: [
+				{
+					from: prop("qty", EntitySchemaPropertyType.String),
+					to: prop("quantity", EntitySchemaPropertyType.String)
+				}
+			]
+		});
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ qty: "5" },
+			d,
+			() => undefined
+		);
+		expect(result.quantity).toBe("5");
+	});
+
 	test("combination: unchanged, added, and removed properties all handled correctly", async () => {
 		const d = diff({
 			unchanged: [prop("id", EntitySchemaPropertyType.String)],
@@ -589,6 +658,25 @@ describe("MigrationHelper.applyEntityChain", () => {
 		};
 		expect(result.quantity).toBe("5");
 		expect(result.qty).toBeUndefined();
+	});
+
+	test("applies transformEntityProperty during a rename, not just a generic coercion", async () => {
+		const step: IResolvedMigrationStep = {
+			fromProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["hash", EntitySchemaPropertyType.String]
+			),
+			toProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["integrity", EntitySchemaPropertyType.String]
+			),
+			renames: [{ from: "hash", to: "integrity" }],
+			transformEntityProperty: (entity, f, t, v) => (v as string).replace("sha256:", "sha256-")
+		};
+		const result = (await MigrationHelper.applyEntityChain({ id: "1", hash: "sha256:abc" }, [
+			step
+		])) as { [key: string]: unknown };
+		expect(result.integrity).toBe("sha256-abc");
 	});
 
 	test("applies the step's transformEntity to the source entity before the diff", async () => {

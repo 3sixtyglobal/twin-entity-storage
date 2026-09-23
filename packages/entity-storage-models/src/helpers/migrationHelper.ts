@@ -193,7 +193,7 @@ export class MigrationHelper {
 	 * @param source The connector to read from (already bootstrapped).
 	 * @param target The connector to write to (already bootstrapped).
 	 * @param steps Ordered, fully-resolved migration steps.
-	 * @param options Optional migration options (batchSize, progress callbacks, transformEntityProperty).
+	 * @param options Optional migration options (batchSize, progress callbacks).
 	 * @returns The number of entities migrated.
 	 */
 	public static async migratePartitionWithChain(
@@ -291,7 +291,8 @@ export class MigrationHelper {
 	 * modified properties according to the provided schema diff and optional transform hook.
 	 * @param entity The entity to transform.
 	 * @param schemaDiff The schema diff between the old and new schemas.
-	 * @param transformEntityProperty Optional per-property transform hook for object/array properties.
+	 * @param transformEntityProperty Optional transform hook called for every modified property when
+	 * supplied; scalar targets fall back to coercion when it returns undefined or it is not supplied.
 	 * @param removeEntityProperty Optional hook called with the entity and dropped property schemas.
 	 * @returns The transformed entity ready to be written to the new schema.
 	 * @throws GeneralError if a transformation is required for an object or array property but no transformEntityProperty function is provided.
@@ -345,30 +346,32 @@ export class MigrationHelper {
 
 		for (const change of schemaDiff.modified) {
 			const currentValue = ObjectHelper.propertyGet(entity, change.from.property as string);
-			let newValue;
-
-			if (change.to.type === EntitySchemaPropertyType.Boolean) {
-				newValue = Coerce.boolean(currentValue);
-			} else if (
-				change.to.type === EntitySchemaPropertyType.Number ||
-				change.to.type === EntitySchemaPropertyType.Integer
-			) {
-				newValue = Coerce.number(currentValue);
-			} else if (change.to.type === EntitySchemaPropertyType.String) {
-				newValue = Coerce.string(currentValue);
-			} else if (
+			const isObjectOrArray =
 				change.to.type === EntitySchemaPropertyType.Array ||
-				change.to.type === EntitySchemaPropertyType.Object
-			) {
-				if (!Is.function(transformEntityProperty)) {
-					throw new GeneralError(MigrationHelper.CLASS_NAME, "transformRequiredForProperty", {
-						from: change.from.property,
-						to: change.to.property,
-						type: change.from.type
-					});
-				}
+				change.to.type === EntitySchemaPropertyType.Object;
 
+			let newValue: unknown;
+			if (Is.function(transformEntityProperty)) {
 				newValue = await transformEntityProperty(entity as T, change.from, change.to, currentValue);
+			} else if (isObjectOrArray) {
+				throw new GeneralError(MigrationHelper.CLASS_NAME, "transformRequiredForProperty", {
+					from: change.from.property,
+					to: change.to.property,
+					type: change.from.type
+				});
+			}
+
+			if (Is.undefined(newValue) && !isObjectOrArray) {
+				if (change.to.type === EntitySchemaPropertyType.Boolean) {
+					newValue = Coerce.boolean(currentValue);
+				} else if (
+					change.to.type === EntitySchemaPropertyType.Number ||
+					change.to.type === EntitySchemaPropertyType.Integer
+				) {
+					newValue = Coerce.number(currentValue);
+				} else if (change.to.type === EntitySchemaPropertyType.String) {
+					newValue = Coerce.string(currentValue);
+				}
 			}
 
 			if (newValue === undefined && !(change.to.optional ?? false)) {

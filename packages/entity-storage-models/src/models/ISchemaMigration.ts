@@ -33,7 +33,8 @@ export interface ISchemaMigration<T = unknown, U = unknown> {
 	transformEntity?: EntityTransformer<T>;
 
 	/**
-	 * Optional transformation for properties, usually only called for object and array types.
+	 * Optional transformation called for every modified property when supplied. Mandatory for
+	 * object and array targets; scalar targets fall back to coercion when it returns undefined.
 	 * @param entity The entity being migrated, after transformEntity when one is set.
 	 * @param schema1Property The property schema in the old schema.
 	 * @param schemaProperty2 The property schema in the new schema.

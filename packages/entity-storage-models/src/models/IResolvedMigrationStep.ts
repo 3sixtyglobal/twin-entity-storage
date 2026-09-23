@@ -42,7 +42,8 @@ export interface IResolvedMigrationStep<T = unknown, U = unknown> {
 	transformEntity?: EntityTransformer<T>;
 
 	/**
-	 * Optional transformation for properties, usually only called for object and array types.
+	 * Optional transformation called for every modified property when supplied. Mandatory for
+	 * object and array targets; scalar targets fall back to coercion when it returns undefined.
 	 * @param schema1Property The property schema in the old schema.
 	 * @param schemaProperty2 The property schema in the new schema.
 	 * @param value The value of the property in the old schema.
