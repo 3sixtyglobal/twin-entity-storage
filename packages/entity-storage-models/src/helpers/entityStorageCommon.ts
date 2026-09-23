@@ -74,37 +74,53 @@ export class EntityStorageCommon {
 
 		EntityStorageHelper.validateJoinOptions(schema, joinSchema, joinOptions);
 
-		const normalizedOptions = EntityStorageHelper.normalizeJoinOptions(joinOptions);
+		// Paging carries a cursor from one call to the next, and a group stands on the first of its
+		// entities in the sort order, so both need an order the storage reproduces between calls.
+		// When the caller asks for no order the primary key supplies one, as it is unique and every
+		// connector can sort on it.
+		const sortedOptions: IEntityStorageJoinOptions<T, U> = Is.arrayValue(joinOptions.sortProperties)
+			? joinOptions
+			: {
+					...joinOptions,
+					sortProperties: [
+						{
+							property: EntitySchemaHelper.getPrimaryKey<T>(schema).property,
+							sortDirection: SortDirection.Ascending
+						}
+					]
+				};
+
+		const normalizedOptions = EntityStorageHelper.normalizeJoinOptions(sortedOptions);
 		const startCursor = EntityStorageHelper.decodeCursor<T, U, string>(
 			normalizedOptions,
-			joinOptions.cursor
+			sortedOptions.cursor
 		);
 
-		const returnSize = joinOptions.limit ?? EntityStorageCommon._DEFAULT_JOIN_LIMIT;
-		const groupProperty = joinOptions.groupProperty;
-		const joinColumn = String(joinOptions.property);
-		const joinedColumn = String(joinOptions.joinProperty);
+		const returnSize = sortedOptions.limit ?? EntityStorageCommon._DEFAULT_JOIN_LIMIT;
+		const groupProperty = sortedOptions.groupProperty;
+		const joinColumn = String(sortedOptions.property);
+		const joinedColumn = String(sortedOptions.joinProperty);
 
 		// Only what the caller asked for plus what the join itself needs is read back, and the
 		// extras fall away when the projection is applied to the result.
-		const primaryProjection = EntityStorageCommon.projection<T>(schema, joinOptions.properties, [
-			joinOptions.property,
+		const primaryProjection = EntityStorageCommon.projection<T>(schema, sortedOptions.properties, [
+			sortedOptions.property,
 			...(Is.empty(groupProperty) ? [] : [groupProperty]),
-			...(joinOptions.sortProperties ?? []).map(sortProperty => sortProperty.property),
-			...(joinOptions.groupConditions ?? []).flatMap(groupCondition =>
+			...(sortedOptions.sortProperties ?? []).map(sortProperty => sortProperty.property),
+			...(sortedOptions.groupConditions ?? []).flatMap(groupCondition =>
 				EntityStorageCommon.conditionProperties<T>(groupCondition)
 			)
 		]);
 		const joinedProjection = EntityStorageCommon.projection<U>(
 			joinSchema,
-			joinOptions.joinProperties,
-			[joinOptions.joinProperty]
+			sortedOptions.joinProperties,
+			[sortedOptions.joinProperty]
 		);
 
 		const page = await EntityStorageCommon.readPage(
 			connector,
 			joinConnector,
-			joinOptions,
+			sortedOptions,
 			primaryProjection,
 			startCursor,
 			returnSize
@@ -118,7 +134,7 @@ export class EntityStorageCommon {
 					connector,
 					String(groupProperty),
 					EntityStorageCommon.distinctValues(page.entities, String(groupProperty)),
-					joinOptions.conditions,
+					sortedOptions.conditions,
 					primaryProjection
 				);
 
@@ -126,9 +142,9 @@ export class EntityStorageCommon {
 			joinConnector,
 			joinedColumn,
 			EntityStorageCommon.distinctValues(members, joinColumn),
-			joinOptions.joinConditions,
+			sortedOptions.joinConditions,
 			joinedProjection,
-			joinOptions.joinSortProperties
+			sortedOptions.joinSortProperties
 		);
 
 		const entities: (Partial<T> & { joined: Partial<U>[] })[] = [];
@@ -148,11 +164,11 @@ export class EntityStorageCommon {
 			});
 
 			entities.push({
-				...(Is.arrayValue(joinOptions.properties)
-					? ObjectHelper.pick(entity, joinOptions.properties)
+				...(Is.arrayValue(sortedOptions.properties)
+					? ObjectHelper.pick(entity, sortedOptions.properties)
 					: entity),
-				joined: Is.arrayValue(joinOptions.joinProperties)
-					? matches.map(match => ObjectHelper.pick(match, joinOptions.joinProperties ?? []))
+				joined: Is.arrayValue(sortedOptions.joinProperties)
+					? matches.map(match => ObjectHelper.pick(match, sortedOptions.joinProperties ?? []))
 					: matches.slice()
 			});
 		}
