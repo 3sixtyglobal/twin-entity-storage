@@ -110,7 +110,7 @@ Ordered, fully-resolved migration steps.
 
 [`IMigrationOptions`](../interfaces/IMigrationOptions.md)
 
-Optional migration options (batchSize, progress callbacks, transformEntityProperty).
+Optional migration options (batchSize, progress callbacks).
 
 #### Returns
 
@@ -187,7 +187,8 @@ The schema diff between the old and new schemas.
 
 [`EntityPropertyTransformer`](../type-aliases/EntityPropertyTransformer.md)\<`T`, `U`\>
 
-Optional per-property transform hook for object/array properties.
+Optional transform hook called for every modified property when
+supplied; scalar targets fall back to coercion when it returns undefined or it is not supplied.
 
 ##### removeEntityProperty?
 

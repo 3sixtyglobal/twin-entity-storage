@@ -79,7 +79,8 @@ The entity, still in the step's source shape.
 
 > `optional` **transformEntityProperty?**: [`EntityPropertyTransformer`](../type-aliases/EntityPropertyTransformer.md)\<`T`, `U`\>
 
-Optional transformation for properties, usually only called for object and array types.
+Optional transformation called for every modified property when supplied. Mandatory for
+object and array targets; scalar targets fall back to coercion when it returns undefined.
 
 #### Param
 
