@@ -322,20 +322,12 @@ jobs:
 
       - name: Remove Mono-Repo Node Modules
         run: |
-          # Preserve dependency build approvals, then remove the workspace files so pnpm
-          # installs dependencies from the registry as it would for a package consumer.
-          # The approvals are written into the package directory so it becomes its own
-          # workspace root. Leaving a workspace file at the repository root instead makes
-          # pnpm treat the package as a non-member and skip the install entirely.
-          awk '
-            /^allowBuilds:/ { copying = 1 }
-            copying && /^[^[:space:]]/ && !/^allowBuilds:/ { exit }
-            copying { print }
-          ' pnpm-workspace.yaml > "${{ matrix.package }}/pnpm-workspace.yaml"
-          grep -q '^allowBuilds:' "${{ matrix.package }}/pnpm-workspace.yaml" || {
-            echo "allowBuilds section is missing from pnpm-workspace.yaml"
-            exit 1
-          }
+          # Copy the workspace settings into the package directory so it becomes its own
+          # workspace root, with the package globs commented out, then remove the workspace
+          # files so pnpm installs dependencies from the registry as it would for a package
+          # consumer. Leaving a workspace file at the repository root instead makes pnpm
+          # treat the package as a non-member and skip the install entirely.
+          sed '/^packages:/,/^$/ s/^/# /' pnpm-workspace.yaml > "${{ matrix.package }}/pnpm-workspace.yaml"
           rm -f package.json pnpm-lock.yaml pnpm-workspace.yaml
 
       # Retried to handle transient registry failures.
