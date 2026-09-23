@@ -11,6 +11,8 @@
 		},
 		"migrationHelper": {
 			"migrateSchemaFailed": "Migration failed for schema \"{schemaName}\".",
+			"migrateEntityFailed": "Migration failed for entity \"{id}\"",
+			"migrateEntityPartitionFailed": "Migration failed for entity \"{id}\" in partition \"{partitionId}\"",
 			"transformRequiredForProperty": "A transformation function is required to migrate property \"{from}\" to \"{to}\" of type \"{type}\"",
 			"coercionProducedUndefined": "Coercion of property \"{property}\" to type \"{type}\" produced undefined but the property is not optional",
 			"connectorBootstrapFailed": "Connector \"{className}\" failed to bootstrap storage for schema \"{schemaName}\"",

@@ -15,6 +15,13 @@ export interface IEntityStorageConnector<T = unknown> extends IComponent {
 	getSchema(): IEntitySchema;
 
 	/**
+	 * The separator this connector joins context id parts with to form a partition key.
+	 * Defaults to "/" when not implemented.
+	 * @returns The separator.
+	 */
+	getPartitionKeySeparator?(): string;
+
+	/**
 	 * Set an entity.
 	 * @param entity The entity to set.
 	 * @param conditions The optional conditions to match for the entities.

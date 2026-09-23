@@ -258,6 +258,15 @@ export class FirestoreEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * The separator this connector joins context id parts with to form a partition key.
+	 * @returns The separator, ":" instead of the default "/" since Firestore interprets "/" as a
+	 * path separator in collection names.
+	 */
+	public getPartitionKeySeparator(): string {
+		return FirestoreEntityStorageConnector._PARTITION_SEPARATOR;
+	}
+
+	/**
 	 * Bootstrap the component by creating and initializing any resources it needs.
 	 * @param nodeLoggingComponentType The node logging component type.
 	 * @returns True if the bootstrapping process was successful.
