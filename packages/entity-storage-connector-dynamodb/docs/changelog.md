@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.10.1-next.12](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-dynamodb-v0.10.1-next.11...entity-storage-connector-dynamodb-v0.10.1-next.12) (2026-09-23)
+
+
+### Features
+
+* state that skipped partitions are removed by the rebuild and report their entity counts ([#310](https://github.com/iotaledger/twin-entity-storage/issues/310)) ([921baa3](https://github.com/iotaledger/twin-entity-storage/commit/921baa3e5855670b0f46eb105a54d33335738625))
+
+
+### Bug Fixes
+
+* return rows with a null sort property when paging mysql and postgresql ([#313](https://github.com/iotaledger/twin-entity-storage/issues/313)) ([7ab339b](https://github.com/iotaledger/twin-entity-storage/commit/7ab339b516eb6a6591caebe559842d970918e09b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.10.1-next.11 to 0.10.1-next.12
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.10.1-next.11 to 0.10.1-next.12
+
 ## [0.10.1-next.11](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-dynamodb-v0.10.1-next.10...entity-storage-connector-dynamodb-v0.10.1-next.11) (2026-09-23)
 
 

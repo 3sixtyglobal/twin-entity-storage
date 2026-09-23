@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1-next.12](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.10.1-next.11...entity-storage-models-v0.10.1-next.12) (2026-09-23)
+
+
+### Features
+
+* honour transformEntityProperty for string, number and boolean targets in migration steps ([#309](https://github.com/iotaledger/twin-entity-storage/issues/309)) ([8527f0a](https://github.com/iotaledger/twin-entity-storage/commit/8527f0a4fdc87c1a324b64dcd54405906f5fb36b))
+
 ## [0.10.1-next.11](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-models-v0.10.1-next.10...entity-storage-models-v0.10.1-next.11) (2026-09-23)
 
 
