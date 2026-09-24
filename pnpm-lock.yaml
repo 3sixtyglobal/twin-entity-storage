@@ -257,7 +257,7 @@ importers:
         specifier: next
         version: 0.10.1-next.10
       '@twin.org/entity-storage-models':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
@@ -267,7 +267,7 @@ importers:
         version: 0.10.1-next.10
     devDependencies:
       '@twin.org/entity-storage-connector-memory':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
@@ -339,7 +339,7 @@ importers:
         specifier: next
         version: 0.10.1-next.10
       '@twin.org/entity-storage-models':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
@@ -349,7 +349,7 @@ importers:
         version: 0.10.1-next.10
     devDependencies:
       '@twin.org/entity-storage-connector-memory':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
@@ -418,7 +418,7 @@ importers:
         specifier: next
         version: 0.10.1-next.10
       '@twin.org/entity-storage-models':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
@@ -428,7 +428,7 @@ importers:
         version: 0.10.1-next.10
     devDependencies:
       '@twin.org/entity-storage-connector-memory':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
@@ -500,7 +500,7 @@ importers:
         specifier: next
         version: 0.10.1-next.10
       '@twin.org/entity-storage-models':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
@@ -513,7 +513,7 @@ importers:
         version: 11.1.0(supports-color@10.2.2)
     devDependencies:
       '@twin.org/entity-storage-connector-memory':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
@@ -579,7 +579,7 @@ importers:
         specifier: next
         version: 0.10.1-next.10
       '@twin.org/entity-storage-models':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
@@ -649,7 +649,7 @@ importers:
         specifier: next
         version: 0.10.1-next.10
       '@twin.org/entity-storage-models':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
@@ -662,7 +662,7 @@ importers:
         version: 7.6.0
     devDependencies:
       '@twin.org/entity-storage-connector-memory':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
@@ -734,7 +734,7 @@ importers:
         specifier: next
         version: 0.10.1-next.10
       '@twin.org/entity-storage-models':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
@@ -747,7 +747,7 @@ importers:
         version: 3.24.4(@types/node@26.6.2)
     devDependencies:
       '@twin.org/entity-storage-connector-memory':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
@@ -816,7 +816,7 @@ importers:
         specifier: next
         version: 0.10.1-next.10
       '@twin.org/entity-storage-models':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
@@ -829,7 +829,7 @@ importers:
         version: 3.4.9
     devDependencies:
       '@twin.org/entity-storage-connector-memory':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
@@ -898,7 +898,7 @@ importers:
         specifier: next
         version: 0.10.1-next.10
       '@twin.org/entity-storage-models':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
@@ -911,7 +911,7 @@ importers:
         version: 4.9.0
     devDependencies:
       '@twin.org/entity-storage-connector-memory':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-connector-memory
       '@twin.org/logging-connector-entity-storage':
         specifier: next
@@ -1041,7 +1041,7 @@ importers:
         specifier: next
         version: 0.10.1-next.10
       '@twin.org/entity-storage-models':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-models
       '@twin.org/nameof':
         specifier: next
@@ -1105,7 +1105,7 @@ importers:
         specifier: next
         version: 0.10.1-next.10
       '@twin.org/entity-storage-models':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-models
       '@twin.org/logging-models':
         specifier: next
@@ -1118,7 +1118,7 @@ importers:
         version: 0.10.1-next.10
     devDependencies:
       '@twin.org/entity-storage-connector-memory':
-        specifier: 0.10.1-next.12
+        specifier: 0.10.1-next.13
         version: link:../entity-storage-connector-memory
       '@twin.org/nameof-transformer':
         specifier: next
@@ -2157,8 +2157,8 @@ packages:
     resolution: {integrity: sha512-Ebsuj7QRvoZnk6RFl6XaMkmmaz1tlhavbtDW9utQ1sPn+VvZTdEiUAK/r+qUQ7pwqqeJd93Yy8kbIvr+76k/Dw==}
     engines: {node: '>=24.0.0'}
 
-  '@twin.org/entity-storage-models@0.10.1-next.11':
-    resolution: {integrity: sha512-MzSxiyut210PFFldP3CRk/4q2vJnJpcIElAKZPYoqemdNfwbT/h7fq8dRDg52kO0fowCc7c7BYUMu/7vkgZp8g==}
+  '@twin.org/entity-storage-models@0.10.1-next.12':
+    resolution: {integrity: sha512-msMV1L2gSRJ8XtpJHfzvm82nLSv5rsmiIUk0r4wvmuvU1osK+qCbZ3YZ8Zy8YwT3KA9dGAb93qcZGaxujgIuQw==}
     engines: {node: '>=24.0.0'}
 
   '@twin.org/entity@0.10.1-next.10':
@@ -6100,7 +6100,7 @@ snapshots:
       '@types/jsonld': 1.5.15
       jsonld: 9.0.0
 
-  '@twin.org/entity-storage-models@0.10.1-next.11':
+  '@twin.org/entity-storage-models@0.10.1-next.12':
     dependencies:
       '@twin.org/context': 0.10.1-next.10
       '@twin.org/core': 0.10.1-next.10
@@ -6122,7 +6122,7 @@ snapshots:
       '@twin.org/context': 0.10.1-next.10
       '@twin.org/core': 0.10.1-next.10
       '@twin.org/entity': 0.10.1-next.10
-      '@twin.org/entity-storage-models': 0.10.1-next.11
+      '@twin.org/entity-storage-models': 0.10.1-next.12
       '@twin.org/logging-models': 0.10.1-next.3
       '@twin.org/nameof': 0.10.1-next.10
 

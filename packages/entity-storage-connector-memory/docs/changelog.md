@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.1-next.13](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-memory-v0.10.1-next.12...entity-storage-connector-memory-v0.10.1-next.13) (2026-09-24)
+
+
+### Bug Fixes
+
+* keep the primary key last in the key set so cursor values stay aligned ([#316](https://github.com/iotaledger/twin-entity-storage/issues/316)) ([c1a5158](https://github.com/iotaledger/twin-entity-storage/commit/c1a51588326a8041898f6ba2db6a7e8e67370fb0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.10.1-next.12 to 0.10.1-next.13
+
 ## [0.10.1-next.12](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-memory-v0.10.1-next.11...entity-storage-connector-memory-v0.10.1-next.12) (2026-09-23)
 
 
