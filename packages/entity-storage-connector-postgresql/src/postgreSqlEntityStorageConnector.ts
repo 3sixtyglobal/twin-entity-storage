@@ -1640,6 +1640,11 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				asc: sortProperty.sortDirection === SortDirection.Ascending,
 				nullable: this._nullableProperties.has(String(sortProperty.property))
 			});
+			// The primary key is unique, so nothing after it can change the order.  Stopping here
+			// keeps it last, which is what the cursor assumes when it pairs values with columns.
+			if (String(sortProperty.property) === pkPropName) {
+				break;
+			}
 		}
 
 		if (!keySetCols.some(c => c.prop === pkPropName)) {
