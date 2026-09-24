@@ -335,7 +335,21 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 					}
 				});
 			}
+		} catch (error) {
+			await nodeLogging?.log({
+				level: "error",
+				source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "tableCreateFailed",
+				error: BaseError.fromError(error),
+				data: {
+					tableName: this._config.tableName
+				}
+			});
+			return false;
+		}
 
+		try {
 			const indexes = await this.readIndexes(dbConnection);
 
 			for (const prop of this._entitySchema.properties ?? []) {
@@ -357,7 +371,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 				level: "error",
 				source: PostgreSqlEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
-				message: "tableCreateFailed",
+				message: "indexCreateFailed",
 				error: BaseError.fromError(error),
 				data: {
 					tableName: this._config.tableName

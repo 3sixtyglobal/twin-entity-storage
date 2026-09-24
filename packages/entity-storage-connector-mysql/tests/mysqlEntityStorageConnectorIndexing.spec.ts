@@ -1,7 +1,7 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
-import { Coerce } from "@twin.org/core";
+import { Coerce, ComponentFactory } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -12,6 +12,7 @@ import {
 	property
 } from "@twin.org/entity";
 import { IndexHelper } from "@twin.org/entity-storage-models";
+import type { ILogEntry } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import { createPool, type Pool } from "mysql2/promise";
 import { TEST_MYSQL_CONFIG } from "./setupTestEnv.js";
@@ -1692,7 +1693,7 @@ describe("MySqlEntityStorageConnector", () => {
 				const wideIndexName = IndexHelper.generateCompositeName(tableName, indexGroups.wide);
 
 				// Three prefixed text columns fit MySQL's key length limit, the partition key in front
-				// of them does not, so the replacement index cannot be created.
+				// of them does not, so the replacement index is refused before it is attempted.
 				await pool.query(
 					`CREATE TABLE \`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\` (\`partitionId\` LONGTEXT NOT NULL, \`id\` LONGTEXT NOT NULL, \`first\` LONGTEXT NOT NULL, \`second\` LONGTEXT NOT NULL, \`third\` LONGTEXT NOT NULL, PRIMARY KEY (\`partitionId\`(255), \`id\`(255)))`
 				);
@@ -1707,6 +1708,72 @@ describe("MySqlEntityStorageConnector", () => {
 					"third ASC"
 				]);
 			} finally {
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"reports a composite index group wider than the key limit as an index failure",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_group_toolong_${Date.now()}`;
+			const connector = new MySqlEntityStorageConnector<WideCompositeIndexedTestType>({
+				entitySchema: nameof<WideCompositeIndexedTestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			const logEntries: ILogEntry[] = [];
+			ComponentFactory.register("test-logging-key-too-long", () => ({
+				className: () => "TestLogging",
+				log: async (entry: ILogEntry) => {
+					logEntries.push(entry);
+				}
+			}));
+			let pool: Pool | undefined;
+
+			try {
+				expect(await connector.bootstrap("test-logging-key-too-long")).toBe(false);
+
+				const errorEntries = logEntries.filter(entry => entry.level === "error");
+				expect(errorEntries).toHaveLength(1);
+				expect(errorEntries[0].message).toEqual("indexCreateFailed");
+				expect(errorEntries[0].data).toEqual({ tableName });
+				// The partition key and three unbounded strings are each indexed on 255 utf8mb4 characters.
+				expect(errorEntries[0].error).toMatchObject({
+					message: "mySqlEntityStorageConnector.indexKeyTooLong",
+					properties: {
+						entitySchema: nameof<WideCompositeIndexedTestType>(),
+						indexGroup: "wide",
+						keyBytes: 4080,
+						maxKeyBytes: 3072
+					}
+				});
+
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const indexColumns = await indexColumnsByName(pool, tableName);
+				expect(indexColumns.PRIMARY).toBeDefined();
+				const indexGroups = EntitySchemaHelper.getIndexGroups(
+					EntitySchemaHelper.getSchema(WideCompositeIndexedTestType)
+				);
+				expect(
+					indexColumns[IndexHelper.generateCompositeName(tableName, indexGroups.wide)]
+				).toBeUndefined();
+			} finally {
+				ComponentFactory.unregister("test-logging-key-too-long");
 				try {
 					await pool?.end();
 				} catch {}

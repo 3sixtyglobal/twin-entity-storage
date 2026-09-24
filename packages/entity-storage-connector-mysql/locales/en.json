@@ -30,6 +30,8 @@
 			"entitySchemaPropertiesUndefined": "The entity schema properties are undefined",
 			"databaseCreateFailed": "Unable to create database \"{databaseName}\"",
 			"tableCreateFailed": "Unable to create table \"{tableName}\"",
+			"indexCreateFailed": "Unable to create the indexes for table \"{tableName}\"",
+			"indexKeyTooLong": "The index group \"{indexGroup}\" on entity \"{entitySchema}\" needs a key of {keyBytes} bytes, which exceeds the {maxKeyBytes} byte limit",
 			"setBatchFailed": "Unable to set batch of entities",
 			"countFailed": "Unable to count entities",
 			"emptyFailed": "Unable to empty entity storage",

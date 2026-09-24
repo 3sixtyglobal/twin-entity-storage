@@ -1,6 +1,7 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
+import { ComponentFactory } from "@twin.org/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -11,6 +12,7 @@ import {
 	property
 } from "@twin.org/entity";
 import { IndexHelper } from "@twin.org/entity-storage-models";
+import type { ILogEntry } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import postgres from "postgres";
 import { TEST_POSTGRESQL_CONFIG } from "./setupTestEnv.js";
@@ -1217,6 +1219,55 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				);
 				expect(groupIndexNames.length).toBe(2);
 			} finally {
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"reports a failure to create an index separately from table creation",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_group_indexfail_${Date.now()}`;
+			const connector = new PostgreSqlEntityStorageConnector<CompositeIndexedTestType>({
+				entitySchema: nameof<CompositeIndexedTestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			const logEntries: ILogEntry[] = [];
+			ComponentFactory.register("test-logging-index-fail", () => ({
+				className: () => "TestLogging",
+				log: async (entry: ILogEntry) => {
+					logEntries.push(entry);
+				}
+			}));
+			let sql: postgres.Sql | undefined;
+
+			try {
+				sql = openTestConnection();
+
+				// The table exists but lacks a grouped column, so only the index creation can fail.
+				await sql.unsafe(
+					`CREATE TABLE "${tableName}" ("partitionId" VARCHAR(255) NOT NULL, "id" VARCHAR(255) NOT NULL, "category" VARCHAR(255), "value" INT, PRIMARY KEY ("partitionId", "id"))`
+				);
+
+				expect(await connector.bootstrap("test-logging-index-fail")).toBe(false);
+
+				const errorEntries = logEntries.filter(entry => entry.level === "error");
+				expect(errorEntries).toHaveLength(1);
+				expect(errorEntries[0].source).toEqual(PostgreSqlEntityStorageConnector.CLASS_NAME);
+				expect(errorEntries[0].message).toEqual("indexCreateFailed");
+				expect(errorEntries[0].data).toEqual({ tableName });
+				expect(errorEntries[0].error?.message).toContain("status");
+			} finally {
+				ComponentFactory.unregister("test-logging-index-fail");
 				try {
 					await sql?.end();
 				} catch {}

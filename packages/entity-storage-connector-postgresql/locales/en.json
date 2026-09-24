@@ -21,6 +21,7 @@
 			"conditionFailed": "The entity \"{conflictId}\" could not be updated because the supplied conditions did not match the stored state",
 			"databaseCreateFailed": "Unable to create database \"{databaseName}\"",
 			"tableCreateFailed": "Unable to create table \"{tableName}\"",
+			"indexCreateFailed": "Unable to create the indexes for table \"{tableName}\"",
 			"setFailed": "Unable to set entity \"{id}\"",
 			"getFailed": "Unable to get entity \"{id}\"",
 			"removeFailed": "Unable to remove entity \"{id}\"",

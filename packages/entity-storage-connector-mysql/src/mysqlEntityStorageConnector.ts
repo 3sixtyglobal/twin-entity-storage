@@ -120,6 +120,18 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private static readonly _INDEX_PREFIX_LENGTH: number = 255;
 
 	/**
+	 * MySQL's maximum index key length in bytes.
+	 * @internal
+	 */
+	private static readonly _MAX_KEY_BYTES: number = 3072;
+
+	/**
+	 * The most bytes a utf8mb4 character can occupy.
+	 * @internal
+	 */
+	private static readonly _BYTES_PER_CHARACTER: number = 4;
+
+	/**
 	 * The name for the schema.
 	 * @internal
 	 */
@@ -398,7 +410,21 @@ export class MySqlEntityStorageConnector<T = unknown>
 					}
 				});
 			}
+		} catch (error) {
+			await nodeLogging?.log({
+				level: "error",
+				source: MySqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "tableCreateFailed",
+				error: BaseError.fromError(error),
+				data: {
+					tableName: this._config.tableName
+				}
+			});
+			return false;
+		}
 
+		try {
 			const indexes = await this.readIndexes(pool);
 			const columnLengths = await this.readColumnLengths(pool);
 
@@ -413,15 +439,15 @@ export class MySqlEntityStorageConnector<T = unknown>
 			}
 
 			const indexGroups = EntitySchemaHelper.getIndexGroups(this._entitySchema);
-			for (const indexProperties of Object.values(indexGroups)) {
-				await this.ensureCompositeIndex(pool, indexes, columnLengths, indexProperties);
+			for (const [groupName, indexProperties] of Object.entries(indexGroups)) {
+				await this.ensureCompositeIndex(pool, indexes, columnLengths, groupName, indexProperties);
 			}
 		} catch (error) {
 			await nodeLogging?.log({
 				level: "error",
 				source: MySqlEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
-				message: "tableCreateFailed",
+				message: "indexCreateFailed",
 				error: BaseError.fromError(error),
 				data: {
 					tableName: this._config.tableName
@@ -1969,16 +1995,44 @@ export class MySqlEntityStorageConnector<T = unknown>
 		prop: IEntitySchemaProperty<U>,
 		columnLengths: { [columnName: string]: number }
 	): string {
-		const columnName = String(prop.property);
-		const declaredPrefixLength = this.mapSqlColumn(prop).indexPrefixLength;
-		const columnLength = columnLengths[columnName];
+		return this.indexColumn(String(prop.property), this.indexKeyPrefixLength(prop, columnLengths));
+	}
 
-		return this.indexColumn(
-			columnName,
-			Is.integer(declaredPrefixLength) && Is.integer(columnLength)
-				? Math.min(declaredPrefixLength, columnLength)
-				: declaredPrefixLength
-		);
+	/**
+	 * Get the prefix length an index key is created with, bounded by the column as it exists.
+	 * @param prop The indexed property.
+	 * @param columnLengths The character length of each column on the table.
+	 * @returns The prefix length, or undefined for a non-string column.
+	 * @internal
+	 */
+	private indexKeyPrefixLength<U>(
+		prop: IEntitySchemaProperty<U>,
+		columnLengths: { [columnName: string]: number }
+	): number | undefined {
+		const declaredPrefixLength = this.mapSqlColumn(prop).indexPrefixLength;
+		const columnLength = columnLengths[String(prop.property)];
+
+		return Is.integer(declaredPrefixLength) && Is.integer(columnLength)
+			? Math.min(declaredPrefixLength, columnLength)
+			: declaredPrefixLength;
+	}
+
+	/**
+	 * Get the most bytes an index key part can occupy, as MySQL counts it against its key limit.
+	 * @param prop The indexed property.
+	 * @param columnLengths The character length of each column on the table.
+	 * @returns The key part size in bytes.
+	 * @internal
+	 */
+	private indexKeyBytes<U>(
+		prop: IEntitySchemaProperty<U>,
+		columnLengths: { [columnName: string]: number }
+	): number {
+		const prefixLength = this.indexKeyPrefixLength(prop, columnLengths);
+		if (Is.integer(prefixLength)) {
+			return prefixLength * MySqlEntityStorageConnector._BYTES_PER_CHARACTER;
+		}
+		return this.mapSqlColumn(prop).keyBytes ?? 0;
 	}
 
 	/**
@@ -2042,13 +2096,16 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @param pool The pool to query with.
 	 * @param indexes The indexes already on the table, keyed by index name.
 	 * @param columnLengths The character length of each column on the table.
+	 * @param groupName The name of the index group.
 	 * @param indexProperties The properties in the group, ordered by their index position.
+	 * @throws GeneralError if the index key would exceed MySQL's key length limit.
 	 * @internal
 	 */
 	private async ensureCompositeIndex(
 		pool: Pool,
 		indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } },
 		columnLengths: { [columnName: string]: number },
+		groupName: string,
 		indexProperties: { property: IEntitySchemaProperty<T>; direction: SortDirection }[]
 	): Promise<void> {
 		const indexName = IndexHelper.generateCompositeName(this._config.tableName, indexProperties);
@@ -2059,6 +2116,20 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		if (this.isIndexCovered(indexes, keyColumns)) {
 			return;
+		}
+
+		let keyBytes = this.indexKeyBytes(this.partitionKeyProperty(), columnLengths);
+		for (const indexProperty of indexProperties) {
+			keyBytes += this.indexKeyBytes(indexProperty.property, columnLengths);
+		}
+
+		if (keyBytes > MySqlEntityStorageConnector._MAX_KEY_BYTES) {
+			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "indexKeyTooLong", {
+				entitySchema: this._entitySchemaName,
+				indexGroup: groupName,
+				keyBytes,
+				maxKeyBytes: MySqlEntityStorageConnector._MAX_KEY_BYTES
+			});
 		}
 
 		const indexCols = [
@@ -2576,13 +2647,25 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * over the format mapping. A format which has a default length in EntitySchemaHelper.FORMAT_MAX_LENGTHS
 	 * and no dedicated column type is also bounded to that length.
 	 * @param prop The property to map.
-	 * @returns The MySQL column type, and the prefix length to index it with, undefined for a non-string column.
+	 * @returns The MySQL column type, the prefix length to index it with, undefined for a non-string
+	 * column, and the key size in bytes of a fixed width column.
 	 * @internal
 	 */
 	private mapSqlColumn<U>(prop: IEntitySchemaProperty<U>): {
 		sqlType: string;
 		indexPrefixLength?: number;
+		keyBytes?: number;
 	} {
+		const fixedKeyBytes: { [sqlType: string]: number } = {
+			"TINYINT(1)": 1,
+			TINYINT: 1,
+			SMALLINT: 2,
+			INT: 4,
+			BIGINT: 8,
+			FLOAT: 4,
+			DOUBLE: 8
+		};
+
 		const sqlTypeMap: { [key in EntitySchemaPropertyType]: string } = {
 			[EntitySchemaPropertyType.String]: "LONGTEXT",
 			[EntitySchemaPropertyType.Number]: "FLOAT",
@@ -2677,7 +2760,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 					)
 				: undefined;
 
-		return { sqlType, indexPrefixLength };
+		return { sqlType, indexPrefixLength, keyBytes: fixedKeyBytes[sqlType] };
 	}
 
 	/**
