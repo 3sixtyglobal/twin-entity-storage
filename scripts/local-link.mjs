@@ -11,19 +11,19 @@
  * symbolic links into the store.
  *
  * You can use wildcards to link multiple packages with similar names.
- *    npm run local-link "@twin.org/engine*"
+ *    pnpm run local-link "@twin.org/engine*"
  * or to link all packages in the current repo
- *    npm run local-link "@twin.org//*"
+ *    pnpm run local-link "@twin.org//*"
  *
  * Usage:
- *    npm run local-link <package-name>
+ *    pnpm run local-link <package-name>
  * or
- *    npm run local-link /path/to/package
+ *    pnpm run local-link /path/to/package
  *
  * To unlink
- *    npm run local-link <package-name> unlink
+ *    pnpm run local-link <package-name> unlink
  * or
- *    npm run local-link /path/to/package unlink
+ *    pnpm run local-link /path/to/package unlink
  *
  * Always unlink before running an install, as the package manager will
  * overwrite the links and leave the backups orphaned.
