@@ -8,7 +8,9 @@
  * It supports both the hoisted layout used by npm, where the package is
  * installed once in the root node_modules, and the isolated layout used by
  * pnpm, where each workspace package has its own node_modules containing
- * symbolic links into the store.
+ * symbolic links into the store. For pnpm the real copy of the package in the
+ * store is also replaced, so transitive dependencies and editors which follow
+ * the links into node_modules/.pnpm resolve to the local package too.
  *
  * You can use wildcards to link multiple packages with similar names.
  *    pnpm run local-link "@twin.org/engine*"
@@ -56,6 +58,7 @@ async function run() {
 	const packages = await findPackagesDetails(targetPackage);
 
 	const nodeModulesDirs = await findNodeModulesDirs(path.resolve('.'));
+	const storeDirs = await findStoreDirs(path.resolve('node_modules'));
 
 	process.stdout.write(`\n📦 Matched packages: ${packages.length}\n`);
 	for (const pkg of packages) {
@@ -66,6 +69,9 @@ async function run() {
 	for (const nodeModulesDir of nodeModulesDirs) {
 		process.stdout.write(`   • ${relativeToHere(nodeModulesDir)}\n`);
 	}
+	if (storeDirs.length > 0) {
+		process.stdout.write(`   • ${relativeToHere(path.resolve('node_modules', '.pnpm'))} (store)\n`);
+	}
 
 	let changed = 0;
 
@@ -74,10 +80,10 @@ async function run() {
 
 		if (isUnlink) {
 			process.stdout.write(`\n${position} ${pkg.packageName}\n`);
-			changed += await unlinkPackage(nodeModulesDirs, pkg.packageName);
+			changed += await unlinkPackage([...nodeModulesDirs, ...storeDirs], pkg.packageName);
 		} else {
 			process.stdout.write(`\n${position} ${pkg.packageName}\n   => ${pkg.targetDir}\n`);
-			changed += await linkPackage(nodeModulesDirs, pkg.packageName, pkg.targetDir);
+			changed += await linkPackage(nodeModulesDirs, storeDirs, pkg.packageName, pkg.targetDir);
 		}
 	}
 
@@ -100,20 +106,28 @@ function relativeToHere(target) {
 /**
  * Link the specified package in every node_modules which contains it.
  * @param nodeModulesDirs The node_modules directories to link in.
+ * @param storeDirs The node_modules directories inside the pnpm store.
  * @param packageName The name of the package to link.
  * @param targetDir The target directory of the package to link.
  * @returns How many locations were linked.
  */
-async function linkPackage(nodeModulesDirs, packageName, targetDir) {
+async function linkPackage(nodeModulesDirs, storeDirs, packageName, targetDir) {
 	let foundCount = 0;
 	let linkCount = 0;
 
-	for (const nodeModulesDir of nodeModulesDirs) {
+	for (const nodeModulesDir of [...nodeModulesDirs, ...storeDirs]) {
 		const currentNodeDir = path.join(nodeModulesDir, packageName);
 		const location = relativeToHere(currentNodeDir);
 
+		// In the store only the real copy of the package is replaced, every other
+		// reference is a symbolic link to it so will resolve to the target as well
+		const isStoreReference =
+			storeDirs.includes(nodeModulesDir) &&
+			(await isSymbolicLink(currentNodeDir)) &&
+			!(await entryExists(`${currentNodeDir}.bak`));
+
 		// Only proceed if the package is installed in this node_modules
-		if (await entryExists(currentNodeDir)) {
+		if (!isStoreReference && (await entryExists(currentNodeDir))) {
 			foundCount++;
 
 			if (await isLinkedTo(currentNodeDir, targetDir)) {
@@ -209,6 +223,27 @@ async function findNodeModulesDirs(searchDir, depth = 2) {
 	}
 
 	return nodeModulesDirs;
+}
+
+/**
+ * Find the node_modules directories inside the pnpm store, each one holds the real
+ * copy of a package alongside symbolic links to its dependencies.
+ * @param rootNodeModulesDir The root node_modules directory.
+ * @returns The store node_modules directories.
+ */
+async function findStoreDirs(rootNodeModulesDir) {
+	const storeDir = path.join(rootNodeModulesDir, '.pnpm');
+	const storeDirs = [];
+
+	if (await directoryExists(storeDir)) {
+		for (const entry of await readdir(storeDir, { withFileTypes: true })) {
+			if (entry.isDirectory() && entry.name !== 'node_modules') {
+				storeDirs.push(path.join(storeDir, entry.name, 'node_modules'));
+			}
+		}
+	}
+
+	return storeDirs;
 }
 
 /**
