@@ -186,6 +186,12 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private readonly _mutexTimeoutMs?: number;
 
 	/**
+	 * The schema columns the last bootstrap found missing from the table.
+	 * @internal
+	 */
+	private _missingColumns: string[];
+
+	/**
 	 * Create a new instance of MySqlEntityStorageConnector.
 	 * @param options The options for the connector.
 	 */
@@ -281,6 +287,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 		this._config = options.config;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 		this._instanceId = RandomHelper.generateUuidV7("compact");
+		this._missingColumns = [];
 	}
 
 	/**
@@ -425,8 +432,28 @@ export class MySqlEntityStorageConnector<T = unknown>
 		}
 
 		try {
+			const { names: columnNames, lengths: columnLengths } = await this.readColumns(pool);
+
+			// A table missing schema columns is replaced by the schema version rebuild, which creates
+			// every index, so none are built on it here.
+			this._missingColumns = [this.partitionKeyProperty(), ...(this._entitySchema.properties ?? [])]
+				.map(prop => String(prop.property))
+				.filter(columnName => !columnNames.has(columnName));
+			if (this._missingColumns.length > 0) {
+				await nodeLogging?.log({
+					level: "warn",
+					source: MySqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "columnsMissing",
+					data: {
+						tableName: this._config.tableName,
+						missingColumns: this._missingColumns.join(", ")
+					}
+				});
+				return true;
+			}
+
 			const indexes = await this.readIndexes(pool);
-			const columnLengths = await this.readColumnLengths(pool);
 
 			for (const prop of this._entitySchema.properties ?? []) {
 				if (
@@ -1208,6 +1235,14 @@ export class MySqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Get the schema columns the last bootstrap found missing from the table.
+	 * @returns The missing column names, empty when the table has every column.
+	 */
+	public getMissingColumns(): string[] {
+		return [...this._missingColumns];
+	}
+
+	/**
 	 * Create the target connector for performing the migration using a temporary table.
 	 * @param newEntitySchema The name of the new entity schema to create the connector for.
 	 * @returns Connector for performing the migration.
@@ -1955,30 +1990,36 @@ export class MySqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Read the character length of every column on the table.
+	 * Read the name and character length of every column on the table.
 	 * @param pool The pool to query with.
-	 * @returns The character length of each column, keyed by column name, absent for a non-string column.
+	 * @returns The column names, and the character length of each string column, keyed by column name.
 	 * @internal
 	 */
-	private async readColumnLengths(pool: Pool): Promise<{ [columnName: string]: number }> {
+	private async readColumns(
+		pool: Pool
+	): Promise<{ names: Set<string>; lengths: { [columnName: string]: number } }> {
 		const [columnRows] = await pool.query(
 			"SELECT column_name AS columnName, character_maximum_length AS characterMaximumLength FROM INFORMATION_SCHEMA.COLUMNS WHERE table_schema = ? AND table_name = ?",
 			[this._config.database, this._config.tableName]
 		);
 
-		const columnLengths: { [columnName: string]: number } = {};
+		const names = new Set<string>();
+		const lengths: { [columnName: string]: number } = {};
 
 		for (const row of Is.array(columnRows) ? columnRows : []) {
 			const columnName = ObjectHelper.propertyGet<string>(row, "columnName");
 			const characterMaximumLength = Coerce.integer(
 				ObjectHelper.propertyGet(row, "characterMaximumLength")
 			);
-			if (Is.stringValue(columnName) && Is.integer(characterMaximumLength)) {
-				columnLengths[columnName] = characterMaximumLength;
+			if (Is.stringValue(columnName)) {
+				names.add(columnName);
+				if (Is.integer(characterMaximumLength)) {
+					lengths[columnName] = characterMaximumLength;
+				}
 			}
 		}
 
-		return columnLengths;
+		return { names, lengths };
 	}
 
 	/**

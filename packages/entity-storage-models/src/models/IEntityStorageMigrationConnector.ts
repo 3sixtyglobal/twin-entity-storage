@@ -64,4 +64,11 @@ export interface IEntityStorageMigrationConnector<T = unknown> extends IEntitySt
 		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<void>;
+
+	/**
+	 * Get the schema columns the last bootstrap found missing from the existing storage.
+	 * A schema version rebuild creates the storage afresh with every column and index.
+	 * @returns The missing column names, empty when the storage has every column.
+	 */
+	getMissingColumns?(): string[];
 }

@@ -35,9 +35,9 @@ runs:
       shell: bash
       run: docker pull amazon/dynamodb-local:latest && docker run -d --name twin-entity-storage-dynamodb -p 8000:8000 amazon/dynamodb-local:latest
 
-    # Start MySQL service only for MySQL package
+    # Start MySQL service for the MySQL package and the service package, whose tests run against it
     - name: Start MySQL Service
-      if: inputs.package == 'packages/entity-storage-connector-mysql' || inputs.package == 'all'
+      if: inputs.package == 'packages/entity-storage-connector-mysql' || inputs.package == 'packages/entity-storage-service' || inputs.package == 'all'
       shell: bash
       run: |
         docker pull mysql:latest && docker run -d --name twin-entity-storage-mysql -e MYSQL_ROOT_PASSWORD=password -p 3306:3306 mysql:latest

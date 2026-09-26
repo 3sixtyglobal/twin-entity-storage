@@ -983,6 +983,97 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
+	// start() - missing columns
+	// -------------------------------------------------------------------------
+
+	test("start() throws columnsMissingWithoutMigration when a schema is missing columns and no migration will run", async () => {
+		const schemaName = "Widget";
+		const currentVersion = 2;
+		const connector = makeMigConnector(schemaName, currentVersion);
+		connector.getMissingColumns = vi.fn().mockReturnValue(["valueHash"]);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(makeSchema(schemaName, currentVersion));
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([{ schemaName, version: currentVersion, updatedAt: "" }]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await expect(new SchemaVersionService().start()).rejects.toMatchObject({
+			message: "schemaVersionService.columnsMissingWithoutMigration",
+			properties: { schemaName, missingColumns: "valueHash" }
+		});
+		expect(connector.createTargetConnector).not.toHaveBeenCalled();
+	});
+
+	test("start() rebuilds a schema with missing columns when its version is behind", async () => {
+		const schemaName = "Widget";
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+		connector.getMissingColumns = vi.fn().mockReturnValue(["valueHash"]);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([{ schemaName, version: 0, updatedAt: "" }]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(migrateWithChainSpy).toHaveBeenCalledTimes(1);
+		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
+	});
+
+	test("start() rebuilds a schema with missing columns when the connector version changed", async () => {
+		const schemaName = "Widget";
+		const currentVersion = 2;
+		const newConnectorVer = 2;
+		const connector = makeMigConnector(schemaName, currentVersion);
+		connector.connectorVersion = vi.fn().mockReturnValue(newConnectorVer);
+		connector.getMissingColumns = vi.fn().mockReturnValue(["valueHash"]);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(makeSchema(schemaName, currentVersion));
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector(
+			[{ schemaName, version: currentVersion, updatedAt: "" }, makeConnectorVersionRecord(1)],
+			true,
+			newConnectorVer
+		);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(migrateWithChainSpy).toHaveBeenCalledTimes(1);
+		expect(vc.set).toHaveBeenCalledWith(
+			expect.objectContaining({ schemaName, version: currentVersion })
+		);
+	});
+
+	// -------------------------------------------------------------------------
 	// start() - enabled: false (detect-only mode)
 	// -------------------------------------------------------------------------
 
@@ -1125,6 +1216,33 @@ describe("SchemaVersionService", () => {
 		} finally {
 			ComponentFactory.unregister("test-logging");
 		}
+	});
+
+	test("start() with enabled:false throws columnsMissingWithoutMigration when a schema is missing columns", async () => {
+		const schemaName = "Widget";
+		const currentVersion = 2;
+		const currentSchema = makeSchema(schemaName, currentVersion);
+		const connector = makeMigConnector(schemaName, currentVersion);
+		connector.getMissingColumns = vi.fn().mockReturnValue(["valueHash"]);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(currentSchema);
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([{ schemaName, version: currentVersion, updatedAt: "" }]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await expect(
+			new SchemaVersionService({ config: { enabled: false } }).start()
+		).rejects.toMatchObject({
+			message: "schemaVersionService.columnsMissingWithoutMigration",
+			properties: { schemaName }
+		});
 	});
 
 	// -------------------------------------------------------------------------

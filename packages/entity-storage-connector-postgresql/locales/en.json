@@ -12,7 +12,8 @@
 	},
 	"warn": {
 		"postgreSqlEntityStorageConnector": {
-			"partitionIdsSkipped": "Partition ids whose depth does not match the {expected} configured partition keys are not migrated and their entities are removed when the rebuilt storage replaces the original (partition id: entity count): {partitionIds}"
+			"partitionIdsSkipped": "Partition ids whose depth does not match the {expected} configured partition keys are not migrated and their entities are removed when the rebuilt storage replaces the original (partition id: entity count): {partitionIds}",
+			"columnsMissing": "Table \"{tableName}\" is missing columns: {missingColumns}. Index creation is skipped until the schema version rebuild."
 		}
 	},
 	"error": {

@@ -234,6 +234,50 @@ class CompositeIndexedTestType {
 	public value!: number;
 }
 
+@entity()
+class DeferredCompositeIndexV1TestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		maxLength: 32,
+		indexGroup: [{ name: "typeValue", direction: SortDirection.Ascending, index: 0 }]
+	})
+	public type!: string;
+
+	@property({
+		type: "string",
+		maxLength: 255,
+		indexGroup: [{ name: "typeValue", direction: SortDirection.Ascending, index: 1 }]
+	})
+	public value!: string;
+}
+
+@entity()
+class DeferredCompositeIndexV2TestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		maxLength: 32,
+		indexGroup: [{ name: "typeValue", direction: SortDirection.Ascending, index: 0 }]
+	})
+	public type!: string;
+
+	@property({ type: "string", maxLength: 255 })
+	public value!: string;
+
+	@property({
+		type: "string",
+		maxLength: 27,
+		optional: true,
+		indexGroup: [{ name: "typeValue", direction: SortDirection.Ascending, index: 1 }]
+	})
+	public valueHash?: string;
+}
+
 function createIndexedConnector(): PostgreSqlEntityStorageConnector<IndexedTestType> {
 	return new PostgreSqlEntityStorageConnector<IndexedTestType>({
 		entitySchema: nameof<IndexedTestType>(),
@@ -267,6 +311,12 @@ describe("PostgreSqlEntityStorageConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<CompositeIndexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(CompositeIndexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<DeferredCompositeIndexV1TestType>(), () =>
+			EntitySchemaHelper.getSchema(DeferredCompositeIndexV1TestType)
+		);
+		EntitySchemaFactory.register(nameof<DeferredCompositeIndexV2TestType>(), () =>
+			EntitySchemaHelper.getSchema(DeferredCompositeIndexV2TestType)
 		);
 
 		ContextIdStore.getContextIds = vi
@@ -1253,9 +1303,11 @@ describe("PostgreSqlEntityStorageConnector", () => {
 			try {
 				sql = openTestConnection();
 
-				// The table exists but lacks a grouped column, so only the index creation can fail.
+				// The table exists with every grouped column present, so no column is missing, but
+				// "status" is JSON, which has no default btree operator class, so only the index
+				// creation can fail.
 				await sql.unsafe(
-					`CREATE TABLE "${tableName}" ("partitionId" VARCHAR(255) NOT NULL, "id" VARCHAR(255) NOT NULL, "category" VARCHAR(255), "value" INT, PRIMARY KEY ("partitionId", "id"))`
+					`CREATE TABLE "${tableName}" ("partitionId" VARCHAR(255) NOT NULL, "id" VARCHAR(255) NOT NULL, "category" VARCHAR(255), "status" JSON, "value" INT, PRIMARY KEY ("partitionId", "id"))`
 				);
 
 				expect(await connector.bootstrap("test-logging-index-fail")).toBe(false);
@@ -1265,7 +1317,7 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				expect(errorEntries[0].source).toEqual(PostgreSqlEntityStorageConnector.CLASS_NAME);
 				expect(errorEntries[0].message).toEqual("indexCreateFailed");
 				expect(errorEntries[0].data).toEqual({ tableName });
-				expect(errorEntries[0].error?.message).toContain("status");
+				expect(errorEntries[0].error?.message).toContain("operator class");
 			} finally {
 				ComponentFactory.unregister("test-logging-index-fail");
 				try {
@@ -1276,6 +1328,96 @@ describe("PostgreSqlEntityStorageConnector", () => {
 				} catch {}
 				try {
 					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"creates a skipped composite index when the rebuild replaces the table",
+		async () => {
+			const tableName = `${TEST_POSTGRESQL_CONFIG.tableName}_group_deferred_${Date.now()}`;
+			const v1 = new PostgreSqlEntityStorageConnector<DeferredCompositeIndexV1TestType>({
+				entitySchema: nameof<DeferredCompositeIndexV1TestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			const v2 = new PostgreSqlEntityStorageConnector<DeferredCompositeIndexV2TestType>({
+				entitySchema: nameof<DeferredCompositeIndexV2TestType>(),
+				config: { ...TEST_POSTGRESQL_CONFIG, tableName }
+			});
+			const logEntries: ILogEntry[] = [];
+			ComponentFactory.register("test-logging-deferred-composite", () => ({
+				className: () => "TestLogging",
+				log: async (entry: ILogEntry) => {
+					logEntries.push(entry);
+				}
+			}));
+			let sql: postgres.Sql | undefined;
+
+			try {
+				// Create the table from the schema that does not have valueHash yet.
+				expect(await v1.bootstrap()).toBe(true);
+				await v1.set({ id: "1", type: "alias", value: "Acme" });
+
+				// Bootstrapping the same table from the schema that adds valueHash must skip its indexes
+				// rather than fail, leaving the table and its rows untouched.
+				expect(await v2.bootstrap("test-logging-deferred-composite")).toBe(true);
+				expect(v2.getMissingColumns()).toEqual(["valueHash"]);
+				const warnEntries = logEntries.filter(entry => entry.level === "warn");
+				expect(warnEntries).toHaveLength(1);
+				expect(warnEntries[0].message).toEqual("columnsMissing");
+
+				sql = openTestConnection();
+				const indexGroups = EntitySchemaHelper.getIndexGroups(
+					EntitySchemaHelper.getSchema(DeferredCompositeIndexV2TestType)
+				);
+				const deferredIndexName = IndexHelper.generateCompositeName(
+					tableName,
+					indexGroups.typeValue
+				);
+				let indexColumns = await indexColumnsByName(sql, tableName);
+				expect(indexColumns[deferredIndexName]).toBeUndefined();
+
+				// A rebuild creates a fresh table under its own name, where the composite index and
+				// its column both exist, so its index name is computed against that name too.
+				const rebuiltTableName = `${tableName}_rebuilt`;
+				const rebuilt = new PostgreSqlEntityStorageConnector<DeferredCompositeIndexV2TestType>({
+					entitySchema: nameof<DeferredCompositeIndexV2TestType>(),
+					config: { ...TEST_POSTGRESQL_CONFIG, tableName: rebuiltTableName }
+				});
+				expect(await rebuilt.bootstrap()).toBe(true);
+				expect(rebuilt.getMissingColumns()).toEqual([]);
+				indexColumns = await indexColumnsByName(sql, rebuiltTableName);
+				const rebuiltIndexName = IndexHelper.generateCompositeName(
+					rebuiltTableName,
+					indexGroups.typeValue
+				);
+				expect(indexColumns[rebuiltIndexName]).toEqual([
+					`${PARTITION_KEY} ASC`,
+					"type ASC",
+					"valueHash ASC"
+				]);
+
+				try {
+					await rebuilt.teardown?.();
+				} catch {}
+				try {
+					await rebuilt.stop?.();
+				} catch {}
+			} finally {
+				ComponentFactory.unregister("test-logging-deferred-composite");
+				try {
+					await sql?.end();
+				} catch {}
+				try {
+					await v2.teardown?.();
+				} catch {}
+				try {
+					await v2.stop?.();
+				} catch {}
+				try {
+					await v1.stop?.();
 				} catch {}
 			}
 		},

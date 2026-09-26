@@ -165,6 +165,12 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	private readonly _instanceId: string;
 
 	/**
+	 * The schema columns the last bootstrap found missing from the table.
+	 * @internal
+	 */
+	private _missingColumns: string[];
+
+	/**
 	 * Create a new instance of PostgreSqlEntityStorageConnector.
 	 * @param options The options for the connector.
 	 */
@@ -250,6 +256,7 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		this._config = options.config;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 		this._instanceId = RandomHelper.generateUuidV7("compact");
+		this._missingColumns = [];
 	}
 
 	/**
@@ -350,6 +357,28 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		}
 
 		try {
+			const columnNames = await this.readColumnNames(dbConnection);
+
+			// A table missing schema columns is replaced by the schema version rebuild, which creates
+			// every index, so none are built on it here.
+			this._missingColumns = [
+				PostgreSqlEntityStorageConnector._PARTITION_KEY,
+				...(this._entitySchema.properties ?? []).map(prop => String(prop.property))
+			].filter(columnName => !columnNames.has(columnName));
+			if (this._missingColumns.length > 0) {
+				await nodeLogging?.log({
+					level: "warn",
+					source: PostgreSqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "columnsMissing",
+					data: {
+						tableName: this._config.tableName,
+						missingColumns: this._missingColumns.join(", ")
+					}
+				});
+				return true;
+			}
+
 			const indexes = await this.readIndexes(dbConnection);
 
 			for (const prop of this._entitySchema.properties ?? []) {
@@ -932,6 +961,14 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 	 */
 	public connectorVersion(): number {
 		return 1;
+	}
+
+	/**
+	 * Get the schema columns the last bootstrap found missing from the table.
+	 * @returns The missing column names, empty when the table has every column.
+	 */
+	public getMissingColumns(): string[] {
+		return [...this._missingColumns];
 	}
 
 	/**
@@ -2105,6 +2142,31 @@ export class PostgreSqlEntityStorageConnector<T = unknown>
 		}
 
 		return indexes;
+	}
+
+	/**
+	 * Read the name of every column on the table.
+	 * @param dbConnection The connection to query with.
+	 * @returns The column names.
+	 * @internal
+	 */
+	private async readColumnNames(dbConnection: postgres.Sql): Promise<Set<string>> {
+		const columnRows = await dbConnection.unsafe(
+			`SELECT column_name AS "columnName"
+			FROM information_schema.columns
+			WHERE table_schema = 'public' AND table_name = $1`,
+			[this._config.tableName] as ParameterOrJSON<never>[]
+		);
+
+		const columnNames = new Set<string>();
+		for (const row of columnRows) {
+			const columnName = ObjectHelper.propertyGet<string>(row, "columnName");
+			if (Is.stringValue(columnName)) {
+				columnNames.add(columnName);
+			}
+		}
+
+		return columnNames;
 	}
 
 	/**

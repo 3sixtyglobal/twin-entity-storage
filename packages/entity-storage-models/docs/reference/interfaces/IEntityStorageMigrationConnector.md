@@ -504,3 +504,18 @@ The optional component type to use for logging the migration progress.
 `Promise`\<`void`\>
 
 A promise that resolves when the migration is cleaned up.
+
+***
+
+### getMissingColumns()? {#getmissingcolumns}
+
+> `optional` **getMissingColumns**(): `string`[]
+
+Get the schema columns the last bootstrap found missing from the existing storage.
+A schema version rebuild creates the storage afresh with every column and index.
+
+#### Returns
+
+`string`[]
+
+The missing column names, empty when the storage has every column.

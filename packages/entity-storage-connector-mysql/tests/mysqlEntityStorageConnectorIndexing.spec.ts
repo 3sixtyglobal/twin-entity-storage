@@ -249,6 +249,50 @@ class WideCompositeIndexedTestType {
 }
 
 @entity()
+class DeferredCompositeIndexV1TestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		maxLength: 32,
+		indexGroup: [{ name: "typeValue", direction: SortDirection.Ascending, index: 0 }]
+	})
+	public type!: string;
+
+	@property({
+		type: "string",
+		maxLength: 255,
+		indexGroup: [{ name: "typeValue", direction: SortDirection.Ascending, index: 1 }]
+	})
+	public value!: string;
+}
+
+@entity()
+class DeferredCompositeIndexV2TestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		maxLength: 32,
+		indexGroup: [{ name: "typeValue", direction: SortDirection.Ascending, index: 0 }]
+	})
+	public type!: string;
+
+	@property({ type: "string", maxLength: 255 })
+	public value!: string;
+
+	@property({
+		type: "string",
+		maxLength: 27,
+		optional: true,
+		indexGroup: [{ name: "typeValue", direction: SortDirection.Ascending, index: 1 }]
+	})
+	public valueHash?: string;
+}
+
+@entity()
 class BoundedIndexedTestType {
 	@property({ type: "string", isPrimary: true })
 	public id!: string;
@@ -331,6 +375,12 @@ describe("MySqlEntityStorageConnector", () => {
 		);
 		EntitySchemaFactory.register(nameof<WideCompositeIndexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(WideCompositeIndexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<DeferredCompositeIndexV1TestType>(), () =>
+			EntitySchemaHelper.getSchema(DeferredCompositeIndexV1TestType)
+		);
+		EntitySchemaFactory.register(nameof<DeferredCompositeIndexV2TestType>(), () =>
+			EntitySchemaHelper.getSchema(DeferredCompositeIndexV2TestType)
 		);
 		EntitySchemaFactory.register(nameof<BoundedIndexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(BoundedIndexedTestType)
@@ -1782,6 +1832,102 @@ describe("MySqlEntityStorageConnector", () => {
 				} catch {}
 				try {
 					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"creates a skipped composite index when the rebuild replaces the table",
+		async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_group_deferred_${Date.now()}`;
+			const v1 = new MySqlEntityStorageConnector<DeferredCompositeIndexV1TestType>({
+				entitySchema: nameof<DeferredCompositeIndexV1TestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			const v2 = new MySqlEntityStorageConnector<DeferredCompositeIndexV2TestType>({
+				entitySchema: nameof<DeferredCompositeIndexV2TestType>(),
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			const logEntries: ILogEntry[] = [];
+			ComponentFactory.register("test-logging-deferred-composite", () => ({
+				className: () => "TestLogging",
+				log: async (entry: ILogEntry) => {
+					logEntries.push(entry);
+				}
+			}));
+			let pool: Pool | undefined;
+
+			try {
+				// Create the table from the schema that does not have valueHash yet.
+				expect(await v1.bootstrap()).toBe(true);
+				await v1.set({ id: "1", type: "alias", value: "Acme" });
+
+				// Bootstrapping the same table from the schema that adds valueHash must skip its indexes
+				// rather than fail, leaving the table and its rows untouched.
+				expect(await v2.bootstrap("test-logging-deferred-composite")).toBe(true);
+				expect(v2.getMissingColumns()).toEqual(["valueHash"]);
+				const warnEntries = logEntries.filter(entry => entry.level === "warn");
+				expect(warnEntries).toHaveLength(1);
+				expect(warnEntries[0].message).toEqual("columnsMissing");
+
+				pool = createPool({
+					host: TEST_MYSQL_CONFIG.host,
+					port: TEST_MYSQL_CONFIG.port,
+					user: TEST_MYSQL_CONFIG.user,
+					password: TEST_MYSQL_CONFIG.password,
+					database: TEST_MYSQL_CONFIG.database
+				});
+				const indexGroups = EntitySchemaHelper.getIndexGroups(
+					EntitySchemaHelper.getSchema(DeferredCompositeIndexV2TestType)
+				);
+				const deferredIndexName = IndexHelper.generateCompositeName(
+					tableName,
+					indexGroups.typeValue
+				);
+				let indexColumns = await indexColumnsByName(pool, tableName);
+				expect(indexColumns[deferredIndexName]).toBeUndefined();
+
+				// A rebuild creates a fresh table under its own name, where the composite index and
+				// its column both exist, so its index name is computed against that name too.
+				const rebuiltTableName = `${tableName}_rebuilt`;
+				const rebuilt = new MySqlEntityStorageConnector<DeferredCompositeIndexV2TestType>({
+					entitySchema: nameof<DeferredCompositeIndexV2TestType>(),
+					config: { ...TEST_MYSQL_CONFIG, tableName: rebuiltTableName }
+				});
+				expect(await rebuilt.bootstrap()).toBe(true);
+				expect(rebuilt.getMissingColumns()).toEqual([]);
+				indexColumns = await indexColumnsByName(pool, rebuiltTableName);
+				const rebuiltIndexName = IndexHelper.generateCompositeName(
+					rebuiltTableName,
+					indexGroups.typeValue
+				);
+				expect(indexColumns[rebuiltIndexName]).toEqual([
+					`${PARTITION_KEY} ASC`,
+					"type ASC",
+					"valueHash ASC"
+				]);
+
+				try {
+					await rebuilt.teardown?.();
+				} catch {}
+				try {
+					await rebuilt.stop?.();
+				} catch {}
+			} finally {
+				ComponentFactory.unregister("test-logging-deferred-composite");
+				try {
+					await pool?.end();
+				} catch {}
+				try {
+					await v2.teardown?.();
+				} catch {}
+				try {
+					await v2.stop?.();
+				} catch {}
+				try {
+					await v1.stop?.();
 				} catch {}
 			}
 		},

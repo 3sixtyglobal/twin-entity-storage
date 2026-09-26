@@ -86,6 +86,9 @@ version records are written for other schemas.
 When config.enabled is false the service runs in detect-only mode: it identifies schemas
 that need migration and logs a warning for each one, but applies no changes.
 
+A schema whose storage is missing columns fails with columnsMissingWithoutMigration when no
+rebuild will add them, including in detect-only mode.
+
 Runs after all component bootstraps, so every managed table already exists.
 
 #### Parameters

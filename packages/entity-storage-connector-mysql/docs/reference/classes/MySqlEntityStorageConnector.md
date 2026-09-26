@@ -522,6 +522,24 @@ The connector implementation version.
 
 ***
 
+### getMissingColumns() {#getmissingcolumns}
+
+> **getMissingColumns**(): `string`[]
+
+Get the schema columns the last bootstrap found missing from the table.
+
+#### Returns
+
+`string`[]
+
+The missing column names, empty when the table has every column.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.getMissingColumns`
+
+***
+
 ### createTargetConnector() {#createtargetconnector}
 
 > **createTargetConnector**\<`U`\>(`newEntitySchema`): `Promise`\<`IEntityStorageConnector`\<`U`\>\>
