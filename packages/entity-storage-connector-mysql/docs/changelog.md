@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.1-next.14](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.10.1-next.13...entity-storage-connector-mysql-v0.10.1-next.14) (2026-09-26)
+
+
+### Bug Fixes
+
+* defer indexes over missing columns until the schema rebuild adds them ([#322](https://github.com/iotaledger/twin-entity-storage/issues/322)) ([9999639](https://github.com/iotaledger/twin-entity-storage/commit/99996399d22e23fa2587c86212f5b19ad45bad8f))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @twin.org/entity-storage-models bumped from 0.10.1-next.13 to 0.10.1-next.14
+  * devDependencies
+    * @twin.org/entity-storage-connector-memory bumped from 0.10.1-next.13 to 0.10.1-next.14
+
 ## [0.10.1-next.13](https://github.com/iotaledger/twin-entity-storage/compare/entity-storage-connector-mysql-v0.10.1-next.12...entity-storage-connector-mysql-v0.10.1-next.13) (2026-09-24)
 
 
