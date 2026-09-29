@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0.
 import { ContextIdStore } from "@twin.org/context";
 import { Coerce, RandomHelper } from "@twin.org/core";
-import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
+import {
+	EntitySchemaFactory,
+	EntitySchemaHelper,
+	SortDirection,
+	entity,
+	property
+} from "@twin.org/entity";
 import { nameof } from "@twin.org/nameof";
 import { createPool, type Pool } from "mysql2/promise";
 import { TEST_MYSQL_CONFIG } from "./setupTestEnv.js";
@@ -30,12 +36,32 @@ async function columnType(
 
 /**
  * Read the index prefix length used for a column.
+ * The connector leads each index with the partition key, so the column follows it.
+ * @param pool The pool to query with.
+ * @param tableName The table to inspect.
+ * @param columnName The column that must be the second key column of the index.
+ * @returns The prefix length, or undefined when the column is indexed in full.
+ */
+async function indexPrefixLength(
+	pool: Pool,
+	tableName: string,
+	columnName: string
+): Promise<number | undefined> {
+	const [rows] = await pool.query(
+		"SELECT sub_part AS subPart FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND column_name = ? AND seq_in_index = 2 LIMIT 1",
+		[TEST_MYSQL_CONFIG.database, tableName, columnName]
+	);
+	return Coerce.number((rows as { subPart: number | null }[])[0]?.subPart);
+}
+
+/**
+ * Read the index prefix length used for a column which leads an index.
  * @param pool The pool to query with.
  * @param tableName The table to inspect.
  * @param columnName The column that must be the leading key column of the index.
  * @returns The prefix length, or undefined when the column is indexed in full.
  */
-async function indexPrefixLength(
+async function indexLeadingPrefixLength(
 	pool: Pool,
 	tableName: string,
 	columnName: string
@@ -87,6 +113,23 @@ class MaxLengthDdlType {
 
 	@property({ type: "string", maxLength: 20000 })
 	public aboveVarCharLimit!: string;
+
+	@property({ type: "string", isSecondary: true, maxLength: 255, optional: true })
+	public atPrefixLimitIndexed?: string;
+
+	@property({ type: "string", isSecondary: true, maxLength: 256, optional: true })
+	public abovePrefixLimitIndexed?: string;
+
+	@property({
+		type: "string",
+		format: "date-time",
+		sortDirection: SortDirection.Descending,
+		optional: true
+	})
+	public sortedDateTime?: string;
+
+	@property({ type: "string", format: "uuid", isSecondary: true, optional: true })
+	public uuidIndexed?: string;
 }
 
 describe("MySqlEntityStorageConnector - maxLength column mapping", () => {
@@ -109,7 +152,7 @@ describe("MySqlEntityStorageConnector - maxLength column mapping", () => {
 			entitySchema: nameof<MaxLengthDdlType>(),
 			config: { ...TEST_MYSQL_CONFIG, tableName }
 		});
-		await connector.bootstrap();
+		expect(await connector.bootstrap()).toBe(true);
 
 		pool = createPool({
 			host: TEST_MYSQL_CONFIG.host,
@@ -143,6 +186,14 @@ describe("MySqlEntityStorageConnector - maxLength column mapping", () => {
 			dataType: "varchar",
 			maxLength: 64
 		});
+	});
+
+	test("bounds the partition key so it can lead an index without a prefix", async () => {
+		expect(await columnType(pool, tableName, "partitionId")).toEqual({
+			dataType: "varchar",
+			maxLength: 255
+		});
+		expect(await indexLeadingPrefixLength(pool, tableName, "partitionId")).toBeUndefined();
 	});
 
 	test("maxLength takes precedence over the uuid format mapping", async () => {
@@ -202,6 +253,22 @@ describe("MySqlEntityStorageConnector - maxLength column mapping", () => {
 
 	test("indexes an unbounded column with a prefix", async () => {
 		expect(await indexPrefixLength(pool, tableName, "unboundedIndexed")).toEqual(255);
+	});
+
+	test("indexes a column bounded to the prefix limit in full", async () => {
+		expect(await indexPrefixLength(pool, tableName, "atPrefixLimitIndexed")).toBeUndefined();
+	});
+
+	test("indexes a column bounded above the prefix limit with a prefix", async () => {
+		expect(await indexPrefixLength(pool, tableName, "abovePrefixLimitIndexed")).toEqual(255);
+	});
+
+	test("indexes a sorted date-time column in full", async () => {
+		expect(await indexPrefixLength(pool, tableName, "sortedDateTime")).toBeUndefined();
+	});
+
+	test("indexes a uuid column in full", async () => {
+		expect(await indexPrefixLength(pool, tableName, "uuidIndexed")).toBeUndefined();
 	});
 
 	test("round-trips values written to the bounded columns", async () => {

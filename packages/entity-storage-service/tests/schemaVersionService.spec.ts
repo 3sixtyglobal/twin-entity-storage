@@ -50,6 +50,7 @@ function makeVersionConnector(
 		connectorVersion: vi.fn().mockReturnValue(connectorVersion),
 		start: vi.fn().mockResolvedValue(undefined),
 		query: vi.fn().mockResolvedValue({ entities: records }),
+		queryJoin: vi.fn().mockResolvedValue({ entities: [] }),
 		set: vi.fn().mockResolvedValue(undefined),
 		get: vi.fn(),
 		remove: vi.fn(),
@@ -71,6 +72,7 @@ function makeMigConnector(schemaName: string, version = 0): IEntityStorageMigrat
 		bootstrap: vi.fn(),
 		start: vi.fn(),
 		query: vi.fn().mockResolvedValue({ entities: [] }),
+		queryJoin: vi.fn().mockResolvedValue({ entities: [] }),
 		set: vi.fn(),
 		get: vi.fn(),
 		remove: vi.fn(),
@@ -94,6 +96,7 @@ function makeNonMigConnector(schemaName: string, version = 0): IEntityStorageCon
 		bootstrap: vi.fn(),
 		start: vi.fn(),
 		query: vi.fn().mockResolvedValue({ entities: [] }),
+		queryJoin: vi.fn().mockResolvedValue({ entities: [] }),
 		set: vi.fn(),
 		get: vi.fn(),
 		remove: vi.fn(),
@@ -379,6 +382,55 @@ describe("SchemaVersionService", () => {
 				expect.arrayContaining([
 					expect.objectContaining({ renames: [{ from: "oldField", to: "newField" }] })
 				]),
+				expect.any(Object),
+				undefined
+			);
+		} finally {
+			try {
+				SchemaMigrationFactory.unregister(overrideKey);
+			} catch {
+				/* ignore */
+			}
+		}
+	});
+
+	test("start() passes the transformEntity override through to the migration step", async () => {
+		const schemaName = "Widget";
+		const overrideKey = `${schemaName}_0_1`;
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		const hook = vi.fn().mockImplementation(entity => entity);
+		SchemaMigrationFactory.register(overrideKey, () => ({
+			transformEntity: hook
+		}));
+
+		try {
+			await new SchemaVersionService().start();
+
+			expect(migrateWithChainSpy).toHaveBeenCalledWith(
+				connector,
+				schemaName,
+				undefined,
+				expect.arrayContaining([expect.objectContaining({ transformEntity: hook })]),
 				expect.any(Object),
 				undefined
 			);
@@ -931,6 +983,97 @@ describe("SchemaVersionService", () => {
 	});
 
 	// -------------------------------------------------------------------------
+	// start() - missing columns
+	// -------------------------------------------------------------------------
+
+	test("start() throws columnsMissingWithoutMigration when a schema is missing columns and no migration will run", async () => {
+		const schemaName = "Widget";
+		const currentVersion = 2;
+		const connector = makeMigConnector(schemaName, currentVersion);
+		connector.getMissingColumns = vi.fn().mockReturnValue(["valueHash"]);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(makeSchema(schemaName, currentVersion));
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([{ schemaName, version: currentVersion, updatedAt: "" }]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await expect(new SchemaVersionService().start()).rejects.toMatchObject({
+			message: "schemaVersionService.columnsMissingWithoutMigration",
+			properties: { schemaName, missingColumns: "valueHash" }
+		});
+		expect(connector.createTargetConnector).not.toHaveBeenCalled();
+	});
+
+	test("start() rebuilds a schema with missing columns when its version is behind", async () => {
+		const schemaName = "Widget";
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+		connector.getMissingColumns = vi.fn().mockReturnValue(["valueHash"]);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([{ schemaName, version: 0, updatedAt: "" }]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(migrateWithChainSpy).toHaveBeenCalledTimes(1);
+		expect(vc.set).toHaveBeenCalledWith(expect.objectContaining({ schemaName, version: 1 }));
+	});
+
+	test("start() rebuilds a schema with missing columns when the connector version changed", async () => {
+		const schemaName = "Widget";
+		const currentVersion = 2;
+		const newConnectorVer = 2;
+		const connector = makeMigConnector(schemaName, currentVersion);
+		connector.connectorVersion = vi.fn().mockReturnValue(newConnectorVer);
+		connector.getMissingColumns = vi.fn().mockReturnValue(["valueHash"]);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(makeSchema(schemaName, currentVersion));
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector(
+			[{ schemaName, version: currentVersion, updatedAt: "" }, makeConnectorVersionRecord(1)],
+			true,
+			newConnectorVer
+		);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await new SchemaVersionService().start();
+
+		expect(migrateWithChainSpy).toHaveBeenCalledTimes(1);
+		expect(vc.set).toHaveBeenCalledWith(
+			expect.objectContaining({ schemaName, version: currentVersion })
+		);
+	});
+
+	// -------------------------------------------------------------------------
 	// start() - enabled: false (detect-only mode)
 	// -------------------------------------------------------------------------
 
@@ -1073,5 +1216,171 @@ describe("SchemaVersionService", () => {
 		} finally {
 			ComponentFactory.unregister("test-logging");
 		}
+	});
+
+	test("start() with enabled:false throws columnsMissingWithoutMigration when a schema is missing columns", async () => {
+		const schemaName = "Widget";
+		const currentVersion = 2;
+		const currentSchema = makeSchema(schemaName, currentVersion);
+		const connector = makeMigConnector(schemaName, currentVersion);
+		connector.getMissingColumns = vi.fn().mockReturnValue(["valueHash"]);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(currentSchema);
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([{ schemaName, version: currentVersion, updatedAt: "" }]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await expect(
+			new SchemaVersionService({ config: { enabled: false } }).start()
+		).rejects.toMatchObject({
+			message: "schemaVersionService.columnsMissingWithoutMigration",
+			properties: { schemaName }
+		});
+	});
+
+	// -------------------------------------------------------------------------
+	// start() - finalizing marker
+	// -------------------------------------------------------------------------
+
+	test("start() throws migrationInterrupted when a finalizing marker record exists", async () => {
+		const schemaName = "Widget";
+		const connector = makeMigConnector(schemaName, 1);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(makeSchema(schemaName, 1));
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([
+			{ schemaName, version: 0, updatedAt: "" },
+			{ schemaName: `${schemaName}:finalizing`, version: 1, updatedAt: "" }
+		]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await expect(new SchemaVersionService().start()).rejects.toMatchObject({
+			properties: { schemaName, version: 1, marker: `${schemaName}:finalizing` }
+		});
+		expect(migrateWithChainSpy).not.toHaveBeenCalled();
+		expect(vc.set).not.toHaveBeenCalled();
+	});
+
+	test("start() with enabled:false throws migrationInterrupted when a finalizing marker record exists", async () => {
+		const schemaName = "Widget";
+		const connector = makeMigConnector(schemaName, 1);
+
+		schemaNamesSpy.mockReturnValue([schemaName]);
+		schemaGetSpy.mockReturnValue(makeSchema(schemaName, 1));
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([
+			{ schemaName, version: 1, updatedAt: "" },
+			{ schemaName: `${schemaName}:finalizing`, version: 1, updatedAt: "" }
+		]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+
+		await expect(new SchemaVersionService({ config: { enabled: false } }).start()).rejects.toThrow(
+			GeneralError
+		);
+	});
+
+	test("start() writes the finalizing marker before finalize and removes it after the version is stamped", async () => {
+		const schemaName = "Widget";
+		const marker = `${schemaName}:finalizing`;
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([{ schemaName, version: 0, updatedAt: "" }]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+		migrateWithChainSpy.mockImplementation(
+			async (...args: Parameters<typeof MigrationHelper.migrateWithChain>) => {
+				await args[4]?.onFinalizing?.();
+				return { finalConnector: connector, migrated: 0 };
+			}
+		);
+
+		await new SchemaVersionService().start();
+
+		const setCalls = vi.mocked(vc.set).mock.calls;
+		const markerIndex = setCalls.findIndex(call => call[0].schemaName === marker);
+		const versionIndex = setCalls.findIndex(
+			call => call[0].schemaName === schemaName && call[0].version === 1
+		);
+		expect(setCalls[markerIndex][0]).toEqual(
+			expect.objectContaining({ schemaName: marker, version: 1 })
+		);
+		expect(markerIndex).toBeLessThan(versionIndex);
+		expect(vc.remove).toHaveBeenCalledWith(marker);
+		expect(vi.mocked(vc.remove).mock.invocationCallOrder[0]).toBeGreaterThan(
+			vi.mocked(vc.set).mock.invocationCallOrder[versionIndex]
+		);
+	});
+
+	test("start() keeps the finalizing marker when finalize fails", async () => {
+		const schemaName = "Widget";
+		const marker = `${schemaName}:finalizing`;
+		const v0Schema = makeSchema(`${schemaName}V0`, 0);
+		const currentSchema = makeSchema(schemaName, 1);
+		const connector = makeMigConnector(schemaName, 1);
+
+		schemaNamesSpy.mockReturnValue([`${schemaName}V0`, schemaName]);
+		schemaGetSpy.mockImplementation((name: string) => {
+			if (name === `${schemaName}V0`) {
+				return v0Schema;
+			}
+			return currentSchema;
+		});
+		connectorNamesSpy.mockReturnValue([schemaName]);
+
+		const vc = makeVersionConnector([{ schemaName, version: 0, updatedAt: "" }]);
+		connectorGetSpy.mockImplementation((name: string) => {
+			if (name === "schema-version") {
+				return vc;
+			}
+			return connector;
+		});
+		migrateWithChainSpy.mockImplementation(
+			async (...args: Parameters<typeof MigrationHelper.migrateWithChain>) => {
+				await args[4]?.onFinalizing?.();
+				throw new GeneralError("test", "finalizeFailed");
+			}
+		);
+
+		await expect(new SchemaVersionService().start()).rejects.toThrow(GeneralError);
+
+		expect(vc.set).toHaveBeenCalledWith(
+			expect.objectContaining({ schemaName: marker, version: 1 })
+		);
+		expect(vc.remove).not.toHaveBeenCalled();
 	});
 });

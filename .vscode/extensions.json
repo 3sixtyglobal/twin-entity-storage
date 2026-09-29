@@ -3,6 +3,7 @@
 		"davidanson.vscode-markdownlint",
 		"dbaeumer.vscode-eslint",
 		"rvest.vs-code-prettier-eslint",
+		"ryanluker.vscode-coverage-gutters",
 		"streetsidesoftware.code-spell-checker",
 		"redhat.vscode-yaml",
 		"vitest.explorer"

@@ -36,10 +36,9 @@ import type { ISchemaVersionServiceConstructorOptions } from "./models/ISchemaVe
  * SchemaMigrationFactory under the key "Base_from_to" (e.g. "MyEntity_0_1").
  *
  * Crash-window note: finalizeMigration and the subsequent version-record write are two
- * separate operations. If the process dies between them the next boot re-runs the chain
- * over already-migrated data. applyEntityTransform is NOT idempotent for structural changes
- * (newly-added optional fields would be dropped on re-run). A transaction spanning both
- * writes is a precondition for production; track this in the concurrency follow-up.
+ * separate operations, and applyEntityTransform is not idempotent for structural changes.
+ * A finalizing marker record is therefore written before finalizeMigration and removed after
+ * the version write; a start-up that finds one refuses to run (migrationInterrupted).
  */
 export class SchemaVersionService implements IComponent {
 	/**
@@ -59,6 +58,12 @@ export class SchemaVersionService implements IComponent {
 	 * @internal
 	 */
 	private static readonly _CONNECTOR_VERSION_KEY = "connectorVersion";
+
+	/**
+	 * Suffix of the record written while a schema's migration is being finalized.
+	 * @internal
+	 */
+	private static readonly _FINALIZING_SUFFIX = ":finalizing";
 
 	/**
 	 * The connector used to read and write SchemaVersion records.
@@ -101,6 +106,9 @@ export class SchemaVersionService implements IComponent {
 	 *
 	 * When config.enabled is false the service runs in detect-only mode: it identifies schemas
 	 * that need migration and logs a warning for each one, but applies no changes.
+	 *
+	 * A schema whose storage is missing columns fails with columnsMissingWithoutMigration when no
+	 * rebuild will add them, including in detect-only mode.
 	 *
 	 * Runs after all component bootstraps, so every managed table already exists.
 	 * @param nodeLoggingComponentType An optional logging component type.
@@ -151,7 +159,16 @@ export class SchemaVersionService implements IComponent {
 			);
 			for (const record of queryResult.entities ?? []) {
 				if (Is.object<SchemaVersion>(record)) {
-					if (record.schemaName === SchemaVersionService._CONNECTOR_VERSION_KEY) {
+					if (record.schemaName.endsWith(SchemaVersionService._FINALIZING_SUFFIX)) {
+						throw new GeneralError(SchemaVersionService.CLASS_NAME, "migrationInterrupted", {
+							schemaName: record.schemaName.slice(
+								0,
+								-SchemaVersionService._FINALIZING_SUFFIX.length
+							),
+							version: record.version,
+							marker: record.schemaName
+						});
+					} else if (record.schemaName === SchemaVersionService._CONNECTOR_VERSION_KEY) {
 						storedConnectorVersion = record.version;
 					} else {
 						storedVersions.set(record.schemaName, record.version);
@@ -165,6 +182,7 @@ export class SchemaVersionService implements IComponent {
 			// Detect-only: compare stored vs declared versions and warn about any lagging schemas.
 			// Schemas with no stored version record are skipped — they are either fresh installs
 			// or pre-tracking tables, neither of which can be diagnosed safely here.
+			// Missing columns still fail loudly: no migration will ever run to add them here.
 			for (const [schemaName, schema] of currentSchemas) {
 				const storedVersion = storedVersions.get(schemaName);
 				const currentVersion = EntitySchemaHelper.getVersion(schema);
@@ -179,6 +197,22 @@ export class SchemaVersionService implements IComponent {
 							to: currentVersion
 						}
 					});
+				}
+
+				const connector =
+					schemaName === nameof(SchemaVersion)
+						? (this._versionConnector as IEntityStorageConnector)
+						: this.findConnector(schemaName)?.connector;
+				const missingColumns = connector ? this.missingColumns(connector) : [];
+				if (missingColumns.length > 0) {
+					throw new GeneralError(
+						SchemaVersionService.CLASS_NAME,
+						"columnsMissingWithoutMigration",
+						{
+							schemaName,
+							missingColumns: missingColumns.join(", ")
+						}
+					);
 				}
 			}
 			return;
@@ -291,6 +325,20 @@ export class SchemaVersionService implements IComponent {
 			resolvedStoredVersion = storedVersion;
 		}
 
+		// Missing columns are only added by a rebuild, so fail at start when none is coming rather
+		// than on the first write.
+		const missingColumns = this.missingColumns(connector);
+		if (
+			missingColumns.length > 0 &&
+			resolvedStoredVersion === currentVersion &&
+			!forceUpgradeAllSchemas
+		) {
+			throw new GeneralError(SchemaVersionService.CLASS_NAME, "columnsMissingWithoutMigration", {
+				schemaName,
+				missingColumns: missingColumns.join(", ")
+			});
+		}
+
 		// No-op: stored version already matches current.
 		if (resolvedStoredVersion === currentVersion) {
 			if (!forceUpgradeAllSchemas) {
@@ -379,6 +427,7 @@ export class SchemaVersionService implements IComponent {
 				fromProperties: fromSchema.properties ?? [],
 				toProperties: toSchema.properties ?? [],
 				renames: override?.renames,
+				transformEntity: override?.transformEntity,
 				transformEntityProperty: override?.transformEntityProperty,
 				removeEntityProperty: override?.removeEntityProperty
 			});
@@ -395,12 +444,16 @@ export class SchemaVersionService implements IComponent {
 		if (Is.function(boundGetPartitionContextIds)) {
 			partitions = await boundGetPartitionContextIds(loggingComponentType);
 		}
+		const finalizingMarker = `${schemaName}${SchemaVersionService._FINALIZING_SUFFIX}`;
 		const { finalConnector } = await MigrationHelper.migrateWithChain(
 			migrationConnector,
 			schemaName,
 			partitions,
 			steps,
-			migrationOptions,
+			{
+				...migrationOptions,
+				onFinalizing: async () => this.writeVersion(finalizingMarker, currentVersion)
+			},
 			loggingComponentType
 		);
 
@@ -421,6 +474,7 @@ export class SchemaVersionService implements IComponent {
 		// Advance the stored version only after finalizeMigration has succeeded.
 		// See crash-window note in the class comment.
 		await this.writeVersion(schemaName, currentVersion);
+		await this._versionConnector.remove(finalizingMarker);
 	}
 
 	/**
@@ -491,6 +545,16 @@ export class SchemaVersionService implements IComponent {
 			}
 		}
 		return undefined;
+	}
+
+	/**
+	 * Get the schema columns bootstrap found missing from a connector's storage.
+	 * @param connector The connector to inspect.
+	 * @returns The missing column names, empty when none or the connector does not report them.
+	 * @internal
+	 */
+	private missingColumns(connector: IEntityStorageConnector): string[] {
+		return (connector as IEntityStorageMigrationConnector).getMissingColumns?.() ?? [];
 	}
 
 	/**

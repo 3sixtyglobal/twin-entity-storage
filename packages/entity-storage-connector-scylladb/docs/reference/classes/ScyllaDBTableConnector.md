@@ -194,6 +194,12 @@ The suggested number of entities to return in each chunk, in some scenarios can 
 All the entities for the storage matching the conditions,
 and a cursor which can be used to request more entities.
 
+#### Remarks
+
+Comparisons which CQL cannot express are filtered client side. Candidate pages are
+consumed whole so the page state stays a valid cursor, which can return up to a page more
+than the limit.
+
 #### Implementation of
 
 `IEntityStorageMigrationConnector.query`
@@ -201,6 +207,54 @@ and a cursor which can be used to request more entities.
 #### Inherited from
 
 `AbstractScyllaDBConnector.query`
+
+***
+
+### queryJoin() {#queryjoin}
+
+> **queryJoin**\<`U`\>(`joinConnector`, `joinOptions`): `Promise`\<\{ `entities`: `Partial`\<`T`\> & `object`[]; `cursor?`: `string`; \}\>
+
+Find all the entities which match the conditions, attaching to each one the entities from a
+second storage connector whose join property matches. The join behaves like a left join by
+default, a primary entity with no matches is still returned with an empty joined list, unless
+joinRequired asks for an inner join and those entities are left out altogether.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### joinConnector
+
+`IEntityStorageConnector`\<`U`\>
+
+The connector holding the entities to join to.
+
+##### joinOptions
+
+`IEntityStorageJoinOptions`\<`T`, `U`\>
+
+The properties to join on, the conditions, sort order, projection and
+paging for the primary entities, the optional grouping and group conditions, and the optional
+conditions, sort order and projection for the joined entities.
+
+#### Returns
+
+`Promise`\<\{ `entities`: `Partial`\<`T`\> & `object`[]; `cursor?`: `string`; \}\>
+
+All the entities for the storage matching the conditions with their joined entities,
+and a cursor which can be used to request more entities.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.queryJoin`
+
+#### Inherited from
+
+`AbstractScyllaDBConnector.queryJoin`
 
 ***
 
@@ -223,6 +277,10 @@ The optional conditions to match for the entities.
 `Promise`\<`number`\>
 
 The total count of entities in the storage.
+
+#### Remarks
+
+Comparisons which CQL cannot express are counted client side.
 
 #### Implementation of
 

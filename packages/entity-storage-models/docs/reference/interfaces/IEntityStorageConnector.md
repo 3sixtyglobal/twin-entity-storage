@@ -32,6 +32,21 @@ The schema for the entities.
 
 ***
 
+### getPartitionKeySeparator()? {#getpartitionkeyseparator}
+
+> `optional` **getPartitionKeySeparator**(): `string`
+
+The separator this connector joins context id parts with to form a partition key.
+Defaults to "/" when not implemented.
+
+#### Returns
+
+`string`
+
+The separator.
+
+***
+
 ### set() {#set}
 
 > **set**(`entity`, `conditions?`): `Promise`\<`void`\>
@@ -217,6 +232,46 @@ The suggested number of entities to return in each chunk, in some scenarios can 
 `Promise`\<\{ `entities`: `Partial`\<`T`\>[]; `cursor?`: `string`; \}\>
 
 All the entities for the storage matching the conditions,
+and a cursor which can be used to request more entities.
+
+***
+
+### queryJoin() {#queryjoin}
+
+> **queryJoin**\<`U`\>(`joinConnector`, `joinOptions`): `Promise`\<\{ `entities`: `Partial`\<`T`\> & `object`[]; `cursor?`: `string`; \}\>
+
+Query all the entities which match the conditions, attaching to each one the entities from a
+second storage connector whose join property matches. The join behaves like a left join by
+default, a primary entity with no matches is still returned with an empty joined list, unless
+joinRequired asks for an inner join and those entities are left out altogether.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### joinConnector
+
+`IEntityStorageConnector`\<`U`\>
+
+The connector holding the entities to join to.
+
+##### joinOptions
+
+[`IEntityStorageJoinOptions`](IEntityStorageJoinOptions.md)\<`T`, `U`\>
+
+The properties to join on, the conditions, sort order, projection and
+paging for the primary entities, the optional grouping and group conditions, and the optional
+conditions, sort order and projection for the joined entities.
+
+#### Returns
+
+`Promise`\<\{ `entities`: `Partial`\<`T`\> & `object`[]; `cursor?`: `string`; \}\>
+
+All the entities for the storage matching the conditions with their joined entities,
 and a cursor which can be used to request more entities.
 
 ***

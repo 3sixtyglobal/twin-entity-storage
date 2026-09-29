@@ -7,8 +7,7 @@ import type { IScyllaDBTableConfig } from "./IScyllaDBTableConfig.js";
  */
 export interface IScyllaDBViewConfig extends IScyllaDBTableConfig {
 	/**
-	 * The name of view.
-	 * @default To the camel case of the entity name with View appended.
+	 * The name of the view.
 	 */
 	viewName: string;
 }

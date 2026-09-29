@@ -8,7 +8,7 @@
  */
 import { mkdir, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { directoryExists, fileExists, loadJson, saveJson } from './common.mjs';
+import { directoryExists, fileExists, loadJson, loadWorkspaceDirs, saveJson } from './common.mjs';
 
 /**
  * Execute the process.
@@ -28,9 +28,7 @@ async function run() {
 
 	process.stdout.write(`Target Directory: ${targetDirectory}\n`);
 
-	const packageJson = await loadJson('package.json');
-
-	const packageNames = packageJson.workspaces;
+	const packageNames = await loadWorkspaceDirs();
 
 	await generateConfig(targetDirectory, 'prod', packageNames);
 	await generateConfig(targetDirectory, 'prerelease', packageNames);

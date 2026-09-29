@@ -18,9 +18,14 @@ Thank you for your interest in contributing to this project! This guide will hel
 
 ### Prerequisites
 
-- **Node.js** 20.x or later
-- **npm** (comes with Node.js)
+- **Node.js** 24.x or later
+- **pnpm** 12.x or later (`npm install -g pnpm`)
 - **Git**
+
+The repository uses pnpm as its package manager. The exact version is pinned in
+the `packageManager` field of the root `package.json`, and the workspace is
+defined by `pnpm-workspace.yaml`. There is no npm lockfile, so `npm install`
+will not set the repository up correctly.
 
 ### Initial Setup
 
@@ -34,14 +39,29 @@ Thank you for your interest in contributing to this project! This guide will hel
 2. **Install dependencies**:
 
    ```shell
-   npm install
+   pnpm install
    ```
+
+   This also points git at the `.githooks` directory, see [Git Hooks](#git-hooks).
 
 3. **Verify setup** by running a full build:
 
    ```shell
-   npm run dist
+   pnpm run dist
    ```
+
+### Git Hooks
+
+`pnpm install` runs a `prepare` script that points git at the version controlled
+`.githooks` directory. Two hooks are installed:
+
+| Hook         | Enforces                                                             |
+| ------------ | -------------------------------------------------------------------- |
+| `commit-msg` | Commit messages follow Conventional Commits, checked with commitlint |
+| `pre-push`   | The branch name matches the convention below                         |
+
+If you cloned the repository before the hooks moved out of `.husky`, run
+`pnpm install` once to update the hooks path.
 
 ## Development Workflow
 
@@ -50,16 +70,20 @@ Thank you for your interest in contributing to this project! This guide will hel
 To build all packages in the monorepo:
 
 ```shell
-npm run dist
+pnpm run dist
 ```
 
-This command performs the following operations in sequence:
+Packages are visited in dependency order. Within each package the steps are:
 
 1. **Clean** - Removes existing build artifacts
 2. **Build** - Compiles TypeScript to JavaScript
-3. **Test** - Runs the complete test suite
-4. **Package** - Creates distribution packages
-5. **Generate Docs** - Creates API documentation
+3. **Validate locales** - Checks locale keys against their use in the source
+4. **Type check tests** - Compiles the test sources without emitting
+5. **Test** - Runs the test suite
+
+Steps 2 to 5 run concurrently, as none of them depends on the output of the
+others within the same package. API documentation is not part of this command,
+see [Documentation](#documentation).
 
 ### Build Output Structure
 
@@ -67,7 +91,9 @@ Each package will have a `dist` folder containing:
 
 - **`es/`** - ES Module format for modern bundlers and Node.js
 - **`types/`** - TypeScript declaration files (`.d.ts`)
-- **`docs/`** - Auto-generated API documentation in Markdown format
+
+Generated API documentation is written to `<package>/docs/reference` by
+`pnpm run docs`, not to `dist`.
 
 ### Development Commands for Repository
 
@@ -75,47 +101,92 @@ These commands are available at the repository level.
 
 ```shell
 # Format code with Prettier
-npm run format
+pnpm run format
 
-# Run ESLint checks
-npm run lint
+# Run all the lint checks: formatting, code, markdown and spelling
+pnpm run lint
+
+# Check the published package manifests with publint, run this after a build
+# as it inspects the packed output
+pnpm run lint:package
 
 # Perform a complete build
-npm run dist
+pnpm run dist
+
+# Perform a complete build without running the tests
+pnpm run dist:no-test
+
+# Format, then lint and compile together, then validate locales and test
+pnpm run quality
+
+# The same as quality, without running the tests
+pnpm run quality:no-test
+
+# Run the tests for every package
+pnpm run test
+
+# Run the tests for every package and report coverage
+pnpm run test:coverage
+
+# Remove the build artifacts from every package
+pnpm run clean
+
+# Update the dependencies of every package, choosing each one interactively
+pnpm run package:update
 ```
+
+Most of these are thin wrappers over `pnpm -r`. Only `build`, `merge-locales`,
+`dist` and `dist:no-test` walk the packages in dependency order, because they
+either produce output that later packages compile against, or contain a step
+that does. The rest run across all packages at once.
 
 ### Development Commands for Packages
 
 These command are available in each package.
 
 ```shell
-# Build without tests (faster during development)
-npm run build
+# Compile the TypeScript sources only (fastest during development)
+pnpm run build
 
-# Watch the files and auto build and package when spotting changes
-npm run dev
+# Watch the files and auto build when spotting changes
+pnpm run dev
 
-# Build the docs
-npm run docs
+# Build the docs into docs/reference
+pnpm run docs
 
 # Run the tests
-npm run test
+pnpm run test
 
-# Run the tests with coverage
-npm run test:coverage
+# Run the tests and report coverage
+pnpm run test:coverage
 
-# Complete build (build, package, test and docs)
-npm run dist
+# Type check the tests without emitting
+pnpm run test:build
+
+# Clean, build, validate locales, type check the tests and run them
+pnpm run dist
+
+# The same as dist, without running the tests
+pnpm run dist:no-test
 ```
 
 ## Code Standards
 
 ### Quality Requirements
 
-Before committing code, ensure it meets our quality standards, by running the following combined commands from the repo root:
+Before committing code, ensure it meets our quality standards, by running the following from the repo root:
 
 ```shell
-npm run format && npm run lint && npm run dist
+pnpm run quality
+```
+
+This formats the code first, since formatting rewrites the files the later
+steps read. It then runs the lint checks alongside the compile chain, as
+linting needs no build output, and finishes by validating the locales and
+running the tests together. The steps can also be run individually:
+
+```shell
+pnpm run format && pnpm run lint && pnpm run dist
 ```
 
 ### Code Style Guidelines
@@ -126,6 +197,12 @@ npm run format && npm run lint && npm run dist
 - Use **meaningful variable and function names**
 - Keep functions **small and focused**
 - Write **comprehensive tests** for new features
+
+### Test Coverage
+
+`pnpm run test` runs the tests without instrumentation, which is what `dist` and `quality` use. Use `pnpm run test:coverage` when you want a coverage report. Each package writes its report to `<package>/coverage`, as a summary table in the terminal and as `lcov.info` for tooling. The folder is ignored by git and removed by `pnpm run clean`.
+
+To see the coverage inline while editing, install the [Coverage Gutters](https://marketplace.visualstudio.com/items?itemName=ryanluker.vscode-coverage-gutters) extension, which is already in the workspace recommendations and configured to find the per package `lcov.info` files. Run `Coverage Gutters: Watch` from the command palette once per session and the gutters update after each test run.
 
 ## Branch Management
 
@@ -150,6 +227,9 @@ Use descriptive names with appropriate prefixes:
 | **Chores**    | `chore/description`   | `chore/update-dependencies`     |
 | **Releases**  | `release/description` | `release/v1.2.0`                |
 
+The part after the prefix may only contain lowercase letters, numbers, hyphens
+and dots. This is enforced by the `pre-push` hook.
+
 ### Branch Workflow
 
 1. **Create a branch** from `next`:
@@ -157,7 +237,7 @@ Use descriptive names with appropriate prefixes:
    ```shell
    git checkout next
    git pull origin next
-   git checkout -b feat/your-feature-name
+   git checkout -b feature/your-feature-name
    ```
 
 2. **Make your changes** and commit following our [commit standards](#commit-standards)
@@ -222,10 +302,7 @@ git commit -m "changes"
 
 Before submitting your PR:
 
-- [ ] Code builds successfully (`npm run dist`)
-- [ ] All tests pass (`npm run test`)
-- [ ] Code is formatted (`npm run format`)
-- [ ] No linting errors (`npm run lint`)
+- [ ] Formatting, linting, build and tests all pass (`pnpm run quality`)
 - [ ] Documentation updated if needed
 - [ ] Commit messages follow conventions
 - [ ] PR title follows commit message format

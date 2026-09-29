@@ -14,6 +14,7 @@ import {
 import { Blake2b } from "@twin.org/crypto";
 import {
 	EntitySchemaDiffHelper,
+	EntitySchemaHelper,
 	EntitySchemaPropertyType,
 	type IEntitySchemaDiff
 } from "@twin.org/entity";
@@ -144,6 +145,8 @@ export class MigrationHelper {
 				}
 			});
 
+			await options?.onFinalizing?.();
+
 			const finalConnector = await sourceConnector.finalizeMigration(
 				targetConnector,
 				options,
@@ -163,19 +166,22 @@ export class MigrationHelper {
 		} catch (error) {
 			await sourceConnector.cleanupMigration(targetConnector, options, loggingComponentType);
 
+			const failedEntity = MigrationHelper.failedEntityProperties(error);
+
 			await logging?.log({
 				source: MigrationHelper.CLASS_NAME,
 				level: "error",
 				message: "migrateSchemaFailed",
 				data: {
-					schemaName: targetSchemaName
+					schemaName: targetSchemaName,
+					...failedEntity
 				},
 				error: BaseError.fromError(error)
 			});
 			throw new GeneralError(
 				MigrationHelper.CLASS_NAME,
 				"migrateSchemaFailed",
-				{ schemaName: targetSchemaName },
+				{ schemaName: targetSchemaName, ...failedEntity },
 				error
 			);
 		}
@@ -187,7 +193,7 @@ export class MigrationHelper {
 	 * @param source The connector to read from (already bootstrapped).
 	 * @param target The connector to write to (already bootstrapped).
 	 * @param steps Ordered, fully-resolved migration steps.
-	 * @param options Optional migration options (batchSize, progress callbacks, transformEntityProperty).
+	 * @param options Optional migration options (batchSize, progress callbacks).
 	 * @returns The number of entities migrated.
 	 */
 	public static async migratePartitionWithChain(
@@ -217,10 +223,22 @@ export class MigrationHelper {
 					const transformedBatch: unknown[] = [];
 
 					for (const entity of page.entities) {
-						transformedBatch.push(await MigrationHelper.applyEntityChain(entity, steps));
+						try {
+							transformedBatch.push(await MigrationHelper.applyEntityChain(entity, steps));
+						} catch (error) {
+							throw await MigrationHelper.entityFailure(error, source, entity);
+						}
 					}
 
-					await target.setBatch(transformedBatch);
+					try {
+						await target.setBatch(transformedBatch);
+					} catch (error) {
+						throw await MigrationHelper.entityFailure(
+							error,
+							target,
+							MigrationHelper.findRejectedEntity(target, transformedBatch)
+						);
+					}
 					migrated += transformedBatch.length;
 				}
 
@@ -235,9 +253,9 @@ export class MigrationHelper {
 
 	/**
 	 * Transforms a single entity through an ordered chain of fully-resolved migration steps.
-	 * For each step the method diffs fromProperties against toProperties, then applies
-	 * applyEntityTransform. Each step's output feeds the next step's input so that
-	 * per-step transformEntityProperty hooks are honoured throughout the chain.
+	 * For each step the method applies transformEntity, if present, to the source entity, then
+	 * diffs fromProperties against toProperties and applies applyEntityTransform, feeding each
+	 * step's output to the next.
 	 * @param entity The entity to transform (at the shape described by steps[0].fromProperties).
 	 * @param steps Ordered, fully-resolved migration steps from stored version to current version.
 	 * Each step's fromProperties and toProperties are resolved by the caller before invocation.
@@ -249,6 +267,10 @@ export class MigrationHelper {
 	): Promise<unknown> {
 		let current: unknown = entity;
 		for (const step of steps) {
+			if (Is.function(step.transformEntity)) {
+				current = await step.transformEntity(current);
+			}
+
 			const diff = EntitySchemaDiffHelper.diff(
 				step.fromProperties,
 				step.toProperties,
@@ -269,8 +291,9 @@ export class MigrationHelper {
 	 * modified properties according to the provided schema diff and optional transform hook.
 	 * @param entity The entity to transform.
 	 * @param schemaDiff The schema diff between the old and new schemas.
-	 * @param transformEntityProperty Optional per-property transform hook for object/array properties.
-	 * @param removeEntityProperty Optional hook called with the original entity and dropped property schemas.
+	 * @param transformEntityProperty Optional transform hook called for every modified property when
+	 * supplied; scalar targets fall back to coercion when it returns undefined or it is not supplied.
+	 * @param removeEntityProperty Optional hook called with the entity and dropped property schemas.
 	 * @returns The transformed entity ready to be written to the new schema.
 	 * @throws GeneralError if a transformation is required for an object or array property but no transformEntityProperty function is provided.
 	 * @throws GeneralError if coercion of a modified property results in undefined for a non-optional target property.
@@ -323,30 +346,32 @@ export class MigrationHelper {
 
 		for (const change of schemaDiff.modified) {
 			const currentValue = ObjectHelper.propertyGet(entity, change.from.property as string);
-			let newValue;
-
-			if (change.to.type === EntitySchemaPropertyType.Boolean) {
-				newValue = Coerce.boolean(currentValue);
-			} else if (
-				change.to.type === EntitySchemaPropertyType.Number ||
-				change.to.type === EntitySchemaPropertyType.Integer
-			) {
-				newValue = Coerce.number(currentValue);
-			} else if (change.to.type === EntitySchemaPropertyType.String) {
-				newValue = Coerce.string(currentValue);
-			} else if (
+			const isObjectOrArray =
 				change.to.type === EntitySchemaPropertyType.Array ||
-				change.to.type === EntitySchemaPropertyType.Object
-			) {
-				if (!Is.function(transformEntityProperty)) {
-					throw new GeneralError(MigrationHelper.CLASS_NAME, "transformRequiredForProperty", {
-						from: change.from.property,
-						to: change.to.property,
-						type: change.from.type
-					});
-				}
+				change.to.type === EntitySchemaPropertyType.Object;
 
+			let newValue: unknown;
+			if (Is.function(transformEntityProperty)) {
 				newValue = await transformEntityProperty(entity as T, change.from, change.to, currentValue);
+			} else if (isObjectOrArray) {
+				throw new GeneralError(MigrationHelper.CLASS_NAME, "transformRequiredForProperty", {
+					from: change.from.property,
+					to: change.to.property,
+					type: change.from.type
+				});
+			}
+
+			if (Is.undefined(newValue) && !isObjectOrArray) {
+				if (change.to.type === EntitySchemaPropertyType.Boolean) {
+					newValue = Coerce.boolean(currentValue);
+				} else if (
+					change.to.type === EntitySchemaPropertyType.Number ||
+					change.to.type === EntitySchemaPropertyType.Integer
+				) {
+					newValue = Coerce.number(currentValue);
+				} else if (change.to.type === EntitySchemaPropertyType.String) {
+					newValue = Coerce.string(currentValue);
+				}
 			}
 
 			if (newValue === undefined && !(change.to.optional ?? false)) {
@@ -423,5 +448,117 @@ export class MigrationHelper {
 		if (Is.function(start)) {
 			await start(loggingComponentType);
 		}
+	}
+
+	/**
+	 * Extract the row identity from a failure raised by entityFailure, wherever it sits in the
+	 * cause chain.
+	 * @param error The error caught by the migration.
+	 * @returns The partition and row properties, empty when the failure names no row.
+	 * @internal
+	 */
+	private static failedEntityProperties(error: unknown): {
+		partitionId?: string;
+		id?: string;
+	} {
+		const rowError = BaseError.flatten(error).find(
+			e => e.source === MigrationHelper.CLASS_NAME && Is.stringValue(e.properties?.id)
+		);
+
+		const properties: { partitionId?: string; id?: string } = {};
+		if (Is.stringValue(rowError?.properties?.id)) {
+			properties.id = rowError.properties.id;
+		}
+		if (Is.stringValue(rowError?.properties?.partitionId)) {
+			properties.partitionId = rowError.properties.partitionId;
+		}
+		return properties;
+	}
+
+	/**
+	 * Resolve the partition currently being migrated as the key connectors store against a row.
+	 * @param connector The connector whose partition key format to use.
+	 * @returns The combined partition key, or undefined when the table is not partitioned.
+	 * @internal
+	 */
+	private static async currentPartitionId(
+		connector: IEntityStorageConnector
+	): Promise<string | undefined> {
+		try {
+			const contextIds = await ContextIdStore.getContextIds();
+			const separator = connector.getPartitionKeySeparator?.() ?? "/";
+			return ContextIdHelper.shortCombined(contextIds, Object.keys(contextIds ?? {}), separator);
+		} catch {
+			return undefined;
+		}
+	}
+
+	/**
+	 * Read the primary key value from a row.
+	 * @param connector The connector whose schema declares the primary key.
+	 * @param entity The row to read.
+	 * @returns The primary key value, or undefined if the schema or the row does not yield one.
+	 * @internal
+	 */
+	private static entityId(connector: IEntityStorageConnector, entity: unknown): string | undefined {
+		try {
+			const primaryKey = EntitySchemaHelper.getPrimaryKey(connector.getSchema());
+			return Coerce.string(ObjectHelper.propertyGet(entity, primaryKey.property));
+		} catch {
+			return undefined;
+		}
+	}
+
+	/**
+	 * Wrap a failure that can be attributed to a single row so the error names the row and its
+	 * partition. Returns the original error untouched when neither can be resolved, so this can
+	 * never mask the failure it is describing.
+	 * @param error The error thrown while transforming or writing the row.
+	 * @param connector The connector whose schema declares the primary key of the row.
+	 * @param entity The row the failure was attributed to, if one was identified.
+	 * @returns The error to throw in place of the original.
+	 * @internal
+	 */
+	private static async entityFailure(
+		error: unknown,
+		connector: IEntityStorageConnector,
+		entity: unknown
+	): Promise<unknown> {
+		const id = Is.empty(entity) ? undefined : MigrationHelper.entityId(connector, entity);
+		if (!Is.stringValue(id)) {
+			return error;
+		}
+
+		const partitionId = await MigrationHelper.currentPartitionId(connector);
+
+		return Is.stringValue(partitionId)
+			? new GeneralError(
+					MigrationHelper.CLASS_NAME,
+					"migrateEntityPartitionFailed",
+					{ partitionId, id },
+					error
+				)
+			: new GeneralError(MigrationHelper.CLASS_NAME, "migrateEntityFailed", { id }, error);
+	}
+
+	/**
+	 * Find the row in a batch that the target connector's validation rejects. The connector
+	 * validates the whole batch before writing anything, so the first row that fails here is the
+	 * row it failed on.
+	 * @param target The connector the batch was written to.
+	 * @param batch The transformed rows handed to setBatch.
+	 * @returns The offending row, or undefined when the failure was not a validation failure.
+	 * @internal
+	 */
+	private static findRejectedEntity(target: IEntityStorageConnector, batch: unknown[]): unknown {
+		const schema = target.getSchema();
+		for (const entity of batch) {
+			try {
+				EntitySchemaHelper.validateEntity(entity, schema);
+			} catch {
+				return entity;
+			}
+		}
+		return undefined;
 	}
 }

@@ -292,6 +292,184 @@ GeneralError with message key "unknownPropertyInConditions" if validation fails.
 
 ***
 
+### validateJoinOptions() {#validatejoinoptions}
+
+> `static` **validateJoinOptions**\<`T`, `U`\>(`schema`, `joinSchema`, `joinOptions`): `void`
+
+Validate the options for a join query against the schemas of both sides of the join.
+
+#### Type Parameters
+
+##### T
+
+`T`
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### schema
+
+`IEntitySchema`\<`T`\>
+
+The schema of the primary entities.
+
+##### joinSchema
+
+`IEntitySchema`\<`U`\>
+
+The schema of the entities being joined to.
+
+##### joinOptions
+
+[`IEntityStorageJoinOptions`](../interfaces/IEntityStorageJoinOptions.md)\<`T`, `U`\>
+
+The join options to validate.
+
+#### Returns
+
+`void`
+
+#### Throws
+
+GuardError If the join options, or the properties to join on, are missing.
+
+#### Throws
+
+ValidationError If the limit is not a positive integer.
+
+#### Throws
+
+GeneralError If a property, condition or sort property is not valid for its schema, or
+a group property is supplied along with properties or sort properties which reference anything
+other than the group property.
+
+***
+
+### normalizeJoinOptions() {#normalizejoinoptions}
+
+> `static` **normalizeJoinOptions**\<`T`, `U`\>(`joinOptions`): [`INormalizedJoinOptions`](../interfaces/INormalizedJoinOptions.md)\<`T`, `U`\>
+
+Reduce a set of join options to the parts which decide where a page starts and ends, in a
+stable form. Two queries which page the same way normalise to the same value, and anything
+which moves the position a cursor refers to changes it.
+
+#### Type Parameters
+
+##### T
+
+`T`
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### joinOptions
+
+[`IEntityStorageJoinOptions`](../interfaces/IEntityStorageJoinOptions.md)\<`T`, `U`\>
+
+The join options the page was produced from.
+
+#### Returns
+
+[`INormalizedJoinOptions`](../interfaces/INormalizedJoinOptions.md)\<`T`, `U`\>
+
+The normalised options.
+
+***
+
+### encodeCursor() {#encodecursor}
+
+> `static` **encodeCursor**\<`T`, `U`\>(`normalizedOptions`, `position`): `string`
+
+Create the opaque cursor for the next page. The cursor carries the key set of the last entity
+on the page rather than an offset, and is bound to the query which produced it
+so it can be rejected rather than silently restarting somewhere else.
+
+#### Type Parameters
+
+##### T
+
+`T`
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### normalizedOptions
+
+[`INormalizedJoinOptions`](../interfaces/INormalizedJoinOptions.md)\<`T`, `U`\>
+
+The normalised options of the query, from normalizeJoinOptions.
+
+##### position
+
+`unknown`
+
+The position the next page starts at, which a connector reads back as it
+wrote it, whether that is a key set or the cursor of the storage it paged.
+
+#### Returns
+
+`string`
+
+The encoded cursor.
+
+***
+
+### decodeCursor() {#decodecursor}
+
+> `static` **decodeCursor**\<`T`, `U`, `P`\>(`normalizedOptions`, `cursor?`): `P` \| `undefined`
+
+Decode a cursor produced by encodeCursor.
+
+#### Type Parameters
+
+##### T
+
+`T`
+
+##### U
+
+`U`
+
+##### P
+
+`P` = `unknown`
+
+#### Parameters
+
+##### normalizedOptions
+
+[`INormalizedJoinOptions`](../interfaces/INormalizedJoinOptions.md)\<`T`, `U`\>
+
+The normalised options of the query, from normalizeJoinOptions.
+
+##### cursor?
+
+`string`
+
+The cursor supplied by the caller.
+
+#### Returns
+
+`P` \| `undefined`
+
+The position the page starts at, or undefined when no cursor was supplied.
+
+#### Throws
+
+GeneralError with message key "cursorInvalid" when the cursor is malformed or was
+produced by a different query.
+
+***
+
 ### normalizeConditionValues() {#normalizeconditionvalues}
 
 > `static` **normalizeConditionValues**\<`T`\>(`condition`): `EntityCondition`\<`T`\>

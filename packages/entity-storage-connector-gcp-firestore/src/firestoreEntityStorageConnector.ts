@@ -42,11 +42,13 @@ import {
 } from "@twin.org/entity";
 import {
 	ConnectionHelper,
+	EntityStorageCommon,
 	EntityStorageHelper,
-	MigrationHelper,
 	type IEntityStorageConnector,
+	type IEntityStorageJoinOptions,
 	type IEntityStorageMigrationConnector,
-	type IMigrationOptions
+	type IMigrationOptions,
+	MigrationHelper
 } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
@@ -253,6 +255,15 @@ export class FirestoreEntityStorageConnector<T = unknown>
 	 */
 	public getSchema(): IEntitySchema {
 		return this._entitySchema as IEntitySchema;
+	}
+
+	/**
+	 * The separator this connector joins context id parts with to form a partition key.
+	 * @returns The separator, ":" instead of the default "/" since Firestore interprets "/" as a
+	 * path separator in collection names.
+	 */
+	public getPartitionKeySeparator(): string {
+		return FirestoreEntityStorageConnector._PARTITION_SEPARATOR;
 	}
 
 	/**
@@ -751,7 +762,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 			const prefix = `${this._config.collectionName}_`;
 			const collections = await client.listCollections();
 			const result: IContextIds[] = [];
-			const skipped: string[] = [];
+			const skipped = new Map<string, number>();
 			for (const col of collections) {
 				if (col.id.startsWith(prefix)) {
 					const partitionKey = col.id.slice(prefix.length);
@@ -762,14 +773,15 @@ export class FirestoreEntityStorageConnector<T = unknown>
 							FirestoreEntityStorageConnector._PARTITION_SEPARATOR
 						);
 						if (Is.undefined(split)) {
-							skipped.push(partitionKey);
+							const snapshot = await col.count().get();
+							skipped.set(partitionKey, snapshot.data().count);
 						} else {
 							result.push(split);
 						}
 					}
 				}
 			}
-			if (Is.arrayValue(skipped)) {
+			if (skipped.size > 0) {
 				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
 				await nodeLogging?.log({
 					level: "warn",
@@ -778,7 +790,7 @@ export class FirestoreEntityStorageConnector<T = unknown>
 					message: "partitionIdsSkipped",
 					data: {
 						expected: partitionContextIds.length,
-						partitionIds: skipped.join(", ")
+						partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 					}
 				});
 			}
@@ -1054,6 +1066,25 @@ export class FirestoreEntityStorageConnector<T = unknown>
 				err
 			);
 		}
+	}
+
+	/**
+	 * Find all the entities which match the conditions, attaching to each one the entities from a
+	 * second storage connector whose join property matches. The join behaves like a left join by
+	 * default, a primary entity with no matches is still returned with an empty joined list, unless
+	 * joinRequired asks for an inner join and those entities are left out altogether.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The properties to join on, the conditions, sort order, projection and
+	 * paging for the primary entities, the optional grouping and group conditions, and the optional
+	 * conditions, sort order and projection for the joined entities.
+	 * @returns All the entities for the storage matching the conditions with their joined entities,
+	 * and a cursor which can be used to request more entities.
+	 */
+	public async queryJoin<U>(
+		joinConnector: IEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>
+	): Promise<{ entities: (Partial<T> & { joined: Partial<U>[] })[]; cursor?: string }> {
+		return EntityStorageCommon.queryJoin(this, joinConnector, joinOptions);
 	}
 
 	/**
@@ -1337,6 +1368,18 @@ export class FirestoreEntityStorageConnector<T = unknown>
 				return Filter.where(property, "<=", value);
 			case ComparisonOperator.In:
 				return Filter.where(property, "in", value);
+			case ComparisonOperator.StartsWith:
+				if (!Is.string(value)) {
+					throw new GeneralError(
+						FirestoreEntityStorageConnector.CLASS_NAME,
+						"unsupportedComparisonOperator",
+						{ comparison }
+					);
+				}
+				return Filter.and(
+					Filter.where(property, ">=", value),
+					Filter.where(property, "<=", `${value}\uF8FF`)
+				);
 			case ComparisonOperator.Includes:
 				// Object value → array-contains (caller ensured needsPostFilter is false here)
 				return Filter.where(property, "array-contains", value);

@@ -3,6 +3,7 @@
 ## Classes
 
 - [ConnectionHelper](classes/ConnectionHelper.md)
+- [EntityStorageCommon](classes/EntityStorageCommon.md)
 - [EntityStorageHelper](classes/EntityStorageHelper.md)
 - [IndexHelper](classes/IndexHelper.md)
 - [MigrationHelper](classes/MigrationHelper.md)
@@ -11,8 +12,10 @@
 
 - [IEntityStorageComponent](interfaces/IEntityStorageComponent.md)
 - [IEntityStorageConnector](interfaces/IEntityStorageConnector.md)
+- [IEntityStorageJoinOptions](interfaces/IEntityStorageJoinOptions.md)
 - [IEntityStorageMigrationConnector](interfaces/IEntityStorageMigrationConnector.md)
 - [IMigrationOptions](interfaces/IMigrationOptions.md)
+- [INormalizedJoinOptions](interfaces/INormalizedJoinOptions.md)
 - [IResolvedMigrationStep](interfaces/IResolvedMigrationStep.md)
 - [ISchemaMigration](interfaces/ISchemaMigration.md)
 - [IEntityStorageCountRequest](interfaces/IEntityStorageCountRequest.md)
@@ -31,6 +34,7 @@
 
 - [EntityPropertyRemover](type-aliases/EntityPropertyRemover.md)
 - [EntityPropertyTransformer](type-aliases/EntityPropertyTransformer.md)
+- [EntityTransformer](type-aliases/EntityTransformer.md)
 
 ## Variables
 

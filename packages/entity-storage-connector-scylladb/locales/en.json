@@ -13,7 +13,9 @@
 		"scyllaDBViewConnector": {
 			"viewCreating": "Creating view \"{view}\"",
 			"viewCreated": "Created view \"{view}\"",
-			"viewExists": "Skipping create view \"{view}\" as it already exists"
+			"viewExists": "Skipping create view \"{view}\" as it already exists",
+			"viewDropping": "Dropping view \"{view}\"",
+			"viewDropped": "View \"{view}\" dropped"
 		},
 		"abstractScyllaDBConnector": {
 			"sql": "SQL: \"{sql}\""
@@ -21,7 +23,7 @@
 	},
 	"warn": {
 		"scyllaDBTableConnector": {
-			"partitionIdsSkipped": "Skipping partition ids whose depth does not match the {expected} configured partition keys: {partitionIds}. Entities in these partitions are ignored by migration."
+			"partitionIdsSkipped": "Partition ids whose depth does not match the {expected} configured partition keys are not migrated and their entities are removed when the rebuilt storage replaces the original (partition id: entity count): {partitionIds}"
 		}
 	},
 	"error": {
@@ -40,14 +42,14 @@
 		},
 		"scyllaDBViewConnector": {
 			"viewCreateFailed": "Creating view \"{view}\" failed",
-			"notSupported": "The operation is not supported \"{methodName}\""
+			"notSupported": "The operation is not supported \"{methodName}\"",
+			"teardownFailed": "Teardown entity storage failed"
 		},
 		"abstractScyllaDBConnector": {
 			"getFailed": "Getting item with \"{id}\" failed",
 			"findFailed": "Error while querying data on  \"{table}\"",
 			"parseJSONFailed": "Parsing JSON failed for field \"{name}\" with value \"{value}\"",
 			"comparisonNotSupported": "Dot-notation nested property path \"{property}\" is not supported in CQL queries",
-			"notEqualsNotSupported": "The NotEquals operator is not supported in CQL queries for property \"{property}\"",
 			"notIncludesNotSupported": "The NotIncludes operator is not supported in CQL queries for property \"{property}\"",
 			"orConditionNotSupported": "OR logical operators are not supported in CQL queries",
 			"countFailed": "Unable to count entities",

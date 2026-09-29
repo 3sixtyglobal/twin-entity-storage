@@ -5,10 +5,14 @@
 			"propertyNotInSchema": "The property \"{property}\" does not exist in the schema and cannot be used for projection",
 			"unknownPropertyInConditionProperty": "The property \"{property}\" is not a recognised schema property and cannot be used as a condition property",
 			"unknownPropertyInConditions": "The property \"{property}\" is not a recognised schema property and cannot be used in conditions",
-			"invalidConditionPropertyPath": "The property \"{property}\" has an invalid path: the root must be an object or array type, segments must not exceed 128 characters, and must not contain SQL metacharacters or control characters"
+			"invalidConditionPropertyPath": "The property \"{property}\" has an invalid path: the root must be an object or array type, segments must not exceed 128 characters, and must not contain SQL metacharacters or control characters",
+			"cursorInvalid": "The cursor is not valid for this query, it is malformed or was produced by a different query",
+			"groupConditionsWithoutGroup": "Group conditions can only be used when a group property is supplied"
 		},
 		"migrationHelper": {
 			"migrateSchemaFailed": "Migration failed for schema \"{schemaName}\".",
+			"migrateEntityFailed": "Migration failed for entity \"{id}\"",
+			"migrateEntityPartitionFailed": "Migration failed for entity \"{id}\" in partition \"{partitionId}\"",
 			"transformRequiredForProperty": "A transformation function is required to migrate property \"{from}\" to \"{to}\" of type \"{type}\"",
 			"coercionProducedUndefined": "Coercion of property \"{property}\" to type \"{type}\" produced undefined but the property is not optional",
 			"connectorBootstrapFailed": "Connector \"{className}\" failed to bootstrap storage for schema \"{schemaName}\"",

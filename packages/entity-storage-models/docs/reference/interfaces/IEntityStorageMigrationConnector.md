@@ -32,6 +32,25 @@ The schema for the entities.
 
 ***
 
+### getPartitionKeySeparator()? {#getpartitionkeyseparator}
+
+> `optional` **getPartitionKeySeparator**(): `string`
+
+The separator this connector joins context id parts with to form a partition key.
+Defaults to "/" when not implemented.
+
+#### Returns
+
+`string`
+
+The separator.
+
+#### Inherited from
+
+[`IEntityStorageConnector`](IEntityStorageConnector.md).[`getPartitionKeySeparator`](IEntityStorageConnector.md#getpartitionkeyseparator)
+
+***
+
 ### set() {#set}
 
 > **set**(`entity`, `conditions?`): `Promise`\<`void`\>
@@ -245,6 +264,50 @@ and a cursor which can be used to request more entities.
 
 ***
 
+### queryJoin() {#queryjoin}
+
+> **queryJoin**\<`U`\>(`joinConnector`, `joinOptions`): `Promise`\<\{ `entities`: `Partial`\<`T`\> & `object`[]; `cursor?`: `string`; \}\>
+
+Query all the entities which match the conditions, attaching to each one the entities from a
+second storage connector whose join property matches. The join behaves like a left join by
+default, a primary entity with no matches is still returned with an empty joined list, unless
+joinRequired asks for an inner join and those entities are left out altogether.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### joinConnector
+
+[`IEntityStorageConnector`](IEntityStorageConnector.md)\<`U`\>
+
+The connector holding the entities to join to.
+
+##### joinOptions
+
+[`IEntityStorageJoinOptions`](IEntityStorageJoinOptions.md)\<`T`, `U`\>
+
+The properties to join on, the conditions, sort order, projection and
+paging for the primary entities, the optional grouping and group conditions, and the optional
+conditions, sort order and projection for the joined entities.
+
+#### Returns
+
+`Promise`\<\{ `entities`: `Partial`\<`T`\> & `object`[]; `cursor?`: `string`; \}\>
+
+All the entities for the storage matching the conditions with their joined entities,
+and a cursor which can be used to request more entities.
+
+#### Inherited from
+
+[`IEntityStorageConnector`](IEntityStorageConnector.md).[`queryJoin`](IEntityStorageConnector.md#queryjoin)
+
+***
+
 ### empty() {#empty}
 
 > **empty**(): `Promise`\<`void`\>
@@ -441,3 +504,18 @@ The optional component type to use for logging the migration progress.
 `Promise`\<`void`\>
 
 A promise that resolves when the migration is cleaned up.
+
+***
+
+### getMissingColumns()? {#getmissingcolumns}
+
+> `optional` **getMissingColumns**(): `string`[]
+
+Get the schema columns the last bootstrap found missing from the existing storage.
+A schema version rebuild creates the storage afresh with every column and index.
+
+#### Returns
+
+`string`[]
+
+The missing column names, empty when the storage has every column.

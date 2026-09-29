@@ -48,6 +48,10 @@ runs:
       with:
         node-version: 24
 
+    # Setup pnpm after node, the runners have no system node for its installer to use.
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v6
+
     # Import GPG key for signed commits.
     - name: Import GPG key
       shell: bash
@@ -65,18 +69,19 @@ runs:
         git config --global commit.gpgsign true
         git config --global tag.gpgsign true
 
-    # Install dependencies once at repo root for workspace docs generation.
+    # Install dependencies once at repo root for workspace docs generation, with
+    # retry to handle transient registry failures.
     - name: Install dependencies
       shell: bash
       run: |
         cd "$TARGET_DIR"
         for i in {1..5}; do
-          npm ci --no-audit --no-fund && break || {
+          pnpm install --frozen-lockfile && break || {
             if [ $i -eq 5 ]; then
-              echo "npm ci failed after 5 attempts"
+              echo "pnpm install failed after 5 attempts"
               exit 1
             fi
-            echo "npm ci failed, retrying in 30 seconds (attempt $i/3)..."
+            echo "pnpm install failed, retrying in 30 seconds (attempt $i/5)..."
             sleep 30
           }
         done
@@ -86,8 +91,8 @@ runs:
       shell: bash
       run: |
         cd "$TARGET_DIR"
-        npm run build
-        npm run docs
+        pnpm run build
+        pnpm run docs
 
     # Diff only docs folders so unrelated working-tree changes don't influence the check.
     - name: Report docs change status

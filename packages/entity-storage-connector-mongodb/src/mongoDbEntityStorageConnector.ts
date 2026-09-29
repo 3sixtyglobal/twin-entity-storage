@@ -28,16 +28,20 @@ import {
 	EntitySchemaHelper,
 	EntitySchemaPropertyType,
 	type IEntitySchema,
+	type IEntitySchemaProperty,
 	LogicalOperator,
-	type SortDirection
+	SortDirection
 } from "@twin.org/entity";
 import {
 	ConnectionHelper,
+	EntityStorageCommon,
 	EntityStorageHelper,
-	MigrationHelper,
 	type IEntityStorageConnector,
+	type IEntityStorageJoinOptions,
 	type IEntityStorageMigrationConnector,
-	type IMigrationOptions
+	type IMigrationOptions,
+	IndexHelper,
+	MigrationHelper
 } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
@@ -300,6 +304,17 @@ export class MongoDbEntityStorageConnector<T = unknown>
 						});
 					}
 				}
+			}
+
+			const indexGroups = EntitySchemaHelper.getIndexGroups(this._entitySchema);
+			for (const indexProperties of Object.values(indexGroups)) {
+				const created = await this.ensureCompositeIndex(
+					collection,
+					existingIndexes,
+					indexProperties,
+					nodeLogging
+				);
+				bootstrapSuccess &&= created;
 			}
 
 			return bootstrapSuccess;
@@ -813,6 +828,25 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Find all the entities which match the conditions, attaching to each one the entities from a
+	 * second storage connector whose join property matches. The join behaves like a left join by
+	 * default, a primary entity with no matches is still returned with an empty joined list, unless
+	 * joinRequired asks for an inner join and those entities are left out altogether.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The properties to join on, the conditions, sort order, projection and
+	 * paging for the primary entities, the optional grouping and group conditions, and the optional
+	 * conditions, sort order and projection for the joined entities.
+	 * @returns All the entities for the storage matching the conditions with their joined entities,
+	 * and a cursor which can be used to request more entities.
+	 */
+	public async queryJoin<U>(
+		joinConnector: IEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>
+	): Promise<{ entities: (Partial<T> & { joined: Partial<U>[] })[]; cursor?: string }> {
+		return EntityStorageCommon.queryJoin(this, joinConnector, joinOptions);
+	}
+
+	/**
 	 * Count all the entities which match the conditions.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
@@ -852,7 +886,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 			const db = client.db(this._config.database);
 			const collections = await this.listPartitionCollections();
 			const result: IContextIds[] = [];
-			const skipped: string[] = [];
+			const skipped = new Map<string, number>();
 			for (const col of collections) {
 				const count = await db.collection(col.name).estimatedDocumentCount();
 				if (count > 0) {
@@ -862,13 +896,13 @@ export class MongoDbEntityStorageConnector<T = unknown>
 						partitionId
 					);
 					if (Is.undefined(split)) {
-						skipped.push(partitionId);
+						skipped.set(partitionId, count);
 					} else {
 						result.push(split);
 					}
 				}
 			}
-			if (Is.arrayValue(skipped)) {
+			if (skipped.size > 0) {
 				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
 				await nodeLogging?.log({
 					level: "warn",
@@ -877,7 +911,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 					message: "partitionIdsSkipped",
 					data: {
 						expected: this._partitionContextIds?.length,
-						partitionIds: skipped.join(", ")
+						partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 					}
 				});
 			}
@@ -923,7 +957,7 @@ export class MongoDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Finalize the migration by dropping the source collection and renaming the migration collection to the original name.
+	 * Finalize the migration by renaming each migration collection over its source collection in one command.
 	 * @param targetConnector The connector holding the migrated data in a temporary collection.
 	 * @param options The options to control how the migration is finalized.
 	 * @param loggingComponentType The logging component type to use during finalization.
@@ -941,8 +975,6 @@ export class MongoDbEntityStorageConnector<T = unknown>
 		const sourceBase = this._config.collection;
 		const targetClient = await targetConnector.getClient();
 		const targetDb = targetClient.db(targetConnector._config.database);
-		const sourceClient = await this.getClient();
-		const sourceDb = sourceClient.db(this._config.database);
 
 		// Find all collections the target connector wrote to (exact base name or with a _suffix).
 		const allCollections = await targetDb.listCollections().toArray();
@@ -955,12 +987,9 @@ export class MongoDbEntityStorageConnector<T = unknown>
 			const suffix = col.name.slice(targetBase.length);
 			const finalName = `${sourceBase}${suffix}`;
 
-			// Drop the existing source collection to free up the name.
-			try {
-				await sourceDb.collection(finalName).drop();
-			} catch {} // collection may not exist yet
-
-			await targetDb.collection(col.name).rename(finalName);
+			// The server drops the source collection and renames inside one command, so the source
+			// is never gone while the migrated collection still sits under its own name.
+			await targetDb.collection(col.name).rename(finalName, { dropTarget: true });
 		}
 
 		const finalConnector = new MongoDbEntityStorageConnector<U>({
@@ -1052,6 +1081,88 @@ export class MongoDbEntityStorageConnector<T = unknown>
 		const collectionName = await this.resolveCollectionName(this._config.collection);
 		const client = await this.getClient();
 		return client.db(this._config.database).collection(collectionName);
+	}
+
+	/**
+	 * Ensure the composite index for a schema index group exists.
+	 * A group needs at least two properties to form a composite index, otherwise it is skipped.
+	 * @param collection The collection to index.
+	 * @param existingIndexes The indexes returned by listIndexes.
+	 * @param indexProperties The properties in the group, ordered by their index position.
+	 * @param nodeLogging Optional logging component.
+	 * @returns True if the group is covered by an index.
+	 * @internal
+	 */
+	private async ensureCompositeIndex(
+		collection: Collection,
+		existingIndexes: Document[],
+		indexProperties: { property: IEntitySchemaProperty<T>; direction: SortDirection }[],
+		nodeLogging?: ILoggingComponent
+	): Promise<boolean> {
+		const key: { [propName: string]: 1 | -1 } = {};
+		for (const indexProperty of indexProperties) {
+			key[String(indexProperty.property.property)] =
+				indexProperty.direction === SortDirection.Descending ? -1 : 1;
+		}
+
+		if (!Is.empty(this.findCoveringCompositeIndex(existingIndexes, key))) {
+			return true;
+		}
+
+		try {
+			await collection.createIndex(key, {
+				name: IndexHelper.generateCompositeName(this._config.collection, indexProperties)
+			});
+		} catch (groupError) {
+			await nodeLogging?.log({
+				level: "error",
+				source: MongoDbEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "indexCreateFailed",
+				error: BaseError.fromError(groupError),
+				data: { property: Object.keys(key).join(", ") }
+			});
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Find an existing index which already serves a composite index group, meaning its leading key
+	 * columns are the group properties in order with the directions the group asked for, or with
+	 * every direction inverted since MongoDB walks a compound index backwards just as cheaply.
+	 * @param existingIndexes The indexes already on the collection.
+	 * @param groupKey The group's key columns and directions, in index order.
+	 * @returns The covering index if there is one.
+	 * @internal
+	 */
+	private findCoveringCompositeIndex(
+		existingIndexes: Document[],
+		groupKey: { [propName: string]: 1 | -1 }
+	): Document | undefined {
+		const groupPropNames = Object.keys(groupKey);
+
+		return existingIndexes.find(idx => {
+			const key = idx.key as { [k: string]: unknown };
+			const keys = Object.keys(key);
+			if (keys.length < groupPropNames.length) {
+				return false;
+			}
+
+			let matchesForwards = true;
+			let matchesBackwards = true;
+			for (let i = 0; i < groupPropNames.length; i++) {
+				const propName = groupPropNames[i];
+				if (keys[i] !== propName) {
+					return false;
+				}
+				matchesForwards &&= key[propName] === groupKey[propName];
+				matchesBackwards &&= key[propName] === -groupKey[propName];
+			}
+
+			return (matchesForwards || matchesBackwards) && !this.hasRestrictiveOptions(idx);
+		});
 	}
 
 	/**
@@ -1269,6 +1380,8 @@ export class MongoDbEntityStorageConnector<T = unknown>
 				return { $lte: value };
 			case ComparisonOperator.In:
 				return { $in: Array.isArray(value) ? value : [value] };
+			case ComparisonOperator.StartsWith:
+				return { $regex: `^${this.escapeRegex(String(value))}` };
 			case ComparisonOperator.Includes:
 				// For string fields, use regex for substring matching
 				if (type === EntitySchemaPropertyType.String) {

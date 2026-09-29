@@ -7,13 +7,13 @@
 			"tableExists": "Table \"{tableName}\" created or it already exists",
 			"tableDropping": "Dropping table \"{tableName}\"",
 			"tableDropped": "Table \"{tableName}\" dropped",
-			"legacyIndexDropped": "Legacy index \"{indexName}\" dropped from table \"{tableName}\", \"{newIndexName}\" already covers the column",
-			"legacyIndexRenamed": "Legacy index \"{indexName}\" renamed to \"{newIndexName}\" on table \"{tableName}\""
+			"legacyIndexDropped": "Legacy index \"{indexName}\" dropped from table \"{tableName}\", \"{newIndexName}\" now covers the column"
 		}
 	},
 	"warn": {
 		"mySqlEntityStorageConnector": {
-			"partitionIdsSkipped": "Skipping partition ids whose depth does not match the {expected} configured partition keys: {partitionIds}. Entities in these partitions are ignored by migration."
+			"partitionIdsSkipped": "Partition ids whose depth does not match the {expected} configured partition keys are not migrated and their entities are removed when the rebuilt storage replaces the original (partition id: entity count): {partitionIds}",
+			"columnsMissing": "Table \"{tableName}\" is missing columns: {missingColumns}. Index creation is skipped until the schema version rebuild."
 		}
 	},
 	"error": {
@@ -24,11 +24,15 @@
 			"getFailed": "Unable to get entity \"{id}\"",
 			"removeFailed": "Unable to remove entity \"{id}\"",
 			"queryFailed": "The query failed",
+			"queryJoinFailed": "The join query failed",
+			"joinConnectorMismatch": "The join connector must be a MySQL connector reading from the same server and database \"{database}\"",
 			"comparisonNotSupported": "Comparison operator \"{comparison}\" is not supported",
 			"conditionalNotSupported": "Conditional operator \"{operator}\" is not supported",
 			"entitySchemaPropertiesUndefined": "The entity schema properties are undefined",
 			"databaseCreateFailed": "Unable to create database \"{databaseName}\"",
 			"tableCreateFailed": "Unable to create table \"{tableName}\"",
+			"indexCreateFailed": "Unable to create the indexes for table \"{tableName}\"",
+			"indexKeyTooLong": "The index group \"{indexGroup}\" on entity \"{entitySchema}\" needs a key of {keyBytes} bytes, which exceeds the {maxKeyBytes} byte limit",
 			"setBatchFailed": "Unable to set batch of entities",
 			"countFailed": "Unable to count entities",
 			"emptyFailed": "Unable to empty entity storage",

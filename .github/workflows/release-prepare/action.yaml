@@ -84,24 +84,29 @@ runs:
       with:
         node-version: 24
 
-    # Install and prepare the tooling release-please depends on.
+    # Setup pnpm after node, the runners have no system node for its installer to use.
+    - name: Setup pnpm
+      uses: pnpm/action-setup@v6
+
+    # Install and prepare the tooling release-please depends on, with retry to
+    # handle transient registry failures.
     - name: Install dependencies
       shell: bash
       run: |
         for i in {1..5}; do
-          npm ci --no-audit --no-fund && break || {
+          pnpm install --frozen-lockfile && break || {
             if [ $i -eq 5 ]; then
-              echo "npm ci failed after 5 attempts"
+              echo "pnpm install failed after 5 attempts"
               exit 1
             fi
-            echo "npm ci failed, retrying in 30 seconds (attempt $i/3)..."
+            echo "pnpm install failed, retrying in 30 seconds (attempt $i/5)..."
             sleep 30
           }
         done
 
     - name: Patch release-please prerelease versioning strategy
       shell: bash
-      run: npx patch-package --patch-dir release
+      run: pnpm dlx patch-package --patch-dir release
 
     - name: Import GPG key
       shell: bash
@@ -238,6 +243,24 @@ runs:
           echo "::error::release-please did not create a PR. Either there are no releasable commits since the last release, or a stale 'autorelease: pending' PR is blocking a new one. Check for open PRs labelled 'autorelease: pending' on the ${{ inputs.branch }} branch."
           exit 1
         fi
+
+    # Release-please updates package.json versions but does not regenerate the
+    # pnpm lockfile. Update the generated release PR before approval.
+    - name: Update release PR lockfile
+      if: ${{ steps.release-please.outputs.pr_number != '' }}
+      shell: bash
+      run: |
+        gh pr checkout ${{ steps.release-please.outputs.pr_number }} --force
+        pnpm install --lockfile-only --no-frozen-lockfile --ignore-scripts
+        if git diff --quiet -- pnpm-lock.yaml; then
+          echo "pnpm-lock.yaml is already up to date"
+        else
+          git add pnpm-lock.yaml
+          git commit -m "chore: update pnpm lockfile for release versions [skip ci]"
+          git push origin HEAD
+        fi
+      env:
+        GH_TOKEN: ${{ inputs.release_token }}
 
     # Approval must come from a second identity because the PR author cannot self-approve.
     # If the approval token is rate-limited, continue and let the reviewer approve manually.

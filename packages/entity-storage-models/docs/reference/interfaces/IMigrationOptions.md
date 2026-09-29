@@ -47,3 +47,16 @@ The number of rows migrated so far.
 #### Returns
 
 `Promise`\<`void`\>
+
+***
+
+### onFinalizing? {#onfinalizing}
+
+> `optional` **onFinalizing?**: () => `Promise`\<`void`\>
+
+Called once every partition has been copied, immediately before the source connector
+finalizes the migration.
+
+#### Returns
+
+`Promise`\<`void`\>

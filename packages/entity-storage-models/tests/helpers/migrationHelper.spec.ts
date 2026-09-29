@@ -7,12 +7,13 @@ import {
 	ContextIdStore,
 	type IContextIds
 } from "@twin.org/context";
-import { GeneralError, Is } from "@twin.org/core";
+import { BaseError, ComponentFactory, GeneralError, Is } from "@twin.org/core";
 import {
 	EntitySchemaPropertyType,
 	type IEntitySchemaDiff,
 	type IEntitySchemaProperty
 } from "@twin.org/entity";
+import { EntityStorageHelper } from "../../src/helpers/entityStorageHelper.js";
 import { MigrationHelper } from "../../src/helpers/migrationHelper.js";
 import type { IEntityStorageConnector } from "../../src/models/IEntityStorageConnector.js";
 import type { IEntityStorageMigrationConnector } from "../../src/models/IEntityStorageMigrationConnector.js";
@@ -282,6 +283,75 @@ describe("MigrationHelper.applyEntityTransform", () => {
 			async (entity, f, t, v) => (v as string).split(",")
 		);
 		expect(result.tags).toEqual(["a", "b", "c"]);
+	});
+
+	test("modified property: string rename uses the transformEntityProperty return value instead of coercion", async () => {
+		const d = diff({
+			modified: [
+				{
+					from: prop("hash", EntitySchemaPropertyType.String),
+					to: prop("integrity", EntitySchemaPropertyType.String)
+				}
+			]
+		});
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ hash: "sha256:abc" },
+			d,
+			(entity, f, t, v) => (v as string).replace("sha256:", "sha256-")
+		);
+		expect(result.integrity).toBe("sha256-abc");
+		expect(result.hash).toBeUndefined();
+	});
+
+	test("modified property: number target uses the transformEntityProperty return value instead of coercion", async () => {
+		const d = diff({
+			modified: [
+				{
+					from: prop("count", EntitySchemaPropertyType.String),
+					to: prop("count", EntitySchemaPropertyType.Number)
+				}
+			]
+		});
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ count: "three" },
+			d,
+			() => 3
+		);
+		expect(result.count).toBe(3);
+	});
+
+	test("modified property: boolean target uses the transformEntityProperty return value instead of coercion", async () => {
+		const d = diff({
+			modified: [
+				{
+					from: prop("flag", EntitySchemaPropertyType.String),
+					to: prop("flag", EntitySchemaPropertyType.Boolean)
+				}
+			]
+		});
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ flag: "nope" },
+			d,
+			() => false
+		);
+		expect(result.flag).toBe(false);
+	});
+
+	test("modified property: scalar target falls back to coercion when transformEntityProperty returns undefined", async () => {
+		const d = diff({
+			modified: [
+				{
+					from: prop("qty", EntitySchemaPropertyType.String),
+					to: prop("quantity", EntitySchemaPropertyType.String)
+				}
+			]
+		});
+		const result = await MigrationHelper.applyEntityTransform<ITransformEntity, ITransformEntity>(
+			{ qty: "5" },
+			d,
+			() => undefined
+		);
+		expect(result.quantity).toBe("5");
 	});
 
 	test("combination: unchanged, added, and removed properties all handled correctly", async () => {
@@ -589,6 +659,108 @@ describe("MigrationHelper.applyEntityChain", () => {
 		expect(result.quantity).toBe("5");
 		expect(result.qty).toBeUndefined();
 	});
+
+	test("applies transformEntityProperty during a rename, not just a generic coercion", async () => {
+		const step: IResolvedMigrationStep = {
+			fromProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["hash", EntitySchemaPropertyType.String]
+			),
+			toProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["integrity", EntitySchemaPropertyType.String]
+			),
+			renames: [{ from: "hash", to: "integrity" }],
+			transformEntityProperty: (entity, f, t, v) => (v as string).replace("sha256:", "sha256-")
+		};
+		const result = (await MigrationHelper.applyEntityChain({ id: "1", hash: "sha256:abc" }, [
+			step
+		])) as { [key: string]: unknown };
+		expect(result.integrity).toBe("sha256-abc");
+	});
+
+	test("applies the step's transformEntity to the source entity before the diff", async () => {
+		const step: IResolvedMigrationStep = {
+			fromProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["code", EntitySchemaPropertyType.String, true]
+			),
+			toProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["code", EntitySchemaPropertyType.String]
+			),
+			transformEntity: entity => {
+				const source = entity as { [key: string]: unknown };
+				return { ...source, code: source.legacyCode };
+			}
+		};
+
+		const result = (await MigrationHelper.applyEntityChain({ id: "1", legacyCode: "abc" }, [
+			step
+		])) as { [key: string]: unknown };
+
+		expect(result.code).toBe("abc");
+		expect(result.legacyCode).toBeUndefined();
+	});
+
+	test("awaits an async transformEntity", async () => {
+		const step: IResolvedMigrationStep = {
+			fromProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["code", EntitySchemaPropertyType.String, true]
+			),
+			toProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["code", EntitySchemaPropertyType.String]
+			),
+			transformEntity: async entity => {
+				await new Promise(resolve => setTimeout(resolve, 0));
+				const source = entity as { [key: string]: unknown };
+				return { ...source, code: source.legacyCode };
+			}
+		};
+
+		const result = (await MigrationHelper.applyEntityChain({ id: "1", legacyCode: "abc" }, [
+			step
+		])) as { [key: string]: unknown };
+
+		expect(result.code).toBe("abc");
+	});
+
+	test("feeds each step's output to the next step's transformEntity", async () => {
+		const step1: IResolvedMigrationStep = {
+			fromProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["qty", EntitySchemaPropertyType.String]
+			),
+			toProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["quantity", EntitySchemaPropertyType.String]
+			),
+			renames: [{ from: "qty", to: "quantity" }]
+		};
+
+		let received: { [key: string]: unknown } | undefined;
+		const step2: IResolvedMigrationStep = {
+			fromProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["quantity", EntitySchemaPropertyType.String]
+			),
+			toProperties: makeProps(
+				["id", EntitySchemaPropertyType.String],
+				["quantity", EntitySchemaPropertyType.String]
+			),
+			transformEntity: entity => {
+				received = entity as { [key: string]: unknown };
+				return entity;
+			}
+		};
+
+		await MigrationHelper.applyEntityChain({ id: "1", qty: "5" }, [step1, step2]);
+
+		expect(received?.quantity).toBe("5");
+		expect(received?.qty).toBeUndefined();
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -668,24 +840,38 @@ describe("MigrationHelper.migrateWithChain", () => {
 		toProperties: v1Props
 	};
 
-	function makeTargetConnector(): IEntityStorageConnector<{ [key: string]: unknown }> {
+	function makeTargetConnector(
+		validate: boolean = false,
+		partitionKeySeparator?: string
+	): IEntityStorageConnector<{ [key: string]: unknown }> {
 		const written: { [key: string]: unknown }[] = [];
-		return {
+		const schema = { type: "TargetSchema", properties: v1Props };
+		const connector: IEntityStorageConnector<{ [key: string]: unknown }> = {
 			className: () => "TargetStub",
-			getSchema: vi.fn().mockReturnValue({ type: "TargetSchema", properties: v1Props }),
+			getSchema: vi.fn().mockReturnValue(schema),
 			bootstrap: vi.fn().mockResolvedValue(true),
 			start: vi.fn().mockResolvedValue(undefined),
 			setBatch: vi.fn().mockImplementation(async (batch: { [key: string]: unknown }[]) => {
+				if (validate) {
+					for (const entity of batch) {
+						EntityStorageHelper.prepareEntity(entity, schema);
+					}
+				}
 				written.push(...batch);
 			}),
 			count: vi.fn().mockImplementation(async () => written.length),
 			query: vi.fn().mockResolvedValue({ entities: written }),
+			queryJoin: vi.fn().mockResolvedValue({ entities: written }),
 			set: vi.fn(),
 			get: vi.fn(),
 			remove: vi.fn(),
 			removeBatch: vi.fn(),
 			empty: vi.fn()
 		};
+		if (Is.stringValue(partitionKeySeparator)) {
+			connector.getPartitionKeySeparator = () => partitionKeySeparator;
+		}
+		return connector;
 	}
 
 	function makeSourceConnector(
@@ -699,6 +885,7 @@ describe("MigrationHelper.migrateWithChain", () => {
 			bootstrap: vi.fn().mockResolvedValue(true),
 			start: vi.fn().mockResolvedValue(undefined),
 			query: vi.fn().mockResolvedValue({ entities }),
+			queryJoin: vi.fn().mockResolvedValue({ entities }),
 			count: vi.fn().mockResolvedValue(entities.length),
 			set: vi.fn(),
 			setBatch: vi.fn(),
@@ -711,6 +898,25 @@ describe("MigrationHelper.migrateWithChain", () => {
 			finalizeMigration: vi.fn().mockResolvedValue(targetConnector),
 			cleanupMigration: vi.fn().mockResolvedValue(undefined)
 		};
+	}
+
+	/**
+	 * A source with one valid row in "partitionA" and one row missing "name" in "partitionB",
+	 * for tests that need a failure attributable to a specific row in a specific partition.
+	 * @param target The target connector, passed through to makeSourceConnector.
+	 * @returns The source connector.
+	 */
+	function makeInvalidSecondPartitionSource(
+		target: IEntityStorageConnector<{ [key: string]: unknown }>
+	): IEntityStorageMigrationConnector<{ [key: string]: unknown }> {
+		const source = makeSourceConnector([], target);
+		vi.mocked(source.count).mockResolvedValue(1);
+		vi.mocked(source.query).mockImplementation(async () => {
+			const contextIds = await ContextIdStore.getContextIds();
+			const invalid = contextIds?.[ContextIdKeys.Node] === "partitionB";
+			return { entities: [invalid ? { id: "2" } : { id: "1", name: "Alice" }] };
+		});
+		return source;
 	}
 
 	test("migrates entities through a single step and returns the final connector", async () => {
@@ -740,6 +946,28 @@ describe("MigrationHelper.migrateWithChain", () => {
 		);
 
 		expect(migrated).toBe(0);
+	});
+
+	test("calls onFinalizing after the copy and before finalizeMigration", async () => {
+		const target = makeTargetConnector();
+		const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+		const onFinalizing = vi.fn().mockResolvedValue(undefined);
+
+		await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			await source.getPartitionContextIds(),
+			[singleStep],
+			{ onFinalizing }
+		);
+
+		expect(onFinalizing).toHaveBeenCalledTimes(1);
+		expect(onFinalizing.mock.invocationCallOrder[0]).toBeGreaterThan(
+			vi.mocked(target.setBatch).mock.invocationCallOrder[0]
+		);
+		expect(onFinalizing.mock.invocationCallOrder[0]).toBeLessThan(
+			vi.mocked(source.finalizeMigration).mock.invocationCallOrder[0]
+		);
 	});
 
 	test("calls createTargetConnector with the target schema name", async () => {
@@ -876,6 +1104,34 @@ describe("MigrationHelper.migrateWithChain", () => {
 			);
 		});
 
+		test("runs transformEntity inside the partition context", async () => {
+			const target = makeTargetConnector();
+			const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+
+			const seenNodes: (string | undefined)[] = [];
+			const step: IResolvedMigrationStep = {
+				fromProperties: v0Props,
+				toProperties: v1Props,
+				transformEntity: async entity => {
+					const contextIds = await ContextIdStore.getContextIds();
+					seenNodes.push(contextIds?.[ContextIdKeys.Node]);
+					return entity;
+				}
+			};
+
+			await MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				[{ [ContextIdKeys.Node]: "partitionA" }, { [ContextIdKeys.Node]: "partitionB" }],
+				[step]
+			);
+
+			expect(seenNodes).toEqual([
+				`${TestContextIdHandler.INTERNAL_PREFIX}partitionA`,
+				`${TestContextIdHandler.INTERNAL_PREFIX}partitionB`
+			]);
+		});
+
 		test("runs a single pass with empty context when partitions is undefined (non-partitioned table)", async () => {
 			const target = makeTargetConnector();
 			const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
@@ -963,5 +1219,172 @@ describe("MigrationHelper.migrateWithChain", () => {
 		]);
 
 		expect(migrated).toBe(3);
+	});
+
+	test("names the partition and the row when a row fails validation on write", async () => {
+		const target = makeTargetConnector(true);
+		const source = makeInvalidSecondPartitionSource(target);
+
+		await expect(
+			MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				[{ [ContextIdKeys.Node]: "partitionA" }, { [ContextIdKeys.Node]: "partitionB" }],
+				[singleStep]
+			)
+		).rejects.toMatchObject({
+			message: "migrationHelper.migrateSchemaFailed",
+			properties: { schemaName: "TargetSchema", partitionId: "partitionB", id: "2" }
+		});
+	});
+
+	test("the cause of a failed migration names the row and its partition", async () => {
+		const target = makeTargetConnector(true);
+		const source = makeInvalidSecondPartitionSource(target);
+
+		const error = await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			[{ [ContextIdKeys.Node]: "partitionA" }, { [ContextIdKeys.Node]: "partitionB" }],
+			[singleStep]
+		).catch((caught: unknown) => caught);
+
+		expect(BaseError.flatten(error)).toContainEqual(
+			expect.objectContaining({
+				message: "migrationHelper.migrateEntityPartitionFailed",
+				properties: { partitionId: "partitionB", id: "2" }
+			})
+		);
+	});
+
+	test("names the row when a transform step rejects it", async () => {
+		const target = makeTargetConnector();
+		const source = makeSourceConnector(
+			[
+				{ id: "1", name: "Alice" },
+				{ id: "2", name: "Bob" }
+			],
+			target
+		);
+		const step: IResolvedMigrationStep = {
+			fromProperties: v0Props,
+			toProperties: v1Props,
+			transformEntity: async entity => {
+				if ((entity as { id: string }).id === "2") {
+					throw new GeneralError("TestStep", "rejectedRow");
+				}
+				return entity;
+			}
+		};
+
+		await expect(
+			MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				[{ [ContextIdKeys.Node]: "partitionB" }],
+				[step]
+			)
+		).rejects.toMatchObject({
+			message: "migrationHelper.migrateSchemaFailed",
+			properties: { schemaName: "TargetSchema", partitionId: "partitionB", id: "2" }
+		});
+	});
+
+	test("names the row without a partition when the table is not partitioned", async () => {
+		const target = makeTargetConnector(true);
+		const source = makeSourceConnector([{ id: "2" }], target);
+
+		const error = (await MigrationHelper.migrateWithChain(source, "TargetSchema", undefined, [
+			singleStep
+		]).catch((caught: unknown) => caught)) as GeneralError;
+
+		expect(error.properties).toEqual({ schemaName: "TargetSchema", id: "2" });
+		expect(BaseError.flatten(error)).toContainEqual(
+			expect.objectContaining({
+				message: "migrationHelper.migrateEntityFailed",
+				properties: { id: "2" }
+			})
+		);
+	});
+
+	test("uses the connector's own separator to join a multi-key partition", async () => {
+		const target = makeTargetConnector(true, ":");
+		const source = makeSourceConnector([{ id: "2" }], target);
+
+		const error = (await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			[{ [ContextIdKeys.Node]: "nodeA", [ContextIdKeys.Tenant]: "tenantB" }],
+			[singleStep]
+		).catch((caught: unknown) => caught)) as GeneralError;
+
+		expect(error.properties).toEqual({
+			schemaName: "TargetSchema",
+			partitionId: "nodeA:tenantB",
+			id: "2"
+		});
+	});
+
+	test("a failure that is not attributable to a row still reports only the schema", async () => {
+		const target = makeTargetConnector();
+		const source = makeSourceConnector([], target);
+		vi.mocked(source.finalizeMigration).mockRejectedValue(new Error("store unavailable"));
+
+		const error = (await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			await source.getPartitionContextIds(),
+			[singleStep]
+		).catch((caught: unknown) => caught)) as GeneralError;
+
+		expect(error.properties).toEqual({ schemaName: "TargetSchema" });
+	});
+
+	test("a write failure that is not a validation problem still reports only the schema, even with a valid row", async () => {
+		const target = makeTargetConnector();
+		target.setBatch = vi.fn().mockRejectedValue(new GeneralError("TargetStub", "writeFailed"));
+		const source = makeSourceConnector([{ id: "1", name: "Alice" }], target);
+
+		const error = (await MigrationHelper.migrateWithChain(
+			source,
+			"TargetSchema",
+			await source.getPartitionContextIds(),
+			[singleStep]
+		).catch((caught: unknown) => caught)) as GeneralError;
+
+		expect(error.properties).toEqual({ schemaName: "TargetSchema" });
+		expect(BaseError.flatten(error)).toContainEqual(
+			expect.objectContaining({ message: "targetStub.writeFailed" })
+		);
+	});
+
+	test("logs the partition and the row alongside the schema name on a row failure", async () => {
+		const target = makeTargetConnector(true);
+		const source = makeInvalidSecondPartitionSource(target);
+		const logSpy = vi.fn();
+		ComponentFactory.register("test-logging", () => ({
+			className: () => "TestLogging",
+			log: logSpy
+		}));
+
+		try {
+			await MigrationHelper.migrateWithChain(
+				source,
+				"TargetSchema",
+				[{ [ContextIdKeys.Node]: "partitionA" }, { [ContextIdKeys.Node]: "partitionB" }],
+				[singleStep],
+				undefined,
+				"test-logging"
+			).catch(() => {});
+
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					message: "migrateSchemaFailed",
+					data: { schemaName: "TargetSchema", partitionId: "partitionB", id: "2" }
+				})
+			);
+		} finally {
+			ComponentFactory.unregister("test-logging");
+		}
 	});
 });

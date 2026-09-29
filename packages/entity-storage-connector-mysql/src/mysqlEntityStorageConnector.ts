@@ -41,6 +41,7 @@ import {
 	IndexHelper,
 	MigrationHelper,
 	type IEntityStorageConnector,
+	type IEntityStorageJoinOptions,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
 } from "@twin.org/entity-storage-models";
@@ -80,10 +81,23 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private static readonly _PARTITION_KEY_VALUE: string = "root";
 
 	/**
+	 * Maximum length of the partition id column. The column leads the primary key and every
+	 * index, so it is bounded to a length which can be indexed in full rather than by prefix.
+	 * @internal
+	 */
+	private static readonly _PARTITION_KEY_MAX_LENGTH: number = 255;
+
+	/**
 	 * Maximum number of rows per INSERT statement in setBatch.
 	 * @internal
 	 */
 	private static readonly _BATCH_CHUNK_SIZE: number = 1000;
+
+	/**
+	 * The column the group ranking is emitted as when picking one row per group.
+	 * @internal
+	 */
+	private static readonly _GROUP_RANK_COLUMN: string = "__groupRank";
 
 	/**
 	 * MySQL's maximum identifier length in characters.
@@ -99,10 +113,23 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private static readonly _MAX_VARCHAR_LENGTH: number = 16383;
 
 	/**
-	 * The prefix length used when indexing a column which is too long to index in full.
+	 * The longest prefix a string column is indexed with, matching the bound on the partition key
+	 * so it can lead an index without one. MySQL itself allows more, up to the 3072 byte key limit.
 	 * @internal
 	 */
 	private static readonly _INDEX_PREFIX_LENGTH: number = 255;
+
+	/**
+	 * MySQL's maximum index key length in bytes.
+	 * @internal
+	 */
+	private static readonly _MAX_KEY_BYTES: number = 3072;
+
+	/**
+	 * The most bytes a utf8mb4 character can occupy.
+	 * @internal
+	 */
+	private static readonly _BYTES_PER_CHARACTER: number = 4;
 
 	/**
 	 * The name for the schema.
@@ -147,10 +174,22 @@ export class MySqlEntityStorageConnector<T = unknown>
 	private readonly _versionKey?: string;
 
 	/**
+	 * The properties which are optional in the schema.
+	 * @internal
+	 */
+	private readonly _nullableProperties: Set<string>;
+
+	/**
 	 * Milliseconds to wait for optimistic-lock mutexes before throwing.
 	 * @internal
 	 */
 	private readonly _mutexTimeoutMs?: number;
+
+	/**
+	 * The schema columns the last bootstrap found missing from the table.
+	 * @internal
+	 */
+	private _missingColumns: string[];
 
 	/**
 	 * Create a new instance of MySqlEntityStorageConnector.
@@ -241,10 +280,14 @@ export class MySqlEntityStorageConnector<T = unknown>
 		this._partitionContextIds = options.partitionContextIds;
 		this._primaryKeyProperty = EntitySchemaHelper.getPrimaryKey(this._entitySchema);
 		this._versionKey = EntitySchemaHelper.findVersionProperty(this._entitySchema);
+		this._nullableProperties = new Set(
+			(this._entitySchema.properties ?? []).filter(p => p.optional).map(p => String(p.property))
+		);
 
 		this._config = options.config;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 		this._instanceId = RandomHelper.generateUuidV7("compact");
+		this._missingColumns = [];
 	}
 
 	/**
@@ -262,9 +305,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 	public async health(): Promise<IHealth[]> {
 		try {
 			const pool = await this.getPool();
-			await pool.query(
-				`SELECT 1 FROM \`${this._config.database}\`.\`${this._config.tableName}\` LIMIT 0`
-			);
+			await pool.query("SELECT 1 FROM ?? LIMIT 0", [this.qualifiedTable()]);
 			return [
 				{
 					source: MySqlEntityStorageConnector.CLASS_NAME,
@@ -360,9 +401,9 @@ export class MySqlEntityStorageConnector<T = unknown>
 					}
 				});
 
-				await pool.query(
-					`CREATE TABLE IF NOT EXISTS \`${this._config.database}\`.\`${this._config.tableName}\` (${this.mapMySqlProperties()})`
-				);
+				await pool.query(`CREATE TABLE IF NOT EXISTS ?? (${this.mapMySqlProperties()})`, [
+					this.qualifiedTable()
+				]);
 
 				await this.waitForTableExists();
 			} else {
@@ -376,6 +417,43 @@ export class MySqlEntityStorageConnector<T = unknown>
 					}
 				});
 			}
+		} catch (error) {
+			await nodeLogging?.log({
+				level: "error",
+				source: MySqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "tableCreateFailed",
+				error: BaseError.fromError(error),
+				data: {
+					tableName: this._config.tableName
+				}
+			});
+			return false;
+		}
+
+		try {
+			const { names: columnNames, lengths: columnLengths } = await this.readColumns(pool);
+
+			// A table missing schema columns is replaced by the schema version rebuild, which creates
+			// every index, so none are built on it here.
+			this._missingColumns = [this.partitionKeyProperty(), ...(this._entitySchema.properties ?? [])]
+				.map(prop => String(prop.property))
+				.filter(columnName => !columnNames.has(columnName));
+			if (this._missingColumns.length > 0) {
+				await nodeLogging?.log({
+					level: "warn",
+					source: MySqlEntityStorageConnector.CLASS_NAME,
+					ts: Date.now(),
+					message: "columnsMissing",
+					data: {
+						tableName: this._config.tableName,
+						missingColumns: this._missingColumns.join(", ")
+					}
+				});
+				return true;
+			}
+
+			const indexes = await this.readIndexes(pool);
 
 			for (const prop of this._entitySchema.properties ?? []) {
 				if (
@@ -383,15 +461,20 @@ export class MySqlEntityStorageConnector<T = unknown>
 					prop.type !== EntitySchemaPropertyType.Object &&
 					prop.type !== EntitySchemaPropertyType.Array
 				) {
-					await this.ensureIndex(pool, prop, nodeLogging);
+					await this.ensureIndex(pool, indexes, columnLengths, prop, nodeLogging);
 				}
+			}
+
+			const indexGroups = EntitySchemaHelper.getIndexGroups(this._entitySchema);
+			for (const [groupName, indexProperties] of Object.entries(indexGroups)) {
+				await this.ensureCompositeIndex(pool, indexes, columnLengths, groupName, indexProperties);
 			}
 		} catch (error) {
 			await nodeLogging?.log({
 				level: "error",
 				source: MySqlEntityStorageConnector.CLASS_NAME,
 				ts: Date.now(),
-				message: "tableCreateFailed",
+				message: "indexCreateFailed",
 				error: BaseError.fromError(error),
 				data: {
 					tableName: this._config.tableName
@@ -460,8 +543,8 @@ export class MySqlEntityStorageConnector<T = unknown>
 				}
 			}
 
-			const query = `SELECT * FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE ${whereClauses.join(" AND ")} LIMIT 1`;
-			const [rows] = await pool.query(query, values);
+			const query = `SELECT * FROM ?? WHERE ${whereClauses.join(" AND ")} LIMIT 1`;
+			const [rows] = await pool.query(query, [this.qualifiedTable(), ...values]);
 
 			if (Is.array(rows) && rows.length === 1) {
 				const item = EntityStorageHelper.unPrepareEntity<T>(rows[0] as T, [
@@ -585,8 +668,9 @@ export class MySqlEntityStorageConnector<T = unknown>
 			const pool = await this.getPool();
 
 			if (hasVersionCheck) {
-				const updateSql = `UPDATE \`${this._config.database}\`.\`${this._config.tableName}\` SET ${keys.map(key => `\`${key}\` = ?`).join(", ")} WHERE \`${this._primaryKeyProperty.property as string}\` = ? AND \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ? AND \`${this._versionKey}\` = ?`;
+				const updateSql = `UPDATE ?? SET ${keys.map(key => `\`${key}\` = ?`).join(", ")} WHERE \`${this._primaryKeyProperty.property as string}\` = ? AND \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ? AND \`${this._versionKey}\` = ?`;
 				const updateValues = [
+					this.qualifiedTable(),
 					...values,
 					id,
 					partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE,
@@ -603,12 +687,12 @@ export class MySqlEntityStorageConnector<T = unknown>
 					);
 				}
 			} else {
-				let sql = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\``;
+				let sql = "INSERT INTO ??";
 				sql += ` (${keys.map(key => `\`${key}\``).join(", ")})`;
 				sql += ` VALUES (${values.map(() => "?").join(", ")})`;
 				sql += ` ON DUPLICATE KEY UPDATE ${keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ")};`;
 
-				await pool.query(sql, values);
+				await pool.query(sql, [this.qualifiedTable(), ...values]);
 			}
 		} catch (err) {
 			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
@@ -665,7 +749,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 			const rowPlaceholder = `(${keys.map(() => "?").join(", ")})`;
 			const columnList = `(${keys.map(key => `\`${key}\``).join(", ")})`;
 			const updateClause = keys.map(key => `\`${key}\` = VALUES(\`${key}\`)`).join(", ");
-			const baseInsert = `INSERT INTO \`${this._config.database}\`.\`${this._config.tableName}\` ${columnList} VALUES `;
+			const baseInsert = `INSERT INTO ?? ${columnList} VALUES `;
 			const onDuplicate = ` ON DUPLICATE KEY UPDATE ${updateClause};`;
 
 			const pool = await this.getPool();
@@ -691,7 +775,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 				await pool.query(
 					`${baseInsert}${chunk.map(() => rowPlaceholder).join(", ")}${onDuplicate}`,
-					chunkValues
+					[this.qualifiedTable(), ...chunkValues]
 				);
 			}
 		} catch (err) {
@@ -715,8 +799,8 @@ export class MySqlEntityStorageConnector<T = unknown>
 		try {
 			const pool = await this.getPool();
 			await pool.query(
-				`DELETE FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ?`,
-				[partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE]
+				`DELETE FROM ?? WHERE \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ?`,
+				[this.qualifiedTable(), partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE]
 			);
 		} catch (err) {
 			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "emptyFailed", undefined, err);
@@ -781,8 +865,8 @@ export class MySqlEntityStorageConnector<T = unknown>
 					);
 				}
 
-				const query = `DELETE FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE ${whereClauses.join(" AND ")}`;
-				await pool.query(query, values);
+				const query = `DELETE FROM ?? WHERE ${whereClauses.join(" AND ")}`;
+				await pool.query(query, [this.qualifiedTable(), ...values]);
 			}
 		} catch (err) {
 			if (BaseError.isErrorName(err, ConflictError.CLASS_NAME)) {
@@ -822,7 +906,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 		try {
 			if (await this.tableExists()) {
 				const pool = await this.getPool();
-				await pool.query(`DROP TABLE \`${this._config.database}\`.\`${this._config.tableName}\`;`);
+				await pool.query("DROP TABLE ??;", [this.qualifiedTable()]);
 				await this.waitForTableNotExists();
 			}
 
@@ -860,8 +944,9 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		try {
 			const pool = await this.getPool();
-			const sql = `DELETE FROM \`${this._config.database}\`.\`${this._config.tableName}\` WHERE \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ? AND \`${String(this._primaryKeyProperty.property)}\` IN (?)`;
+			const sql = `DELETE FROM ?? WHERE \`${MySqlEntityStorageConnector._PARTITION_KEY}\` = ? AND \`${String(this._primaryKeyProperty.property)}\` IN (?)`;
 			await pool.query(sql, [
+				this.qualifiedTable(),
 				partitionKey ?? MySqlEntityStorageConnector._PARTITION_KEY_VALUE,
 				ids
 			]);
@@ -915,25 +1000,9 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 			const pkPropName = String(this._primaryKeyProperty.property);
 
-			// Decide whether the caller's sort already includes the PK.  When it does we
-			// skip appending a second PK clause so we never emit "ORDER BY id ..., id ...".
-			const sortsByPK =
-				Is.array(sortProperties) && sortProperties.some(s => String(s.property) === pkPropName);
-
 			// Full ordered column list used for both ORDER BY and the keySet condition.
 			// Format: [user sort cols…] + [pk tie-breaker if not already present].
-			const keySetCols: { prop: string; asc: boolean }[] = [];
-			if (Is.array(sortProperties)) {
-				for (const s of sortProperties) {
-					keySetCols.push({
-						prop: String(s.property),
-						asc: s.sortDirection === SortDirection.Ascending
-					});
-				}
-			}
-			if (!sortsByPK) {
-				keySetCols.push({ prop: pkPropName, asc: true });
-			}
+			const keySetCols = this.buildKeySetColumns(sortProperties);
 
 			// When the caller projects specific columns we must still SELECT the PK and any
 			// sort columns so we can build the next-page cursor.  Track which columns we add
@@ -955,7 +1024,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 				selectClause = "*";
 			}
 
-			const orderByClause = `ORDER BY ${keySetCols.map(c => `\`${c.prop}\` ${c.asc ? "ASC" : "DESC"}`).join(", ")}`;
+			const orderByClause = `ORDER BY ${this.buildKeySetOrderBy(keySetCols)}`;
 
 			const { whereClauses, values } = this.buildWhereClause(conditions, partitionKey);
 
@@ -968,30 +1037,17 @@ export class MySqlEntityStorageConnector<T = unknown>
 				// Reconstruct the ordered last-value list: [sort-col values…, pk].
 				const lastValues: unknown[] = [...(parsedCursor.sv ?? []), parsedCursor.i];
 
-				// Build: (col0 op last0) OR (col0=last0 AND col1 op last1) OR …
-				const orParts: string[] = [];
-				for (let i = 0; i < keySetCols.length; i++) {
-					const parts: string[] = [];
-					for (let j = 0; j < i; j++) {
-						values.push(lastValues[j]);
-						parts.push(`\`${keySetCols[j].prop}\` = ?`);
-					}
-					const op = keySetCols[i].asc ? ">" : "<";
-					values.push(lastValues[i]);
-					parts.push(`\`${keySetCols[i].prop}\` ${op} ?`);
-					orParts.push(parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`);
-				}
-				whereClauses.push(`(${orParts.join(" OR ")})`);
+				this.appendKeySetClause(keySetCols, lastValues, whereClauses, values);
 			}
 
-			sql = `SELECT ${selectClause} FROM \`${this._config.database}\`.\`${this._config.tableName}\``;
+			sql = `SELECT ${selectClause} FROM ??`;
 			if (whereClauses.length > 0) {
 				sql += ` WHERE ${whereClauses.join(" AND ")}`;
 			}
 			sql += ` ${orderByClause} LIMIT ${returnSize + 1}`;
 
 			const pool = await this.getPool();
-			const [rows] = (await pool.query(sql, values)) ?? [];
+			const [rows] = (await pool.query(sql, [this.qualifiedTable(), ...values])) ?? [];
 
 			const hasMore = Is.array(rows) && rows.length > returnSize;
 			const resultRows = hasMore ? (rows as unknown[]).slice(0, returnSize) : rows;
@@ -1032,6 +1088,54 @@ export class MySqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Find all the entities which match the conditions, attaching to each one the entities from a
+	 * second storage connector whose join property matches. The join behaves like a left join by
+	 * default, a primary entity with no matches is still returned with an empty joined list, unless
+	 * joinRequired asks for an inner join and those entities are left out altogether. Both connectors
+	 * must be MySQL connectors reading from the same database so the work can be done in a single
+	 * statement.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The properties to join on, the conditions, sort order, projection and
+	 * paging for the primary entities, the optional grouping and group conditions, and the optional
+	 * conditions, sort order and projection for the joined entities.
+	 * @returns All the entities for the storage matching the conditions with their joined entities,
+	 * and a cursor which can be used to request more entities.
+	 * @throws GeneralError if the join connector does not read from the same server and database.
+	 */
+	public async queryJoin<U>(
+		joinConnector: IEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>
+	): Promise<{ entities: (Partial<T> & { joined: Partial<U>[] })[]; cursor?: string }> {
+		Guards.object<IEntityStorageConnector<U>>(
+			MySqlEntityStorageConnector.CLASS_NAME,
+			nameof(joinConnector),
+			joinConnector
+		);
+
+		// The join runs as one statement against this connector's pool, so the other side has to be
+		// a MySQL connector reading from the same server and database.
+		const typedJoinConnector = joinConnector as MySqlEntityStorageConnector<U>;
+		if (
+			joinConnector.className() !== MySqlEntityStorageConnector.CLASS_NAME ||
+			typedJoinConnector._config?.host !== this._config.host ||
+			typedJoinConnector._config?.port !== this._config.port ||
+			typedJoinConnector._config?.database !== this._config.database
+		) {
+			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "joinConnectorMismatch", {
+				database: this._config.database
+			});
+		}
+
+		EntityStorageHelper.validateJoinOptions(
+			this._entitySchema,
+			typedJoinConnector.getSchema(),
+			joinOptions
+		);
+
+		return this.queryJoinPage(typedJoinConnector, joinOptions, joinOptions.groupProperty);
+	}
+
+	/**
 	 * Count all the entities which match the conditions.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
@@ -1051,12 +1155,12 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 			const { whereClauses, values } = this.buildWhereClause(conditions, partitionKey);
 
-			sql = `SELECT COUNT(*) AS count FROM \`${this._config.database}\`.\`${this._config.tableName}\``;
+			sql = "SELECT COUNT(*) AS count FROM ??";
 			if (whereClauses.length > 0) {
 				sql += ` WHERE ${whereClauses.join(" AND ")}`;
 			}
 
-			const [rows] = await pool.query(sql, values);
+			const [rows] = await pool.query(sql, [this.qualifiedTable(), ...values]);
 			return Number((rows as { count: number }[])[0].count);
 		} catch (err) {
 			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "countFailed", { sql }, err);
@@ -1077,26 +1181,28 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		try {
 			const pool = await this.getPool();
+			const partitionColumn = MySqlEntityStorageConnector._PARTITION_KEY;
 			const [rows] = await pool.query(
-				`SELECT DISTINCT \`${MySqlEntityStorageConnector._PARTITION_KEY}\` FROM \`${this._config.database}\`.\`${this._config.tableName}\``
+				`SELECT \`${partitionColumn}\`, COUNT(*) AS count FROM ?? GROUP BY \`${partitionColumn}\``,
+				[this.qualifiedTable()]
 			);
-			const partitionIds = (rows as { [key: string]: string }[])
-				.map(row => row[MySqlEntityStorageConnector._PARTITION_KEY])
-				.filter((id): id is string => Is.stringValue(id));
 			const contextIds: IContextIds[] = [];
-			const skipped: string[] = [];
-			for (const partitionId of partitionIds) {
-				const split = EntityStorageHelper.tryShortSplit(
-					this._partitionContextIds ?? [],
-					partitionId
-				);
-				if (Is.undefined(split)) {
-					skipped.push(partitionId);
-				} else {
-					contextIds.push(split);
+			const skipped = new Map<string, number>();
+			for (const row of rows as { [key: string]: string | number }[]) {
+				const partitionId = row[partitionColumn];
+				if (Is.stringValue(partitionId)) {
+					const split = EntityStorageHelper.tryShortSplit(
+						this._partitionContextIds ?? [],
+						partitionId
+					);
+					if (Is.undefined(split)) {
+						skipped.set(partitionId, Number(row.count));
+					} else {
+						contextIds.push(split);
+					}
 				}
 			}
-			if (Is.arrayValue(skipped)) {
+			if (skipped.size > 0) {
 				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
 				await nodeLogging?.log({
 					level: "warn",
@@ -1105,7 +1211,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 					message: "partitionIdsSkipped",
 					data: {
 						expected: this._partitionContextIds?.length,
-						partitionIds: skipped.join(", ")
+						partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 					}
 				});
 			}
@@ -1125,7 +1231,15 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @returns The connector implementation version.
 	 */
 	public connectorVersion(): number {
-		return 1;
+		return 2;
+	}
+
+	/**
+	 * Get the schema columns the last bootstrap found missing from the table.
+	 * @returns The missing column names, empty when the table has every column.
+	 */
+	public getMissingColumns(): string[] {
+		return [...this._missingColumns];
 	}
 
 	/**
@@ -1151,7 +1265,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Finalize the migration by dropping the source table and renaming the migration table to the original name.
+	 * Finalize the migration by swapping the migration table into the original name and dropping the old table.
 	 * @param targetConnector The connector holding the migrated data in a temporary table.
 	 * @param options The options to control how the migration is finalized.
 	 * @param loggingComponentType The logging component type to use during finalization.
@@ -1162,14 +1276,24 @@ export class MySqlEntityStorageConnector<T = unknown>
 		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<MySqlEntityStorageConnector<U>> {
-		// Teardown the existing table with the original name to free up the name for the new table
-		await this.teardown(loggingComponentType);
-
-		// RENAME TABLE is an atomic metadata-only operation in MySQL - no data copying needed.
+		// One statement swaps the two tables through a transient third name, so a failure or a
+		// process death leaves either the untouched source or the complete migrated table in place.
+		const swapTable = `${this._config.database}.${MigrationHelper.generateTargetName(
+			targetConnector._config.tableName,
+			MySqlEntityStorageConnector._MAX_IDENTIFIER_LENGTH
+		)}`;
 		const pool = await this.getPool();
-		await pool.query(
-			`RENAME TABLE \`${targetConnector._config.database}\`.\`${targetConnector._config.tableName}\` TO \`${this._config.database}\`.\`${this._config.tableName}\``
-		);
+		await pool.query("RENAME TABLE ?? TO ??, ?? TO ??, ?? TO ??", [
+			this.qualifiedTable(),
+			swapTable,
+			targetConnector.qualifiedTable(),
+			this.qualifiedTable(),
+			swapTable,
+			targetConnector.qualifiedTable()
+		]);
+
+		// The migration table now holds the old rows.
+		await targetConnector.teardown(loggingComponentType);
 
 		const finalConnector = new MySqlEntityStorageConnector<U>({
 			entitySchema: targetConnector._entitySchemaName,
@@ -1220,6 +1344,589 @@ export class MySqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Read a page of primary entities and their joined entities in a single statement. The page of
+	 * primary rows is selected in a derived table so the limit and the cursor apply to the primary
+	 * entities rather than to the rows the join multiplies them into. When grouping, the derived
+	 * table keeps only the first row of each group in the sort order, which makes one row stand for
+	 * the whole group and lets the same key set cursor step past every row the group holds.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The join configuration.
+	 * @param groupProperty The optional property to group the primary entities by.
+	 * @returns The entities with their joined entities, and the next page cursor.
+	 * @internal
+	 */
+	private async queryJoinPage<U>(
+		joinConnector: MySqlEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>,
+		groupProperty: keyof T | undefined
+	): Promise<{ entities: (Partial<T> & { joined: Partial<U>[] })[]; cursor?: string }> {
+		const returnSize = joinOptions.limit ?? MySqlEntityStorageConnector._DEFAULT_LIMIT;
+		const pkPropName = String(this._primaryKeyProperty.property);
+		const joinColumn = String(joinOptions.property);
+		const joinedPrimaryKey = String(joinConnector._primaryKeyProperty.property);
+
+		const normalizedOptions = EntityStorageHelper.normalizeJoinOptions(joinOptions);
+		const keySetValues = EntityStorageHelper.decodeCursor<T, U, unknown[]>(
+			normalizedOptions,
+			joinOptions.cursor
+		);
+
+		let sql = "";
+		try {
+			const keySetCols = this.buildKeySetColumns(joinOptions.sortProperties);
+
+			// The key set columns and the join column are needed to page and to join, so they are
+			// read even when the caller did not ask for them, then removed from the entities.
+			const primary = this.buildColumnSelection(
+				this._entitySchema,
+				joinOptions.properties,
+				keySetCols
+					.map(c => c.prop)
+					.concat(joinColumn)
+					.concat(Is.empty(groupProperty) ? [] : [String(groupProperty)])
+			);
+			const joined = this.buildColumnSelection(
+				joinConnector._entitySchema,
+				joinOptions.joinProperties,
+				[joinedPrimaryKey]
+			);
+
+			const partitionKey = await this.resolvePartitionKey();
+			const { whereClauses, values } = this.buildWhereClause(joinOptions.conditions, partitionKey);
+
+			if (!Is.empty(groupProperty)) {
+				whereClauses.push(`\`${String(groupProperty)}\` IS NOT NULL`);
+			}
+
+			// The clauses which narrow the rows the page is built from, beyond the plain conditions,
+			// each correlated back to the row being considered. They have to be added before the
+			// page position so the bound values stay in statement order.
+			const narrowing = await this.buildNarrowingClauses(
+				joinConnector,
+				joinOptions,
+				groupProperty,
+				partitionKey,
+				"t"
+			);
+			whereClauses.push(...narrowing.clauses);
+			values.push(...narrowing.values);
+
+			const columnList = primary.columns.map(c => `\`${c}\``).join(", ");
+			const pageOrderBy = this.buildKeySetOrderBy(keySetCols);
+
+			const keySetClauses: string[] = [];
+			this.appendKeySetClause(keySetCols, keySetValues, keySetClauses, values);
+
+			let pageSql: string;
+			if (Is.empty(groupProperty)) {
+				pageSql = `SELECT ${columnList} FROM ?? AS t WHERE ${[...whereClauses, ...keySetClauses].join(" AND ")} ORDER BY ${pageOrderBy} LIMIT ${returnSize + 1}`;
+			} else {
+				// Ranking inside each group and keeping the first row collapses the group to the one
+				// row the result stands on, so the ordering, the projection and the cursor all work
+				// on ordinary rows rather than on a distinct list of group values.
+				const rankedSql = `SELECT ${columnList}, ROW_NUMBER() OVER (PARTITION BY \`${String(groupProperty)}\` ORDER BY ${pageOrderBy}) AS \`${MySqlEntityStorageConnector._GROUP_RANK_COLUMN}\` FROM ?? AS t WHERE ${whereClauses.join(" AND ")}`;
+				const rankedWhere = [
+					`\`${MySqlEntityStorageConnector._GROUP_RANK_COLUMN}\` = 1`,
+					...keySetClauses
+				];
+				pageSql = `SELECT ${columnList} FROM (${rankedSql}) AS ranked WHERE ${rankedWhere.join(" AND ")} ORDER BY ${pageOrderBy} LIMIT ${returnSize + 1}`;
+			}
+
+			// A group stands on one row for ordering and paging, but its joined list has to hold the
+			// matches of every entity in the group, so the other members are re-attached to the
+			// page and the join hangs off them. The same joined entity reached through more than
+			// one member is collapsed when the rows are collected.
+			const memberValues: unknown[] = [];
+			let fromClause = `(${pageSql}) AS p`;
+			let joinFromAlias = "p";
+
+			if (!Is.empty(groupProperty)) {
+				const members = this.buildWhereClause(joinOptions.conditions, partitionKey, "m");
+				// A member has to pass the same narrowing as the row standing for the group,
+				// otherwise an inner join would let entities back in through the members.
+				const memberNarrowing = await this.buildNarrowingClauses(
+					joinConnector,
+					joinOptions,
+					undefined,
+					partitionKey,
+					"m"
+				);
+				memberValues.push(...members.values, ...memberNarrowing.values);
+				fromClause += ` LEFT JOIN ?? AS m ON ${[
+					`m.\`${String(groupProperty)}\` = p.\`${String(groupProperty)}\``,
+					...members.whereClauses,
+					...memberNarrowing.clauses
+				].join(" AND ")}`;
+				joinFromAlias = "m";
+			}
+
+			const join = await joinConnector.buildJoinClause(
+				String(joinOptions.joinProperty),
+				joinOptions.joinConditions,
+				"j",
+				joinFromAlias,
+				joinColumn
+			);
+
+			const selectClause = primary.columns
+				.map(c => `p.\`${c}\``)
+				.concat(joined.columns.map(c => `j.\`${c}\``))
+				.join(", ");
+
+			const outerOrderBy = [
+				this.buildKeySetOrderBy(keySetCols, "p"),
+				...this.buildJoinOrderBy(joinOptions, "j")
+			].join(", ");
+
+			sql = `SELECT ${selectClause} FROM ${fromClause} LEFT JOIN ?? AS j ON ${join.clause} ORDER BY ${outerOrderBy}`;
+
+			// The bound values follow the order the placeholders appear in the statement: the
+			// primary table with its conditions and page position, the primary table again when
+			// the other members of each group are re-attached, then the joined table.
+			const queryValues = [
+				this.qualifiedTable(),
+				...values,
+				...(Is.empty(groupProperty) ? [] : [this.qualifiedTable(), ...memberValues]),
+				joinConnector.qualifiedTable(),
+				...join.values
+			];
+
+			const pool = await this.getPool();
+			const [rows] = (await pool.query({ sql, values: queryValues, nestTables: true })) ?? [];
+
+			const groups = this.collectJoinRows<U>(rows, "p", pkPropName, "j", joinedPrimaryKey);
+			const hasMore = groups.length > returnSize;
+			const pageGroups = hasMore ? groups.slice(0, returnSize) : groups;
+
+			const entities: (Partial<T> & { joined: Partial<U>[] })[] = [];
+			for (const group of pageGroups) {
+				const entity = this.prepareJoinEntity<T>(group.key, this._entitySchema, primary.internal);
+				entities.push({
+					...entity,
+					joined: group.joined.map(j =>
+						this.prepareJoinEntity<U>(j, joinConnector._entitySchema, joined.internal)
+					)
+				});
+			}
+
+			let nextCursor: string | undefined;
+			if (hasMore && pageGroups.length > 0) {
+				const lastRow = pageGroups[pageGroups.length - 1].key;
+				nextCursor = EntityStorageHelper.encodeCursor(
+					normalizedOptions,
+					keySetCols.map(c => ObjectHelper.propertyGet(lastRow, c.prop))
+				);
+			}
+
+			return { entities, cursor: nextCursor };
+		} catch (err) {
+			throw new GeneralError(
+				MySqlEntityStorageConnector.CLASS_NAME,
+				"queryJoinFailed",
+				{ sql },
+				err
+			);
+		}
+	}
+
+	/**
+	 * Build the clauses which narrow the rows a page is built from, beyond the plain conditions.
+	 * An inner join requires the row to have at least one joined entity, and a group condition
+	 * requires the group the row belongs to to hold an entity which matches it.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The join configuration.
+	 * @param groupProperty The optional property the entities are grouped by.
+	 * @param partitionKey The partition key of this connector.
+	 * @param alias The alias of the row being narrowed.
+	 * @returns The clauses and their bound values.
+	 * @internal
+	 */
+	private async buildNarrowingClauses<U>(
+		joinConnector: MySqlEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>,
+		groupProperty: keyof T | undefined,
+		partitionKey: string | undefined,
+		alias: string
+	): Promise<{ clauses: string[]; values: unknown[] }> {
+		const clauses: string[] = [];
+		const values: unknown[] = [];
+
+		if (joinOptions.joinRequired ?? false) {
+			const exists = await joinConnector.buildJoinExistsClause(
+				String(joinOptions.joinProperty),
+				joinOptions.joinConditions,
+				"jx",
+				alias,
+				String(joinOptions.property)
+			);
+			clauses.push(exists.clause);
+			values.push(...exists.values);
+		}
+
+		if (!Is.empty(groupProperty) && Is.arrayValue(joinOptions.groupConditions)) {
+			const groupColumn = String(groupProperty);
+			for (let i = 0; i < joinOptions.groupConditions.length; i++) {
+				const memberAlias = `gx${i}`;
+				const group = this.buildWhereClause(
+					joinOptions.groupConditions[i],
+					partitionKey,
+					memberAlias
+				);
+				clauses.push(
+					`EXISTS (SELECT 1 FROM ?? AS ${memberAlias} WHERE ${memberAlias}.\`${groupColumn}\` = ${alias}.\`${groupColumn}\` AND ${group.whereClauses.join(" AND ")})`
+				);
+				values.push(this.qualifiedTable(), ...group.values);
+			}
+		}
+
+		return { clauses, values };
+	}
+
+	/**
+	 * Build the clause which requires a primary entity to have at least one joined entity. Called
+	 * on the connector holding the joined entities so its partition key and property types apply.
+	 * @param joinProperty The column on this connector's table to join to.
+	 * @param joinConditions The optional conditions to match for the joined entities.
+	 * @param alias The alias of the joined table inside the clause.
+	 * @param primaryAlias The alias of the primary entity being narrowed.
+	 * @param primaryColumn The column on the primary entity to join from.
+	 * @returns The clause and its bound values.
+	 * @internal
+	 */
+	private async buildJoinExistsClause(
+		joinProperty: string,
+		joinConditions: EntityCondition<T> | undefined,
+		alias: string,
+		primaryAlias: string,
+		primaryColumn: string
+	): Promise<{ clause: string; values: unknown[] }> {
+		const partitionKey = await this.resolvePartitionKey();
+		const { whereClauses, values } = this.buildWhereClause(joinConditions, partitionKey, alias);
+
+		return {
+			clause: `EXISTS (SELECT 1 FROM ?? AS ${alias} WHERE ${alias}.\`${joinProperty}\` = ${primaryAlias}.\`${primaryColumn}\` AND ${whereClauses.join(" AND ")})`,
+			values: [this.qualifiedTable(), ...values]
+		};
+	}
+
+	/**
+	 * Build the ON clause which attaches the joined table, including its own partition key and any
+	 * conditions the caller supplied for the joined entities. Called on the connector holding the
+	 * joined entities so the partition key and the property types come from its own schema and
+	 * configuration.
+	 * @param joinProperty The column on this connector's table to join to.
+	 * @param joinConditions The optional conditions to match for the joined entities.
+	 * @param alias The alias of the joined table.
+	 * @param primaryAlias The alias of the table holding the primary entities.
+	 * @param primaryColumn The column on the primary table to join from.
+	 * @returns The ON clause and its bound values.
+	 * @internal
+	 */
+	private async buildJoinClause(
+		joinProperty: string,
+		joinConditions: EntityCondition<T> | undefined,
+		alias: string,
+		primaryAlias: string,
+		primaryColumn: string
+	): Promise<{ clause: string; values: unknown[] }> {
+		const partitionKey = await this.resolvePartitionKey();
+		const { whereClauses, values } = this.buildWhereClause(joinConditions, partitionKey, alias);
+
+		const clauses = [
+			`${alias}.\`${joinProperty}\` = ${primaryAlias}.\`${primaryColumn}\``,
+			...whereClauses
+		];
+
+		return { clause: clauses.join(" AND "), values };
+	}
+
+	/**
+	 * Build the ORDER BY fragments which order the joined entities within each primary entity.
+	 * @param joinOptions The join configuration.
+	 * @param alias The alias of the joined table.
+	 * @returns The order by fragments, empty when no sort order was requested.
+	 * @internal
+	 */
+	private buildJoinOrderBy<U>(
+		joinOptions: IEntityStorageJoinOptions<T, U>,
+		alias: string
+	): string[] {
+		return (joinOptions.joinSortProperties ?? []).map(
+			s =>
+				`${alias}.\`${String(s.property)}\` ${s.sortDirection === SortDirection.Ascending ? "ASC" : "DESC"}`
+		);
+	}
+
+	/**
+	 * Build the ordered keySet columns used for the page order and the cursor, matching the
+	 * behaviour of query so both paginate the same way.
+	 * @param sortProperties The optional sort order.
+	 * @returns The ordered columns with their direction.
+	 * @internal
+	 */
+	private buildKeySetColumns(
+		sortProperties?: { property: keyof T; sortDirection: SortDirection }[]
+	): { prop: string; asc: boolean; nullable: boolean }[] {
+		const pkPropName = String(this._primaryKeyProperty.property);
+		const keySetCols: { prop: string; asc: boolean; nullable: boolean }[] = [];
+
+		for (const sortProperty of sortProperties ?? []) {
+			keySetCols.push({
+				prop: String(sortProperty.property),
+				asc: sortProperty.sortDirection === SortDirection.Ascending,
+				nullable: this._nullableProperties.has(String(sortProperty.property))
+			});
+			// The primary key is unique, so nothing after it can change the order.  Stopping here
+			// keeps it last, which is what the cursor assumes when it pairs values with columns.
+			if (String(sortProperty.property) === pkPropName) {
+				break;
+			}
+		}
+
+		if (!keySetCols.some(c => c.prop === pkPropName)) {
+			keySetCols.push({ prop: pkPropName, asc: true, nullable: false });
+		}
+
+		return keySetCols;
+	}
+
+	/**
+	 * Build the ORDER BY fragment for the keySet columns.
+	 * @param keySetCols The ordered keySet columns.
+	 * @param alias The optional alias qualifying the columns.
+	 * @returns The order by fragment.
+	 * @internal
+	 */
+	private buildKeySetOrderBy(
+		keySetCols: { prop: string; asc: boolean; nullable: boolean }[],
+		alias?: string
+	): string {
+		const prefix = Is.stringValue(alias) ? `${alias}.` : "";
+		// NULLs sort after all other values.
+		return keySetCols
+			.map(c => {
+				const dir = c.asc ? "ASC" : "DESC";
+				const col = `${prefix}\`${c.prop}\``;
+				return c.nullable ? `${col} IS NULL ${dir}, ${col} ${dir}` : `${col} ${dir}`;
+			})
+			.join(", ");
+	}
+
+	/**
+	 * Add the keySet condition which continues the page from a previous cursor.
+	 * @param keySetCols The ordered keySet columns.
+	 * @param lastValues The key set values of the last entity of the previous page.
+	 * @param whereClauses The where clauses to append to.
+	 * @param values The values to append to.
+	 * @internal
+	 */
+	private appendKeySetClause(
+		keySetCols: { prop: string; asc: boolean; nullable: boolean }[],
+		lastValues: unknown[] | undefined,
+		whereClauses: string[],
+		values: unknown[]
+	): void {
+		if (!Is.arrayValue(lastValues)) {
+			return;
+		}
+
+		const orParts: string[] = [];
+		for (let i = 0; i < keySetCols.length; i++) {
+			// Nothing sorts after NULL when ascending, so such a branch can never match.
+			if (!keySetCols[i].asc || !Is.empty(lastValues[i])) {
+				const parts: string[] = [];
+				for (let j = 0; j < i; j++) {
+					if (Is.empty(lastValues[j])) {
+						parts.push(`\`${keySetCols[j].prop}\` IS NULL`);
+					} else {
+						values.push(lastValues[j]);
+						parts.push(`\`${keySetCols[j].prop}\` = ?`);
+					}
+				}
+				const col = `\`${keySetCols[i].prop}\``;
+				if (Is.empty(lastValues[i])) {
+					parts.push(`${col} IS NOT NULL`);
+				} else {
+					values.push(lastValues[i]);
+					if (keySetCols[i].asc) {
+						parts.push(keySetCols[i].nullable ? `(${col} > ? OR ${col} IS NULL)` : `${col} > ?`);
+					} else {
+						parts.push(`${col} < ?`);
+					}
+				}
+				orParts.push(parts.length === 1 ? parts[0] : `(${parts.join(" AND ")})`);
+			}
+		}
+		whereClauses.push(`(${orParts.join(" OR ")})`);
+	}
+
+	/**
+	 * Work out which columns to read for one side of the join, honouring the caller's projection
+	 * but adding the columns the join itself needs.
+	 * @param schema The schema of the entities being read.
+	 * @param properties The optional projection requested by the caller.
+	 * @param required The columns the join needs regardless of the projection.
+	 * @returns The columns to read and the ones which were only added internally.
+	 * @internal
+	 */
+	private buildColumnSelection<E>(
+		schema: IEntitySchema<E>,
+		properties: (keyof E)[] | undefined,
+		required: string[]
+	): { columns: string[]; internal: string[] } {
+		const columns: string[] = [];
+		const internal: string[] = [];
+
+		if (Is.arrayValue(properties)) {
+			for (const prop of properties) {
+				const column = String(prop);
+				if (!columns.includes(column)) {
+					columns.push(column);
+				}
+			}
+			for (const column of required) {
+				if (!columns.includes(column)) {
+					columns.push(column);
+					internal.push(column);
+				}
+			}
+		} else {
+			for (const prop of schema.properties ?? []) {
+				const column = String(prop.property);
+				if (!columns.includes(column)) {
+					columns.push(column);
+				}
+			}
+		}
+
+		return { columns, internal };
+	}
+
+	/**
+	 * Collapse the flat rows returned by the join into one entry per primary entity, preserving the
+	 * order the database returned them in.
+	 * @param rows The nested rows from the join statement.
+	 * @param primaryAlias The alias holding the primary entity columns.
+	 * @param identityColumn The column which identifies a primary entity.
+	 * @param joinedAlias The alias holding the joined entity columns.
+	 * @param joinedPrimaryKey The primary key column of the joined entities.
+	 * @returns One entry per primary entity with its joined entities.
+	 * @internal
+	 */
+	private collectJoinRows<U>(
+		rows: unknown,
+		primaryAlias: string,
+		identityColumn: string,
+		joinedAlias: string,
+		joinedPrimaryKey: string
+	): { key: { [column: string]: unknown }; joined: Partial<U>[] }[] {
+		const groups: { key: { [column: string]: unknown }; joined: Partial<U>[] }[] = [];
+		if (!Is.array(rows)) {
+			return groups;
+		}
+
+		let current: { key: { [column: string]: unknown }; joined: Partial<U>[] } | undefined;
+		let currentIdentity: string | undefined;
+		let seenJoined = new Set<string>();
+
+		for (const row of rows as { [alias: string]: { [column: string]: unknown } }[]) {
+			const primaryRow = row[primaryAlias] ?? {};
+			const identity = this.rowKey(primaryRow[identityColumn]);
+
+			if (Is.undefined(current) || identity !== currentIdentity) {
+				current = { key: primaryRow, joined: [] };
+				currentIdentity = identity;
+				seenJoined = new Set<string>();
+				groups.push(current);
+			}
+
+			// A left join with no match produces a row whose joined columns are all null, and the
+			// same joined entity appears more than once when several primary rows in a group share
+			// the same join value.
+			const joinedRow = row[joinedAlias];
+			if (!Is.empty(joinedRow) && !Is.empty(joinedRow[joinedPrimaryKey])) {
+				const joinedIdentity = this.rowKey(joinedRow[joinedPrimaryKey]);
+				if (!seenJoined.has(joinedIdentity)) {
+					seenJoined.add(joinedIdentity);
+					current.joined.push(joinedRow as Partial<U>);
+				}
+			}
+		}
+
+		return groups;
+	}
+
+	/**
+	 * Turn a raw column value into a key which can be compared between rows.
+	 * @param value The value read from the storage.
+	 * @returns The key for the value.
+	 * @internal
+	 */
+	private rowKey(value: unknown): string {
+		return Is.string(value) ? value : JSON.stringify(value);
+	}
+
+	/**
+	 * Apply to a row read by a join the same clean up a plain query applies to its entities, then
+	 * remove the columns which were only read to satisfy the join.
+	 * @param row The raw row read from the storage.
+	 * @param schema The schema of the entity.
+	 * @param internal The columns to remove.
+	 * @returns The entity.
+	 * @internal
+	 */
+	private prepareJoinEntity<E>(
+		row: { [column: string]: unknown },
+		schema: IEntitySchema<E>,
+		internal: string[]
+	): Partial<E> {
+		const entity = EntityStorageHelper.unPrepareEntity<E>({ ...row } as Partial<E>, [
+			MySqlEntityStorageConnector._PARTITION_KEY,
+			...internal
+		]);
+
+		for (const prop of schema.properties ?? []) {
+			const value = entity[prop.property];
+			if (prop.type === EntitySchemaPropertyType.Boolean && !Is.empty(value)) {
+				ObjectHelper.propertySet(entity, prop.property as string, Boolean(value));
+			}
+		}
+
+		return entity;
+	}
+
+	/**
+	 * Get the partition key for the current context.
+	 * @returns The partition key, or undefined when the connector is not partitioned.
+	 * @internal
+	 */
+	private async resolvePartitionKey(): Promise<string | undefined> {
+		const contextIds = await ContextIdStore.getContextIds();
+		return ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
+	}
+
+	/**
+	 * Get the fully qualified table name for this connector, for binding to a ?? placeholder so
+	 * the driver escapes it rather than the identifier being spliced into the statement.
+	 * @returns The database and table name.
+	 * @internal
+	 */
+	private qualifiedTable(): string {
+		return `${this._config.database}.${this._config.tableName}`;
+	}
+
+	/**
+	 * Qualify a column with a table alias, needed when the statement reads from more than one table.
+	 * @param column The column name.
+	 * @param tableAlias The optional table alias.
+	 * @returns The quoted column, prefixed with the alias when one was supplied.
+	 * @internal
+	 */
+	private qualifiedColumn(column: string, tableAlias?: string): string {
+		return Is.stringValue(tableAlias) ? `${tableAlias}.\`${column}\`` : `\`${column}\``;
+	}
+
+	/**
 	 * Coerce MySQL raw row values back to proper TypeScript types based on the entity schema.
 	 * MySQL returns TINYINT(1) as 0/1 rather than false/true; this method converts those.
 	 * @param entity The raw entity row from MySQL.
@@ -1252,74 +1959,269 @@ export class MySqlEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Ensure the secondary index for a property exists, replacing a legacy-named index if present.
+	 * Read the key columns of every usable index on the table, in key order.
 	 * @param pool The pool to query with.
+	 * @returns The key columns and uniqueness of each index, keyed by index name.
+	 * @internal
+	 */
+	private async readIndexes(
+		pool: Pool
+	): Promise<{ [indexName: string]: { columns: string[]; nonUnique: boolean } }> {
+		const [indexRows] = await pool.query(
+			"SELECT index_name AS indexName, column_name AS columnName, non_unique AS nonUnique FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND is_visible = 'YES' AND index_type = 'BTREE' ORDER BY index_name, seq_in_index",
+			[this._config.database, this._config.tableName]
+		);
+
+		const indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } } = {};
+
+		for (const row of Is.array(indexRows) ? indexRows : []) {
+			const indexName = ObjectHelper.propertyGet<string>(row, "indexName");
+			const columnName = ObjectHelper.propertyGet<string>(row, "columnName");
+			if (Is.stringValue(indexName) && Is.stringValue(columnName)) {
+				indexes[indexName] ??= {
+					columns: [],
+					nonUnique: Coerce.integer(ObjectHelper.propertyGet(row, "nonUnique")) === 1
+				};
+				indexes[indexName].columns.push(columnName);
+			}
+		}
+
+		return indexes;
+	}
+
+	/**
+	 * Read the name and character length of every column on the table.
+	 * @param pool The pool to query with.
+	 * @returns The column names, and the character length of each string column, keyed by column name.
+	 * @internal
+	 */
+	private async readColumns(
+		pool: Pool
+	): Promise<{ names: Set<string>; lengths: { [columnName: string]: number } }> {
+		const [columnRows] = await pool.query(
+			"SELECT column_name AS columnName, character_maximum_length AS characterMaximumLength FROM INFORMATION_SCHEMA.COLUMNS WHERE table_schema = ? AND table_name = ?",
+			[this._config.database, this._config.tableName]
+		);
+
+		const names = new Set<string>();
+		const lengths: { [columnName: string]: number } = {};
+
+		for (const row of Is.array(columnRows) ? columnRows : []) {
+			const columnName = ObjectHelper.propertyGet<string>(row, "columnName");
+			const characterMaximumLength = Coerce.integer(
+				ObjectHelper.propertyGet(row, "characterMaximumLength")
+			);
+			if (Is.stringValue(columnName)) {
+				names.add(columnName);
+				if (Is.integer(characterMaximumLength)) {
+					lengths[columnName] = characterMaximumLength;
+				}
+			}
+		}
+
+		return { names, lengths };
+	}
+
+	/**
+	 * Build the column reference for an index key, with a prefix which is legal on the column as it
+	 * exists rather than as the schema declares it. A table created by an earlier release can hold
+	 * the column as LONGTEXT, or shorter than a length the schema has since raised, and either way
+	 * the index has to be created before the schema version rebuild can convert the column.
+	 * @param prop The indexed property.
+	 * @param columnLengths The character length of each column on the table.
+	 * @returns The quoted column reference.
+	 * @internal
+	 */
+	private indexKeyColumn<U>(
+		prop: IEntitySchemaProperty<U>,
+		columnLengths: { [columnName: string]: number }
+	): string {
+		return this.indexColumn(String(prop.property), this.indexKeyPrefixLength(prop, columnLengths));
+	}
+
+	/**
+	 * Get the prefix length an index key is created with, bounded by the column as it exists.
+	 * @param prop The indexed property.
+	 * @param columnLengths The character length of each column on the table.
+	 * @returns The prefix length, or undefined for a non-string column.
+	 * @internal
+	 */
+	private indexKeyPrefixLength<U>(
+		prop: IEntitySchemaProperty<U>,
+		columnLengths: { [columnName: string]: number }
+	): number | undefined {
+		const declaredPrefixLength = this.mapSqlColumn(prop).indexPrefixLength;
+		const columnLength = columnLengths[String(prop.property)];
+
+		return Is.integer(declaredPrefixLength) && Is.integer(columnLength)
+			? Math.min(declaredPrefixLength, columnLength)
+			: declaredPrefixLength;
+	}
+
+	/**
+	 * Get the most bytes an index key part can occupy, as MySQL counts it against its key limit.
+	 * @param prop The indexed property.
+	 * @param columnLengths The character length of each column on the table.
+	 * @returns The key part size in bytes.
+	 * @internal
+	 */
+	private indexKeyBytes<U>(
+		prop: IEntitySchemaProperty<U>,
+		columnLengths: { [columnName: string]: number }
+	): number {
+		const prefixLength = this.indexKeyPrefixLength(prop, columnLengths);
+		if (Is.integer(prefixLength)) {
+			return prefixLength * MySqlEntityStorageConnector._BYTES_PER_CHARACTER;
+		}
+		return this.mapSqlColumn(prop).keyBytes ?? 0;
+	}
+
+	/**
+	 * Ensure the secondary index for a property exists, dropping a legacy-named index if present.
+	 * Every query is scoped to a single partition, so the index leads with the partition key and
+	 * the property follows it, letting one index serve both the partition filter and the sort.
+	 * @param pool The pool to query with.
+	 * @param indexes The indexes already on the table, keyed by index name.
+	 * @param columnLengths The character length of each column on the table.
 	 * @param prop The indexed property.
 	 * @param nodeLogging Optional logging component.
 	 * @internal
 	 */
 	private async ensureIndex(
 		pool: Pool,
+		indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } },
+		columnLengths: { [columnName: string]: number },
 		prop: IEntitySchemaProperty<T>,
 		nodeLogging?: ILoggingComponent
 	): Promise<void> {
 		const columnName = String(prop.property);
-		const indexCol = this.indexColumn(columnName, this.mapSqlColumn(prop).indexPrefixLength);
 		const indexName = IndexHelper.generateName(this._config.tableName, columnName);
-		const qualifiedTable = `\`${this._config.database}\`.\`${this._config.tableName}\``;
+		const keyColumns = [MySqlEntityStorageConnector._PARTITION_KEY, columnName];
 
-		const [indexRows] = await pool.query(
-			"SELECT DISTINCT index_name AS indexName FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND column_name = ? AND seq_in_index = 1 AND is_visible = 'YES' AND index_type = 'BTREE'",
-			[this._config.database, this._config.tableName, columnName]
-		);
-		const indexNames = Is.array(indexRows)
-			? indexRows.map(row => ObjectHelper.propertyGet<string>(row, "indexName"))
-			: [];
+		if (!this.isIndexCovered(indexes, keyColumns)) {
+			const indexCols = [
+				this.partitionKeyIndexColumn(columnLengths),
+				this.indexKeyColumn(prop, columnLengths)
+			];
 
-		if (!Is.arrayValue(indexNames)) {
-			await pool.query(`CREATE INDEX \`${indexName}\` ON ${qualifiedTable} (${indexCol})`);
-			return;
+			// An index of ours under the same name but with a different shape predates the partition
+			// key leading the key columns, so it has to be replaced rather than left in place.
+			await this.addIndex(pool, indexName, indexCols, !Is.empty(indexes[indexName]));
 		}
 
 		// TODO: remove the legacy index handling once every installation has bootstrapped on a release that contains it
 		const legacyName = IndexHelper.generateLegacyName(this._config.tableName, columnName);
-		if (!indexNames.includes(legacyName)) {
-			return;
-		}
+		const legacyIndex = indexes[legacyName];
 
 		// The connector's own legacy indexes were always non-unique and single-column, anything else is an operator's
-		const [legacyRows] = await pool.query(
-			"SELECT MAX(non_unique) AS nonUnique, COUNT(1) AS keyColumnCount FROM INFORMATION_SCHEMA.STATISTICS WHERE table_schema = ? AND table_name = ? AND index_name = ?",
-			[this._config.database, this._config.tableName, legacyName]
-		);
-		const legacyRow = Is.array(legacyRows) ? legacyRows[0] : undefined;
-		if (
-			!Is.object(legacyRow) ||
-			Coerce.integer(ObjectHelper.propertyGet(legacyRow, "nonUnique")) !== 1 ||
-			Coerce.integer(ObjectHelper.propertyGet(legacyRow, "keyColumnCount")) !== 1
-		) {
+		if (!Is.empty(legacyIndex) && legacyIndex.nonUnique && legacyIndex.columns.length === 1) {
+			await pool.query(`DROP INDEX \`${legacyName}\` ON ??`, [this.qualifiedTable()]);
+			await nodeLogging?.log({
+				level: "info",
+				source: MySqlEntityStorageConnector.CLASS_NAME,
+				ts: Date.now(),
+				message: "legacyIndexDropped",
+				data: {
+					tableName: this._config.tableName,
+					indexName: legacyName,
+					newIndexName: indexName
+				}
+			});
+		}
+	}
+
+	/**
+	 * Ensure the composite index for a schema index group exists.
+	 * A group needs at least two properties to form a composite index, otherwise it is skipped.
+	 * The partition key leads the index for the same reason it leads a single property index.
+	 * @param pool The pool to query with.
+	 * @param indexes The indexes already on the table, keyed by index name.
+	 * @param columnLengths The character length of each column on the table.
+	 * @param groupName The name of the index group.
+	 * @param indexProperties The properties in the group, ordered by their index position.
+	 * @throws GeneralError if the index key would exceed MySQL's key length limit.
+	 * @internal
+	 */
+	private async ensureCompositeIndex(
+		pool: Pool,
+		indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } },
+		columnLengths: { [columnName: string]: number },
+		groupName: string,
+		indexProperties: { property: IEntitySchemaProperty<T>; direction: SortDirection }[]
+	): Promise<void> {
+		const indexName = IndexHelper.generateCompositeName(this._config.tableName, indexProperties);
+		const keyColumns = [
+			MySqlEntityStorageConnector._PARTITION_KEY,
+			...indexProperties.map(indexProperty => String(indexProperty.property.property))
+		];
+
+		if (this.isIndexCovered(indexes, keyColumns)) {
 			return;
 		}
 
-		const hasCurrent = indexNames.includes(indexName);
-		if (hasCurrent) {
-			await pool.query(`DROP INDEX \`${legacyName}\` ON ${qualifiedTable}`);
-		} else {
-			await pool.query(
-				`ALTER TABLE ${qualifiedTable} RENAME INDEX \`${legacyName}\` TO \`${indexName}\``
-			);
+		let keyBytes = this.indexKeyBytes(this.partitionKeyProperty(), columnLengths);
+		for (const indexProperty of indexProperties) {
+			keyBytes += this.indexKeyBytes(indexProperty.property, columnLengths);
 		}
-		await nodeLogging?.log({
-			level: "info",
-			source: MySqlEntityStorageConnector.CLASS_NAME,
-			ts: Date.now(),
-			message: hasCurrent ? "legacyIndexDropped" : "legacyIndexRenamed",
-			data: {
-				tableName: this._config.tableName,
-				indexName: legacyName,
-				newIndexName: indexName
-			}
-		});
+
+		if (keyBytes > MySqlEntityStorageConnector._MAX_KEY_BYTES) {
+			throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "indexKeyTooLong", {
+				entitySchema: this._entitySchemaName,
+				indexGroup: groupName,
+				keyBytes,
+				maxKeyBytes: MySqlEntityStorageConnector._MAX_KEY_BYTES
+			});
+		}
+
+		const indexCols = [
+			`${this.partitionKeyIndexColumn(columnLengths)} ASC`,
+			...indexProperties.map(indexProperty => {
+				const column = this.indexKeyColumn(indexProperty.property, columnLengths);
+				return `${column} ${indexProperty.direction === SortDirection.Descending ? "DESC" : "ASC"}`;
+			})
+		];
+
+		// An index of ours under the same name but with a different shape predates the partition
+		// key leading the key columns, so it has to be replaced rather than left in place.
+		await this.addIndex(pool, indexName, indexCols, !Is.empty(indexes[indexName]));
+	}
+
+	/**
+	 * Add an index to the table, replacing a same-named one in the same statement so that a
+	 * failed create leaves the existing index in place.
+	 * @param pool The pool to query with.
+	 * @param indexName The name of the index.
+	 * @param indexCols The key column references, in key order.
+	 * @param replace True to drop the same-named index in the same statement.
+	 * @internal
+	 */
+	private async addIndex(
+		pool: Pool,
+		indexName: string,
+		indexCols: string[],
+		replace: boolean
+	): Promise<void> {
+		const dropClause = replace ? `DROP INDEX \`${indexName}\`, ` : "";
+		await pool.query(
+			`ALTER TABLE ?? ${dropClause}ADD INDEX \`${indexName}\` (${indexCols.join(", ")})`,
+			[this.qualifiedTable()]
+		);
+	}
+
+	/**
+	 * Check if any of the indexes already starts with the given key columns.
+	 * @param indexes The indexes on the table, keyed by index name.
+	 * @param keyColumns The leading key columns the index must have, in order.
+	 * @returns True if an index already leads with the key columns.
+	 * @internal
+	 */
+	private isIndexCovered(
+		indexes: { [indexName: string]: { columns: string[]; nonUnique: boolean } },
+		keyColumns: string[]
+	): boolean {
+		return Object.values(indexes).some(index =>
+			keyColumns.every((keyColumn, position) => index.columns[position] === keyColumn)
+		);
 	}
 
 	/**
@@ -1419,12 +2321,15 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * Build where clause arrays for a query, combining partition key and optional conditions.
 	 * @param conditions The optional entity conditions to include.
 	 * @param partitionKey The partition key value.
+	 * @param tableAlias The optional table alias to qualify the columns with, needed when the
+	 * clauses are used in a statement which reads from more than one table.
 	 * @returns The where clauses and bound values.
 	 * @internal
 	 */
 	private buildWhereClause(
 		conditions: EntityCondition<T> | undefined,
-		partitionKey: string | undefined
+		partitionKey: string | undefined,
+		tableAlias?: string
 	): { whereClauses: string[]; values: unknown[] } {
 		const whereClauses: string[] = [];
 		const values: unknown[] = [];
@@ -1444,7 +2349,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 			finalConditions.conditions.push(conditions);
 		}
 
-		this.buildQueryParameters("", finalConditions, whereClauses, values);
+		this.buildQueryParameters("", finalConditions, whereClauses, values, tableAlias);
 
 		return { whereClauses, values };
 	}
@@ -1455,13 +2360,15 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @param condition The conditions to create the query from.
 	 * @param whereClauses The where clauses to use in the query.
 	 * @param values The values to use in the query.
+	 * @param tableAlias The optional table alias to qualify the columns with.
 	 * @internal
 	 */
 	private buildQueryParameters(
 		objectPath: string,
 		condition: EntityCondition<T> | undefined,
 		whereClauses: string[],
-		values: unknown[]
+		values: unknown[],
+		tableAlias?: string
 	): void {
 		if (Is.undefined(condition)) {
 			return;
@@ -1474,7 +2381,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 			const joinConditions: string[] = condition.conditions.map(c => {
 				const subWhereClauses: string[] = [];
 				const subValues: unknown[] = [];
-				this.buildQueryParameters(objectPath, c, subWhereClauses, subValues);
+				this.buildQueryParameters(objectPath, c, subWhereClauses, subValues, tableAlias);
 				values.push(...subValues);
 				return subWhereClauses.join(" AND ");
 			});
@@ -1489,7 +2396,13 @@ export class MySqlEntityStorageConnector<T = unknown>
 		}
 
 		const schemaProp = this._entitySchema.properties?.find(p => p.property === condition.property);
-		const comparison = this.mapComparisonOperator(objectPath, condition, schemaProp?.type, values);
+		const comparison = this.mapComparisonOperator(
+			objectPath,
+			condition,
+			schemaProp?.type,
+			values,
+			tableAlias
+		);
 		whereClauses.push(comparison);
 	}
 
@@ -1499,6 +2412,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * @param comparator The operator to map.
 	 * @param type The type of the property.
 	 * @param values The values to use in the query.
+	 * @param tableAlias The optional table alias to qualify the columns with.
 	 * @returns The comparison expression.
 	 * @throws GeneralError if the comparison operator is not supported.
 	 * @internal
@@ -1507,7 +2421,8 @@ export class MySqlEntityStorageConnector<T = unknown>
 		objectPath: string,
 		comparator: IComparator,
 		type: EntitySchemaPropertyType | undefined,
-		values: unknown[]
+		values: unknown[],
+		tableAlias?: string
 	): string {
 		let prop = objectPath;
 		if (prop.length > 0) {
@@ -1525,7 +2440,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 			}
 			values.push(...inValues.map(val => this.propertyToDbValue(val, type)));
 			const placeholders = inValues.map(() => "?").join(", ");
-			return `\`${prop}\` IN (${placeholders})`;
+			return `${this.qualifiedColumn(prop, tableAlias)} IN (${placeholders})`;
 		}
 
 		// null/undefined must use IS NULL / IS NOT NULL - never a parameterised placeholder.
@@ -1546,10 +2461,10 @@ export class MySqlEntityStorageConnector<T = unknown>
 					const rootSchema = this._entitySchema.properties?.find(p => p.property === rootProp);
 					const isArray = rootSchema?.type === EntitySchemaPropertyType.Array;
 					const jsonPath = isArray ? `$[*].${nestedPath}` : `$.${nestedPath}`;
-					const jsonExpr = `JSON_UNQUOTE(JSON_EXTRACT(\`${rootProp}\`, '${jsonPath}'))`;
+					const jsonExpr = `JSON_UNQUOTE(JSON_EXTRACT(${this.qualifiedColumn(rootProp, tableAlias)}, '${jsonPath}'))`;
 					return `${jsonExpr} ${nullCheck}`;
 				}
-				return `\`${prop}\` ${nullCheck}`;
+				return `${this.qualifiedColumn(prop, tableAlias)} ${nullCheck}`;
 			}
 		}
 
@@ -1562,13 +2477,18 @@ export class MySqlEntityStorageConnector<T = unknown>
 			const rootSchema = this._entitySchema.properties?.find(p => p.property === rootProp);
 			const isArray = rootSchema?.type === EntitySchemaPropertyType.Array;
 			const jsonPath = isArray ? `$[*].${nestedPath}` : `$.${nestedPath}`;
-			const jsonExpr = `JSON_UNQUOTE(JSON_EXTRACT(\`${rootProp}\`, '${jsonPath}'))`;
+			const jsonExpr = `JSON_UNQUOTE(JSON_EXTRACT(${this.qualifiedColumn(rootProp, tableAlias)}, '${jsonPath}'))`;
 
 			switch (comparator.comparison) {
 				case ComparisonOperator.Includes: {
 					values.pop();
-					values.push(`%${String(comparator.value).toLowerCase()}%`);
-					return `LOWER(${jsonExpr}) LIKE ?`;
+					values.push(`%${String(comparator.value)}%`);
+					return `${jsonExpr} LIKE ?`;
+				}
+				case ComparisonOperator.StartsWith: {
+					values.pop();
+					values.push(`${this.escapeLike(String(comparator.value))}%`);
+					return `${jsonExpr} LIKE ?`;
 				}
 				case ComparisonOperator.NotEquals:
 					return `${jsonExpr} <> ?`;
@@ -1588,47 +2508,68 @@ export class MySqlEntityStorageConnector<T = unknown>
 		switch (comparator.comparison) {
 			case ComparisonOperator.Equals:
 				if (Is.object(comparator.value) || Is.array(comparator.value)) {
-					return `JSON_CONTAINS(\`${prop}\`, ?)`;
+					return `JSON_CONTAINS(${this.qualifiedColumn(prop, tableAlias)}, ?)`;
 				}
-				return `\`${prop}\` = ?`;
+				return `${this.qualifiedColumn(prop, tableAlias)} = ?`;
 			case ComparisonOperator.NotEquals:
 				if (Is.object(comparator.value) || Is.array(comparator.value)) {
-					return `NOT JSON_CONTAINS(\`${prop}\`, ?)`;
+					return `NOT JSON_CONTAINS(${this.qualifiedColumn(prop, tableAlias)}, ?)`;
 				}
-				return `\`${prop}\` <> ?`;
+				return `${this.qualifiedColumn(prop, tableAlias)} <> ?`;
 			case ComparisonOperator.GreaterThan:
-				return `\`${prop}\` > ?`;
+				return `${this.qualifiedColumn(prop, tableAlias)} > ?`;
 			case ComparisonOperator.LessThan:
-				return `\`${prop}\` < ?`;
+				return `${this.qualifiedColumn(prop, tableAlias)} < ?`;
 			case ComparisonOperator.GreaterThanOrEqual:
-				return `\`${prop}\` >= ?`;
+				return `${this.qualifiedColumn(prop, tableAlias)} >= ?`;
 			case ComparisonOperator.LessThanOrEqual:
-				return `\`${prop}\` <= ?`;
+				return `${this.qualifiedColumn(prop, tableAlias)} <= ?`;
 			case ComparisonOperator.Includes: {
 				if (type === EntitySchemaPropertyType.String) {
 					values.pop();
-					values.push(`%${String(comparator.value).toLowerCase()}%`);
-					return `LOWER(\`${prop}\`) LIKE ?`;
+					values.push(`%${String(comparator.value)}%`);
+					return `${this.qualifiedColumn(prop, tableAlias)} LIKE ?`;
 				}
 				values.pop();
 				values.push(JSON.stringify(comparator.value));
-				return `JSON_CONTAINS(\`${prop}\`, ?)`;
+				return `JSON_CONTAINS(${this.qualifiedColumn(prop, tableAlias)}, ?)`;
 			}
 			case ComparisonOperator.NotIncludes: {
 				if (type === EntitySchemaPropertyType.String) {
 					values.pop();
-					values.push(`%${String(comparator.value).toLowerCase()}%`);
-					return `LOWER(\`${prop}\`) NOT LIKE ?`;
+					values.push(`%${String(comparator.value)}%`);
+					return `${this.qualifiedColumn(prop, tableAlias)} NOT LIKE ?`;
 				}
 				values.pop();
 				values.push(JSON.stringify(comparator.value));
-				return `NOT JSON_CONTAINS(\`${prop}\`, ?)`;
+				return `NOT JSON_CONTAINS(${this.qualifiedColumn(prop, tableAlias)}, ?)`;
+			}
+			case ComparisonOperator.StartsWith: {
+				if (type === EntitySchemaPropertyType.String) {
+					values.pop();
+					values.push(`${this.escapeLike(String(comparator.value))}%`);
+					return `${this.qualifiedColumn(prop, tableAlias)} LIKE ?`;
+				}
+				throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {
+					comparison: comparator.comparison,
+					type
+				});
 			}
 			default:
 				throw new GeneralError(MySqlEntityStorageConnector.CLASS_NAME, "comparisonNotSupported", {
 					comparison: comparator.comparison
 				});
 		}
+	}
+
+	/**
+	 * Escape the LIKE wildcard characters in a value so they match literally.
+	 * @param value The value to escape.
+	 * @returns The escaped value.
+	 * @internal
+	 */
+	private escapeLike(value: string): string {
+		return value.replace(/[\\%_]/g, "\\$&");
 	}
 
 	/**
@@ -1721,11 +2662,7 @@ export class MySqlEntityStorageConnector<T = unknown>
 
 		const props: IEntitySchemaProperty<T>[] = [...entitySchema.properties];
 
-		props.unshift({
-			property: MySqlEntityStorageConnector._PARTITION_KEY as keyof T,
-			type: EntitySchemaPropertyType.String,
-			isPrimary: true
-		});
+		props.unshift(this.partitionKeyProperty());
 
 		const columnDefinitions = props
 			.map(prop => {
@@ -1751,13 +2688,25 @@ export class MySqlEntityStorageConnector<T = unknown>
 	 * over the format mapping. A format which has a default length in EntitySchemaHelper.FORMAT_MAX_LENGTHS
 	 * and no dedicated column type is also bounded to that length.
 	 * @param prop The property to map.
-	 * @returns The MySQL column type, and the prefix length needed to index it, if any.
+	 * @returns The MySQL column type, the prefix length to index it with, undefined for a non-string
+	 * column, and the key size in bytes of a fixed width column.
 	 * @internal
 	 */
 	private mapSqlColumn<U>(prop: IEntitySchemaProperty<U>): {
 		sqlType: string;
 		indexPrefixLength?: number;
+		keyBytes?: number;
 	} {
+		const fixedKeyBytes: { [sqlType: string]: number } = {
+			"TINYINT(1)": 1,
+			TINYINT: 1,
+			SMALLINT: 2,
+			INT: 4,
+			BIGINT: 8,
+			FLOAT: 4,
+			DOUBLE: 8
+		};
+
 		const sqlTypeMap: { [key in EntitySchemaPropertyType]: string } = {
 			[EntitySchemaPropertyType.String]: "LONGTEXT",
 			[EntitySchemaPropertyType.Number]: "FLOAT",
@@ -1839,16 +2788,44 @@ export class MySqlEntityStorageConnector<T = unknown>
 			sqlType = `VARCHAR(${columnLength})`;
 		}
 
-		// A column which cannot be indexed in full needs a prefix, anything which is not text
-		// is always indexable in full.
-		const needsPrefix = Is.integer(columnLength)
-			? columnLength > MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH
-			: isUnboundedText;
+		// Every string column is indexed with a prefix, so the same DDL is legal on the VARCHAR or
+		// CHAR the schema creates and on the LONGTEXT a table from an earlier release still has.
+		// MySQL records a prefix that covers the whole column as a full index.
+		const indexPrefixLength =
+			prop.type === EntitySchemaPropertyType.String
+				? Math.min(
+						Is.integer(columnLength)
+							? columnLength
+							: MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH,
+						MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH
+					)
+				: undefined;
 
+		return { sqlType, indexPrefixLength, keyBytes: fixedKeyBytes[sqlType] };
+	}
+
+	/**
+	 * Build the schema property describing the partition key column.
+	 * @returns The partition key property.
+	 * @internal
+	 */
+	private partitionKeyProperty(): IEntitySchemaProperty<T> {
 		return {
-			sqlType,
-			indexPrefixLength: needsPrefix ? MySqlEntityStorageConnector._INDEX_PREFIX_LENGTH : undefined
+			property: MySqlEntityStorageConnector._PARTITION_KEY as keyof T,
+			type: EntitySchemaPropertyType.String,
+			maxLength: MySqlEntityStorageConnector._PARTITION_KEY_MAX_LENGTH,
+			isPrimary: true
 		};
+	}
+
+	/**
+	 * Build the column reference for the partition key when it leads an index.
+	 * @param columnLengths The character length of each column on the table.
+	 * @returns The quoted column reference.
+	 * @internal
+	 */
+	private partitionKeyIndexColumn(columnLengths: { [columnName: string]: number }): string {
+		return this.indexKeyColumn(this.partitionKeyProperty(), columnLengths);
 	}
 
 	/**

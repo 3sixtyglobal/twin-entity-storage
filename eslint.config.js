@@ -671,7 +671,7 @@ if (customModule?.extendRules) {
 const config = [
 	// Global ignores
 	{
-		ignores: ['**/dist/**', '**/coverage/**', '**/vitest.config.ts.timestamp*']
+		ignores: ['**/dist/**', '**/coverage/**', '**/vitest.config.ts.timestamp*', '**/.tmp/**']
 	},
 
 	// Repository structure naming validation.

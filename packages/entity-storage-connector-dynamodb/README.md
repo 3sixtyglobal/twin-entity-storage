@@ -8,10 +8,6 @@ This package provides an Amazon DynamoDB backend for managed NoSQL storage in cl
 npm install @twin.org/entity-storage-connector-dynamodb
 ```
 
-## Dependency versions
-
-Published versions pin `@aws-sdk/client-dynamodb` and `@aws-sdk/lib-dynamodb` to releases that are at least 48 hours old on npm, so consumers with a minimum package age policy (for example pnpm `minimumReleaseAge`) can install without resolution failures.
-
 ## Docker
 
 To perform testing of this component it may be necessary to launch a local instance to communicate with.

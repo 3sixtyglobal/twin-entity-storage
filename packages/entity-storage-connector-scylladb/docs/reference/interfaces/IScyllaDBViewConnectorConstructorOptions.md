@@ -16,7 +16,7 @@ The type of logging component to use, defaults to no logging.
 
 > **entitySchema**: `string`
 
-The name of the entity schema.
+The name of the base table entity schema.
 
 ***
 
@@ -32,7 +32,7 @@ The keys to use from the context ids to create partitions.
 
 > **viewSchema**: `string`
 
-The name of the view schema.
+The name of the view schema, a subset of the base entity properties whose isPrimary property keys the view.
 
 ***
 

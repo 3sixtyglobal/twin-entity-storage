@@ -50,11 +50,13 @@ import {
 } from "@twin.org/entity";
 import {
 	ConnectionHelper,
+	EntityStorageCommon,
 	EntityStorageHelper,
-	MigrationHelper,
 	type IEntityStorageConnector,
+	type IEntityStorageJoinOptions,
 	type IEntityStorageMigrationConnector,
-	type IMigrationOptions
+	type IMigrationOptions,
+	MigrationHelper
 } from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
@@ -987,6 +989,25 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Find all the entities which match the conditions, attaching to each one the entities from a
+	 * second storage connector whose join property matches. The join behaves like a left join by
+	 * default, a primary entity with no matches is still returned with an empty joined list, unless
+	 * joinRequired asks for an inner join and those entities are left out altogether.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The properties to join on, the conditions, sort order, projection and
+	 * paging for the primary entities, the optional grouping and group conditions, and the optional
+	 * conditions, sort order and projection for the joined entities.
+	 * @returns All the entities for the storage matching the conditions with their joined entities,
+	 * and a cursor which can be used to request more entities.
+	 */
+	public async queryJoin<U>(
+		joinConnector: IEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>
+	): Promise<{ entities: (Partial<T> & { joined: Partial<U>[] })[]; cursor?: string }> {
+		return EntityStorageCommon.queryJoin(this, joinConnector, joinOptions);
+	}
+
+	/**
 	 * Count all the entities which match the conditions.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
@@ -1049,22 +1070,26 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		}
 		try {
 			const container = await this.getContainer();
-			const { resources: partitionIds } = await container.items
-				.query<string>({
-					query: `SELECT DISTINCT VALUE c.${CosmosDbEntityStorageConnector._PARTITION_KEY} FROM c`
+			const partitionProperty = CosmosDbEntityStorageConnector._PARTITION_KEY;
+			const { resources: rows } = await container.items
+				.query<{ [key: string]: string | number }>({
+					query: `SELECT c.${partitionProperty}, COUNT(1) AS count FROM c GROUP BY c.${partitionProperty}`
 				})
 				.fetchAll();
 			const contextIds: IContextIds[] = [];
-			const skipped: string[] = [];
-			for (const partitionId of partitionIds.filter(id => Is.stringValue(id))) {
-				const split = EntityStorageHelper.tryShortSplit(partitionContextIds, partitionId);
-				if (Is.undefined(split)) {
-					skipped.push(partitionId);
-				} else {
-					contextIds.push(split);
+			const skipped = new Map<string, number>();
+			for (const row of rows) {
+				const partitionId = row[partitionProperty];
+				if (Is.stringValue(partitionId)) {
+					const split = EntityStorageHelper.tryShortSplit(partitionContextIds, partitionId);
+					if (Is.undefined(split)) {
+						skipped.set(partitionId, Number(row.count));
+					} else {
+						contextIds.push(split);
+					}
 				}
 			}
-			if (Is.arrayValue(skipped)) {
+			if (skipped.size > 0) {
 				const nodeLogging = ComponentFactory.getIfExists<ILoggingComponent>(loggingComponentType);
 				await nodeLogging?.log({
 					level: "warn",
@@ -1073,7 +1098,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 					message: "partitionIdsSkipped",
 					data: {
 						expected: partitionContextIds.length,
-						partitionIds: skipped.join(", ")
+						partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 					}
 				});
 			}
@@ -1406,6 +1431,8 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 			return `CONTAINS(c.${attributeName}, @${propName})`;
 		} else if (comparator.comparison === ComparisonOperator.NotIncludes) {
 			return `NOT CONTAINS(c.${attributeName}, @${propName})`;
+		} else if (comparator.comparison === ComparisonOperator.StartsWith) {
+			return `STARTSWITH(c.${attributeName}, @${propName})`;
 		} else if (comparator.comparison === ComparisonOperator.In) {
 			return `c.${propName} IN ${attributeName}`;
 		}
@@ -1601,11 +1628,14 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Build the composite indexes needed to serve multi-property ORDER BY queries.
+	 * Build the composite indexes needed to serve multi-property ORDER BY queries and the
+	 * schema's composite index groups.
 	 * Pairing each sortable property with the primary key in both directions covers all
-	 * four direction combinations, as Cosmos DB also serves each index reversed.
+	 * four direction combinations, as Cosmos DB also serves each index reversed. Each index
+	 * group becomes one composite index over its properties in index order, each path taking
+	 * the direction the property declared for that group.
 	 * @returns The indexing policy for the container, or undefined if the schema has no
-	 * sortable properties.
+	 * sortable properties or index groups.
 	 * @internal
 	 */
 	private buildIndexingPolicy(): IndexingPolicy | undefined {
@@ -1625,6 +1655,24 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 						{ path: primaryKeyPath, order: "descending" }
 					]);
 				}
+			}
+		}
+
+		const indexGroups = EntitySchemaHelper.getIndexGroups(this._entitySchema);
+		for (const indexProperties of Object.values(indexGroups)) {
+			const groupCompositeIndex = indexProperties.map<CompositePath>(indexProperty => ({
+				path: `/${indexProperty.property.property as string}`,
+				order: indexProperty.direction === SortDirection.Descending ? "descending" : "ascending"
+			}));
+
+			// Two groups over the same paths resolve to the same index, so only one is needed.
+			if (
+				!compositeIndexes.some(
+					existing =>
+						this.compositeIndexKey(existing) === this.compositeIndexKey(groupCompositeIndex)
+				)
+			) {
+				compositeIndexes.push(groupCompositeIndex);
 			}
 		}
 

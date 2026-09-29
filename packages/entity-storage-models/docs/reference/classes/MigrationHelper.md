@@ -110,7 +110,7 @@ Ordered, fully-resolved migration steps.
 
 [`IMigrationOptions`](../interfaces/IMigrationOptions.md)
 
-Optional migration options (batchSize, progress callbacks, transformEntityProperty).
+Optional migration options (batchSize, progress callbacks).
 
 #### Returns
 
@@ -125,9 +125,9 @@ The number of entities migrated.
 > `static` **applyEntityChain**(`entity`, `steps`): `Promise`\<`unknown`\>
 
 Transforms a single entity through an ordered chain of fully-resolved migration steps.
-For each step the method diffs fromProperties against toProperties, then applies
-applyEntityTransform. Each step's output feeds the next step's input so that
-per-step transformEntityProperty hooks are honoured throughout the chain.
+For each step the method applies transformEntity, if present, to the source entity, then
+diffs fromProperties against toProperties and applies applyEntityTransform, feeding each
+step's output to the next.
 
 #### Parameters
 
@@ -187,13 +187,14 @@ The schema diff between the old and new schemas.
 
 [`EntityPropertyTransformer`](../type-aliases/EntityPropertyTransformer.md)\<`T`, `U`\>
 
-Optional per-property transform hook for object/array properties.
+Optional transform hook called for every modified property when
+supplied; scalar targets fall back to coercion when it returns undefined or it is not supplied.
 
 ##### removeEntityProperty?
 
 [`EntityPropertyRemover`](../type-aliases/EntityPropertyRemover.md)\<`T`\>
 
-Optional hook called with the original entity and dropped property schemas.
+Optional hook called with the entity and dropped property schemas.
 
 #### Returns
 

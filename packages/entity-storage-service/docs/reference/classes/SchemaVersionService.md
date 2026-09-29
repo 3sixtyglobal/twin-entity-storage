@@ -17,10 +17,9 @@ property renames or a custom transform hook, register an optional ISchemaMigrati
 SchemaMigrationFactory under the key "Base_from_to" (e.g. "MyEntity_0_1").
 
 Crash-window note: finalizeMigration and the subsequent version-record write are two
-separate operations. If the process dies between them the next boot re-runs the chain
-over already-migrated data. applyEntityTransform is NOT idempotent for structural changes
-(newly-added optional fields would be dropped on re-run). A transaction spanning both
-writes is a precondition for production; track this in the concurrency follow-up.
+separate operations, and applyEntityTransform is not idempotent for structural changes.
+A finalizing marker record is therefore written before finalizeMigration and removed after
+the version write; a start-up that finds one refuses to run (migrationInterrupted).
 
 ## Implements
 
@@ -86,6 +85,9 @@ version records are written for other schemas.
 
 When config.enabled is false the service runs in detect-only mode: it identifies schemas
 that need migration and logs a warning for each one, but applies no changes.
+
+A schema whose storage is missing columns fails with columnsMissingWithoutMigration when no
+rebuild will add them, including in detect-only mode.
 
 Runs after all component bootstraps, so every managed table already exists.
 

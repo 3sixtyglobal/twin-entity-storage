@@ -12,7 +12,7 @@ export class SchemaVersion {
 	/**
 	 * The entity schema type name - primary key.
 	 */
-	@property({ type: "string", isPrimary: true })
+	@property({ type: "string", isPrimary: true, maxLength: 255 })
 	public schemaName!: string;
 
 	/**

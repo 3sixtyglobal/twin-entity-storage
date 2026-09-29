@@ -132,10 +132,4 @@ To the camel case of the entity name.
 
 > **viewName**: `string`
 
-The name of view.
-
-#### Default
-
-```ts
-To the camel case of the entity name with View appended.
-```
+The name of the view.

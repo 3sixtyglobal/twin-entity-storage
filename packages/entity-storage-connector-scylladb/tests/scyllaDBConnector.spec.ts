@@ -23,17 +23,19 @@ import { ScyllaDBTableConnector } from "../src/scyllaDBTableConnector.js";
 // Does the connector support dot-notation property paths.
 const SUPPORT_DOT_NOTATION = false;
 // Does the connector support null/undefined comparisons.
-const SUPPORT_NULL_UNDEFINED_COMPARISON = false;
+const SUPPORT_NULL_UNDEFINED_COMPARISON = true;
 // Does the connector support OR logical operators in conditions.
 const SUPPORT_OR_CONDITIONS = false;
 // Does the connector support NotEquals (!=) comparisons.
-const SUPPORT_NOT_EQUALS = false;
+const SUPPORT_NOT_EQUALS = true;
 // Does the connector support NotIncludes (NOT LIKE) comparisons.
 const SUPPORT_NOT_INCLUDES = false;
 // Does the connector support optional secondary index fields (clustering keys) being null.
 const SUPPORT_NULLABLE_SECONDARY_INDEX = false;
 // Does the connector support sorting by secondary index properties.
 const SUPPORT_SECONDARY_INDEX_SORT = false;
+// Does the connector support sorting by a nullable property.
+const SUPPORT_NULLABLE_SORT_PROPERTY = false;
 // Does the connector honour trailing tiebreaker sort properties within ties of the
 // first sort property.
 const SUPPORT_MULTI_SORT_TIEBREAKER_ORDER = false;
@@ -717,6 +719,44 @@ describe("ScyllaDBTableConnector", () => {
 	);
 
 	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
+		"paginated cursor walk sorted by the primary key before another property has no skips or duplicates",
+		async () => {
+			const PAGE = 2;
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			const seeded = [...new Array(6).keys()].map(i => ({
+				id: String(i + 1).padStart(3, "0"),
+				value1: `val${String(i + 1).padStart(3, "0")}`,
+				value2: i
+			}));
+			await connector.setBatch(seeded);
+
+			// The primary key is unique, so naming it first makes every later sort property
+			// redundant, but it must not corrupt the cursor.
+			const sort = [
+				{ property: "id" as keyof TestType, sortDirection: SortDirection.Ascending },
+				{ property: "value1" as keyof TestType, sortDirection: SortDirection.Ascending }
+			];
+
+			const seen = new Set<string>();
+			let cursor: string | undefined;
+			let pages = 0;
+			do {
+				const page = await connector.query(undefined, sort, undefined, cursor, PAGE);
+				for (const e of page.entities) {
+					expect(seen.has(e.id as string), `duplicate id ${e.id}`).toBe(false);
+					seen.add(e.id as string);
+				}
+				cursor = page.cursor;
+				expect(++pages).toBeLessThan(100);
+			} while (cursor !== undefined);
+
+			for (const item of seeded) {
+				expect(seen.has(item.id), `id ${item.id} missing from cursor walk`).toBe(true);
+			}
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT)(
 		"paginated cursor walk over a secondary index sorted query has no skips or duplicates",
 		async () => {
 			const BATCH = 20;
@@ -749,6 +789,43 @@ describe("ScyllaDBTableConnector", () => {
 				expect(seen.has(item.id), `id ${item.id} missing from cursor walk`).toBe(true);
 			}
 			expect(seen.size).toBe(BATCH);
+		}
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_SORT || !SUPPORT_NULLABLE_SORT_PROPERTY)(
+		"paginated cursor walk over a nullable sort property has no skips or duplicates",
+		async () => {
+			const PAGE = 2;
+			const connector = await createConnector<TestType>(nameof<TestType>());
+			const seeded = [
+				{ id: "001", value1: "val001", value2: 0, value4: "sort001" },
+				{ id: "002", value1: "val002", value2: 1 },
+				{ id: "003", value1: "val003", value2: 2, value4: "sort003" },
+				{ id: "004", value1: "val004", value2: 3 },
+				{ id: "005", value1: "val005", value2: 4, value4: "sort005" },
+				{ id: "006", value1: "val006", value2: 5 }
+			];
+			await connector.setBatch(seeded);
+
+			for (const sortDirection of [SortDirection.Ascending, SortDirection.Descending]) {
+				const sort = [{ property: "value4" as keyof TestType, sortDirection }];
+				const seen = new Set<string>();
+				let cursor: string | undefined;
+				let pages = 0;
+				do {
+					const page = await connector.query(undefined, sort, undefined, cursor, PAGE);
+					for (const e of page.entities) {
+						expect(seen.has(e.id as string), `duplicate id ${e.id}`).toBe(false);
+						seen.add(e.id as string);
+					}
+					cursor = page.cursor;
+					expect(++pages).toBeLessThan(100);
+				} while (cursor !== undefined);
+
+				for (const item of seeded) {
+					expect(seen.has(item.id), `id ${item.id} missing from cursor walk`).toBe(true);
+				}
+			}
 		}
 	);
 
@@ -2005,6 +2082,35 @@ describe("ScyllaDBTableConnector", () => {
 		expect(result.entities.map(e => (e as TestType).value1)).toEqual(
 			expect.arrayContaining(["hello world", "worldwide"])
 		);
+	});
+
+	test("can query with StartsWith on string field", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "hello world", value2: 1 });
+		await connector.set({ id: "2", value1: "worldwide", value2: 2 });
+		await connector.set({ id: "3", value1: "foo bar", value2: 3 });
+		const result = await connector.query({
+			conditions: [
+				{ property: "value1", value: "world", comparison: ComparisonOperator.StartsWith }
+			]
+		});
+		expect(result.entities.length).toEqual(1);
+		expect((result.entities[0] as TestType).value1).toEqual("worldwide");
+	});
+
+	test("can query with StartsWith treating wildcard characters in the value literally", async () => {
+		const connector = await createConnector<TestType>(nameof<TestType>());
+		await connector.set({ id: "1", value1: "a_b", value2: 1 });
+		await connector.set({ id: "2", value1: "axb", value2: 2 });
+		await connector.set({ id: "3", value1: "a%b", value2: 3 });
+		const underscore = await connector.query({
+			conditions: [{ property: "value1", value: "a_", comparison: ComparisonOperator.StartsWith }]
+		});
+		expect(underscore.entities.map(e => (e as TestType).value1)).toEqual(["a_b"]);
+		const percent = await connector.query({
+			conditions: [{ property: "value1", value: "a%", comparison: ComparisonOperator.StartsWith }]
+		});
+		expect(percent.entities.map(e => (e as TestType).value1)).toEqual(["a%b"]);
 	});
 
 	test.skipIf(!SUPPORT_NOT_INCLUDES)("can query with NotIncludes on string field", async () => {

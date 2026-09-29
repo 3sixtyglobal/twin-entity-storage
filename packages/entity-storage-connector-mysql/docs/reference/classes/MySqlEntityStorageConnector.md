@@ -402,6 +402,56 @@ and a cursor which can be used to request more entities.
 
 ***
 
+### queryJoin() {#queryjoin}
+
+> **queryJoin**\<`U`\>(`joinConnector`, `joinOptions`): `Promise`\<\{ `entities`: `Partial`\<`T`\> & `object`[]; `cursor?`: `string`; \}\>
+
+Find all the entities which match the conditions, attaching to each one the entities from a
+second storage connector whose join property matches. The join behaves like a left join by
+default, a primary entity with no matches is still returned with an empty joined list, unless
+joinRequired asks for an inner join and those entities are left out altogether. Both connectors
+must be MySQL connectors reading from the same database so the work can be done in a single
+statement.
+
+#### Type Parameters
+
+##### U
+
+`U`
+
+#### Parameters
+
+##### joinConnector
+
+`IEntityStorageConnector`\<`U`\>
+
+The connector holding the entities to join to.
+
+##### joinOptions
+
+`IEntityStorageJoinOptions`\<`T`, `U`\>
+
+The properties to join on, the conditions, sort order, projection and
+paging for the primary entities, the optional grouping and group conditions, and the optional
+conditions, sort order and projection for the joined entities.
+
+#### Returns
+
+`Promise`\<\{ `entities`: `Partial`\<`T`\> & `object`[]; `cursor?`: `string`; \}\>
+
+All the entities for the storage matching the conditions with their joined entities,
+and a cursor which can be used to request more entities.
+
+#### Throws
+
+GeneralError if the join connector does not read from the same server and database.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.queryJoin`
+
+***
+
 ### count() {#count}
 
 > **count**(`conditions?`): `Promise`\<`number`\>
@@ -472,6 +522,24 @@ The connector implementation version.
 
 ***
 
+### getMissingColumns() {#getmissingcolumns}
+
+> **getMissingColumns**(): `string`[]
+
+Get the schema columns the last bootstrap found missing from the table.
+
+#### Returns
+
+`string`[]
+
+The missing column names, empty when the table has every column.
+
+#### Implementation of
+
+`IEntityStorageMigrationConnector.getMissingColumns`
+
+***
+
 ### createTargetConnector() {#createtargetconnector}
 
 > **createTargetConnector**\<`U`\>(`newEntitySchema`): `Promise`\<`IEntityStorageConnector`\<`U`\>\>
@@ -508,7 +576,7 @@ Connector for performing the migration.
 
 > **finalizeMigration**\<`U`\>(`targetConnector`, `options?`, `loggingComponentType?`): `Promise`\<`MySqlEntityStorageConnector`\<`U`\>\>
 
-Finalize the migration by dropping the source table and renaming the migration table to the original name.
+Finalize the migration by swapping the migration table into the original name and dropping the old table.
 
 #### Type Parameters
 

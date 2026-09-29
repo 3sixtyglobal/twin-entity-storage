@@ -22,12 +22,19 @@ jobs:
         with:
           node-version: 24
 
-      # Install commitlint globally
-      - name: Install dependencies
-        run: |
-          npm install --no-audit --no-fund @commitlint/config-conventional @commitlint/cli -g
+      # Setup pnpm after node, the runners have no system node for its installer to use.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
 
-      # Lint the PR title using commitlint
+      # dlx fetches just the linter and its config, so the workspace is never installed.
+      # The config package is needed because commitlint.config.mjs extends it, and both
+      # versions are read from package.json so titles are checked against the same rules
+      # as the commit-msg hook. The title is passed through the environment rather than
+      # interpolated into the script, so it cannot be executed by the shell.
       - name: Lint PR title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          echo "${{ github.event.pull_request.title }}" | npx commitlint
+          CLI_VERSION=$(node -p "require('./package.json').devDependencies['@commitlint/cli']")
+          CONFIG_VERSION=$(node -p "require('./package.json').devDependencies['@commitlint/config-conventional']")
+          printf '%s' "$PR_TITLE" | pnpm dlx --package "@commitlint/cli@$CLI_VERSION" --package "@commitlint/config-conventional@$CONFIG_VERSION" commitlint

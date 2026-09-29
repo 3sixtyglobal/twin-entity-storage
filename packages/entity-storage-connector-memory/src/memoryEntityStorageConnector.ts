@@ -32,8 +32,10 @@ import {
 	type SortDirection
 } from "@twin.org/entity";
 import {
+	EntityStorageCommon,
 	EntityStorageHelper,
 	type IEntityStorageConnector,
+	type IEntityStorageJoinOptions,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
 } from "@twin.org/entity-storage-models";
@@ -532,6 +534,25 @@ export class MemoryEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Find all the entities which match the conditions, attaching to each one the entities from a
+	 * second storage connector whose join property matches. The join behaves like a left join by
+	 * default, a primary entity with no matches is still returned with an empty joined list, unless
+	 * joinRequired asks for an inner join and those entities are left out altogether.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The properties to join on, the conditions, sort order, projection and
+	 * paging for the primary entities, the optional grouping and group conditions, and the optional
+	 * conditions, sort order and projection for the joined entities.
+	 * @returns All the entities for the storage matching the conditions with their joined entities,
+	 * and a cursor which can be used to request more entities.
+	 */
+	public async queryJoin<U>(
+		joinConnector: IEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>
+	): Promise<{ entities: (Partial<T> & { joined: Partial<U>[] })[]; cursor?: string }> {
+		return EntityStorageCommon.queryJoin(this, joinConnector, joinOptions);
+	}
+
+	/**
 	 * Remove all entities from the storage.
 	 * @returns Nothing.
 	 */
@@ -683,7 +704,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 		if (!Is.arrayValue(this._partitionContextIds)) {
 			return undefined;
 		}
-		const skipped = new Set<string>();
+		const skipped = new Map<string, number>();
 		const result = await this.withLock(entities => {
 			const contextIds: { [id: string]: IContextIds } = {};
 			for (const entity of entities) {
@@ -697,7 +718,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 						partitionId
 					);
 					if (Is.undefined(split)) {
-						skipped.add(partitionId);
+						skipped.set(partitionId, (skipped.get(partitionId) ?? 0) + 1);
 					} else {
 						contextIds[partitionId] = split;
 					}
@@ -714,7 +735,7 @@ export class MemoryEntityStorageConnector<T = unknown>
 				message: "partitionIdsSkipped",
 				data: {
 					expected: this._partitionContextIds?.length,
-					partitionIds: Array.from(skipped).join(", ")
+					partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 				}
 			});
 		}

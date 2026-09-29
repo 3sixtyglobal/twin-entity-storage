@@ -1,15 +1,24 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdStore, type IContextIds } from "@twin.org/context";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
 import { ComponentFactory, Is } from "@twin.org/core";
-import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
 import {
+	EntitySchemaFactory,
+	EntitySchemaHelper,
+	SortDirection,
+	entity,
+	property
+} from "@twin.org/entity";
+import {
+	IndexHelper,
 	MigrationHelper,
 	type IEntityStorageConnector,
 	type IEntityStorageMigrationConnector,
 	type IResolvedMigrationStep
 } from "@twin.org/entity-storage-models";
+import type { ILogEntry } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
+import { createPool } from "mysql2/promise";
 import { TEST_MYSQL_CONFIG } from "./setupTestEnv.js";
 import { MySqlEntityStorageConnector } from "../src/mysqlEntityStorageConnector.js";
 
@@ -180,6 +189,138 @@ class MigMultiFieldB {
 	public renamedB!: string;
 }
 
+/**
+ * V1 with a composite index over type and value.
+ */
+@entity()
+class MigIndexedV1 {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		maxLength: 32,
+		indexGroup: [{ name: "typeValue", index: 0, direction: SortDirection.Ascending }]
+	})
+	public type!: string;
+
+	@property({
+		type: "string",
+		maxLength: 255,
+		indexGroup: [{ name: "typeValue", index: 1, direction: SortDirection.Ascending }]
+	})
+	public value!: string;
+}
+
+/**
+ * V2 adds valueHash and moves it into the composite index in place of value.
+ */
+@entity()
+class MigIndexedV2 {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		maxLength: 32,
+		indexGroup: [{ name: "typeValue", index: 0, direction: SortDirection.Ascending }]
+	})
+	public type!: string;
+
+	@property({ type: "string", maxLength: 255 })
+	public value!: string;
+
+	@property({
+		type: "string",
+		maxLength: 27,
+		optional: true,
+		indexGroup: [{ name: "typeValue", index: 1, direction: SortDirection.Ascending }]
+	})
+	public valueHash?: string;
+}
+
+/**
+ * V2 adds valueHash outside any index, keeping the V1 composite index.
+ */
+@entity()
+class MigIndexedV2Unindexed {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		maxLength: 32,
+		indexGroup: [{ name: "typeValue", index: 0, direction: SortDirection.Ascending }]
+	})
+	public type!: string;
+
+	@property({
+		type: "string",
+		maxLength: 255,
+		indexGroup: [{ name: "typeValue", index: 1, direction: SortDirection.Ascending }]
+	})
+	public value!: string;
+
+	@property({ type: "string", maxLength: 27, optional: true })
+	public valueHash?: string;
+}
+
+/**
+ * V2 adds an optional secondary-indexed code property to MigIndexedV1, its own single-column index
+ * rather than a composite one.
+ */
+@entity()
+class MigIndexedV2Secondary {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		maxLength: 32,
+		indexGroup: [{ name: "typeValue", index: 0, direction: SortDirection.Ascending }]
+	})
+	public type!: string;
+
+	@property({
+		type: "string",
+		maxLength: 255,
+		indexGroup: [{ name: "typeValue", index: 1, direction: SortDirection.Ascending }]
+	})
+	public value!: string;
+
+	@property({ type: "string", maxLength: 32, optional: true, isSecondary: true })
+	public code?: string;
+}
+
+/**
+ * V1 with a bounded secondary index - a table from an earlier release still holds it as LONGTEXT.
+ * MySQL-only: exercises the connector's legacy-DDL bootstrap, which cannot be expressed generically
+ * for other backends, so this entity/test pair is not duplicated to the other connectors.
+ */
+@entity()
+class MigBoundedV1 {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", isSecondary: true, maxLength: 32 })
+	public code!: string;
+}
+
+/**
+ * V2 adds an optional note to MigBoundedV1.
+ */
+@entity()
+class MigBoundedV2 {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", isSecondary: true, maxLength: 32 })
+	public code!: string;
+
+	@property({ type: "string", optional: true })
+	public note?: string;
+}
+
 let currentUser = "user";
 let currentConnector: IEntityStorageMigrationConnector | undefined;
 const originalMigrateWithChain = MigrationHelper.migrateWithChain.bind(MigrationHelper);
@@ -232,6 +373,24 @@ describe("MySqlEntityStorageConnector - partitioning and migration", () => {
 		);
 		EntitySchemaFactory.register(nameof<MigMultiFieldB>(), () =>
 			EntitySchemaHelper.getSchema(MigMultiFieldB)
+		);
+		EntitySchemaFactory.register(nameof<MigIndexedV1>(), () =>
+			EntitySchemaHelper.getSchema(MigIndexedV1)
+		);
+		EntitySchemaFactory.register(nameof<MigIndexedV2>(), () =>
+			EntitySchemaHelper.getSchema(MigIndexedV2)
+		);
+		EntitySchemaFactory.register(nameof<MigIndexedV2Unindexed>(), () =>
+			EntitySchemaHelper.getSchema(MigIndexedV2Unindexed)
+		);
+		EntitySchemaFactory.register(nameof<MigIndexedV2Secondary>(), () =>
+			EntitySchemaHelper.getSchema(MigIndexedV2Secondary)
+		);
+		EntitySchemaFactory.register(nameof<MigBoundedV1>(), () =>
+			EntitySchemaHelper.getSchema(MigBoundedV1)
+		);
+		EntitySchemaFactory.register(nameof<MigBoundedV2>(), () =>
+			EntitySchemaHelper.getSchema(MigBoundedV2)
 		);
 
 		createConnector = async (entitySchema, partitionContextIds, storageId) => {
@@ -354,6 +513,7 @@ describe("MySqlEntityStorageConnector - partitioning and migration", () => {
 				storageId
 			)) as IEntityStorageMigrationConnector<MigV1>;
 			await legacyStorage.set({ id: "1", legacyField: "a" });
+			await legacyStorage.set({ id: "3", legacyField: "c" });
 
 			const entityStorage = (await createConnector(
 				nameof<MigV1>(),
@@ -375,7 +535,7 @@ describe("MySqlEntityStorageConnector - partitioning and migration", () => {
 					expect.objectContaining({
 						level: "warn",
 						message: "partitionIdsSkipped",
-						data: expect.objectContaining({ partitionIds: "user" })
+						data: expect.objectContaining({ partitionIds: "user: 2" })
 					})
 				);
 			} finally {
@@ -401,6 +561,47 @@ describe("MySqlEntityStorageConnector - partitioning and migration", () => {
 			renames,
 			transformEntityProperty
 		};
+	}
+
+	/**
+	 * Bootstrap a connector for a later schema over storage that already exists, as a node does
+	 * before its schema version service rebuilds the storage.
+	 * @param entitySchema The later schema name.
+	 * @param storageId The storage id of the existing storage.
+	 * @returns The connector, the bootstrap result and the warning/error log lines it produced.
+	 */
+	async function bootstrapOverExisting(
+		entitySchema: string,
+		storageId: string
+	): Promise<{
+		connector: IEntityStorageMigrationConnector;
+		bootstrapped: boolean | undefined;
+		errors: string[];
+		warnings: string[];
+	}> {
+		const logEntries: ILogEntry[] = [];
+		ComponentFactory.register("test-logging-bootstrap-existing", () => ({
+			className: () => "TestLogging",
+			log: async (entry: ILogEntry) => {
+				logEntries.push(entry);
+			}
+		}));
+		try {
+			const connector = await createConnector(entitySchema, undefined, storageId);
+			const bootstrapped = await connector.bootstrap?.("test-logging-bootstrap-existing");
+			return {
+				connector,
+				bootstrapped,
+				errors: logEntries
+					.filter(entry => entry.level === "error")
+					.map(entry => `${entry.message}: ${entry.error?.message}`),
+				warnings: logEntries
+					.filter(entry => entry.level === "warn")
+					.map(entry => `${entry.message}: ${JSON.stringify(entry.data)}`)
+			};
+		} finally {
+			ComponentFactory.unregister("test-logging-bootstrap-existing");
+		}
 	}
 
 	describe("migration using MigrationHelper", () => {
@@ -464,6 +665,169 @@ describe("MySqlEntityStorageConnector - partitioning and migration", () => {
 			expect((item1 as MigV2).newField).toBeUndefined();
 			const item2 = await finalConnector.get("2");
 			expect(item2).toBeDefined();
+		});
+
+		test("migrates a table created by an earlier release whose bounded indexed column is still LONGTEXT", async () => {
+			const tableName = `${TEST_MYSQL_CONFIG.tableName}_legacybounded_${Date.now()}`;
+			const qualifiedTable = `\`${TEST_MYSQL_CONFIG.database}\`.\`${tableName}\``;
+			const partitionKey = ContextIdHelper.combinedContextKey(
+				await ContextIdStore.getContextIds(),
+				["user"]
+			);
+			const pool = createPool({
+				host: TEST_MYSQL_CONFIG.host,
+				port: TEST_MYSQL_CONFIG.port,
+				user: TEST_MYSQL_CONFIG.user,
+				password: TEST_MYSQL_CONFIG.password,
+				database: TEST_MYSQL_CONFIG.database
+			});
+
+			// Tracked before the raw DDL so a failed setup still tears the table down.
+			const source = new MySqlEntityStorageConnector<MigBoundedV1>({
+				entitySchema: nameof<MigBoundedV1>(),
+				partitionContextIds: ["user"],
+				config: { ...TEST_MYSQL_CONFIG, tableName }
+			});
+			trackedConnectors.push(source);
+
+			try {
+				// The table and index exactly as a release before the string length was declared created them.
+				await pool.query(
+					`CREATE TABLE ${qualifiedTable} (\`partitionId\` LONGTEXT NOT NULL, \`id\` LONGTEXT NOT NULL, \`code\` LONGTEXT NOT NULL, PRIMARY KEY (\`partitionId\`(255), \`id\`(255)))`
+				);
+				await pool.query(
+					`CREATE INDEX \`${IndexHelper.generateName(tableName, "code")}\` ON ${qualifiedTable} (\`code\`(255))`
+				);
+				await pool.query(
+					`INSERT INTO ${qualifiedTable} (\`partitionId\`, \`id\`, \`code\`) VALUES (?, ?, ?)`,
+					[partitionKey, "1", "c-1"]
+				);
+
+				const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+					source,
+					nameof<MigBoundedV2>(),
+					await source.getPartitionContextIds(),
+					[makeStep(source, nameof<MigBoundedV2>())]
+				);
+
+				expect(migrated).toBe(1);
+				const item = (await finalConnector.get("1")) as MigBoundedV2 | undefined;
+				expect(item?.code).toEqual("c-1");
+
+				const [rows] = await pool.query(
+					"SELECT data_type AS dataType, character_maximum_length AS maxLength FROM INFORMATION_SCHEMA.COLUMNS WHERE table_schema = ? AND table_name = ? AND column_name = 'code'",
+					[TEST_MYSQL_CONFIG.database, tableName]
+				);
+				expect(rows).toEqual([{ dataType: "varchar", maxLength: 32 }]);
+			} finally {
+				await pool.end();
+			}
+		});
+
+		test("bootstraps a later schema over existing storage when a new property joins an index, so the rebuild can add it", async () => {
+			const storageId = `ix${Date.now().toString(36)}`;
+			const source = await createConnector(nameof<MigIndexedV1>(), undefined, storageId);
+			await source.set({ id: "1", type: "alias", value: "Acme" });
+
+			const { connector, bootstrapped, errors, warnings } = await bootstrapOverExisting(
+				nameof<MigIndexedV2>(),
+				storageId
+			);
+			expect({ bootstrapped, errors }).toEqual({ bootstrapped: true, errors: [] });
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain("columnsMissing");
+			expect(warnings[0]).toContain("valueHash");
+			expect(connector.getMissingColumns?.()).toEqual(["valueHash"]);
+
+			// The node reads the newer schema through the connector bootstrap just built, not the
+			// V1 source, so the migration step's fromProperties come from MigIndexedV1 directly.
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+				connector,
+				nameof<MigIndexedV2>(),
+				await connector.getPartitionContextIds(),
+				[
+					{
+						fromProperties: EntitySchemaFactory.get(nameof<MigIndexedV1>()).properties ?? [],
+						toProperties: EntitySchemaFactory.get(nameof<MigIndexedV2>()).properties ?? []
+					}
+				]
+			);
+			expect(migrated).toBe(1);
+			expect(await finalConnector.get("1")).toEqual({ id: "1", type: "alias", value: "Acme" });
+			expect((finalConnector as IEntityStorageMigrationConnector).getMissingColumns?.()).toEqual(
+				[]
+			);
+
+			await finalConnector.set({
+				id: "2",
+				type: "alias",
+				value: "Other",
+				valueHash: "h".repeat(27)
+			});
+			expect(await finalConnector.get("2")).toEqual({
+				id: "2",
+				type: "alias",
+				value: "Other",
+				valueHash: "h".repeat(27)
+			});
+		});
+
+		test("bootstraps a later schema over existing storage when a new property is not indexed", async () => {
+			const storageId = `ux${Date.now().toString(36)}`;
+			const source = await createConnector(nameof<MigIndexedV1>(), undefined, storageId);
+			await source.set({ id: "1", type: "alias", value: "Acme" });
+
+			const { connector, bootstrapped, errors, warnings } = await bootstrapOverExisting(
+				nameof<MigIndexedV2Unindexed>(),
+				storageId
+			);
+			expect({ bootstrapped, errors }).toEqual({ bootstrapped: true, errors: [] });
+			expect(warnings).toHaveLength(1);
+			expect(warnings[0]).toContain("columnsMissing");
+			expect(connector.getMissingColumns?.()).toEqual(["valueHash"]);
+
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+				source,
+				nameof<MigIndexedV2Unindexed>(),
+				await source.getPartitionContextIds(),
+				[makeStep(source, nameof<MigIndexedV2Unindexed>())]
+			);
+			expect(migrated).toBe(1);
+			expect(await finalConnector.get("1")).toEqual({ id: "1", type: "alias", value: "Acme" });
+		});
+
+		test("skips indexes when a new secondary property is missing from existing storage", async () => {
+			const storageId = `sc${Date.now().toString(36)}`;
+			const source = await createConnector(nameof<MigIndexedV1>(), undefined, storageId);
+			await source.set({ id: "1", type: "alias", value: "Acme" });
+
+			const { connector, bootstrapped, errors, warnings } = await bootstrapOverExisting(
+				nameof<MigIndexedV2Secondary>(),
+				storageId
+			);
+			expect({ bootstrapped, errors }).toEqual({ bootstrapped: true, errors: [] });
+			expect(warnings).toHaveLength(1);
+			expect(connector.getMissingColumns?.()).toEqual(["code"]);
+
+			const { finalConnector, migrated } = await MigrationHelper.migrateWithChain(
+				connector,
+				nameof<MigIndexedV2Secondary>(),
+				await connector.getPartitionContextIds(),
+				[
+					{
+						fromProperties: EntitySchemaFactory.get(nameof<MigIndexedV1>()).properties ?? [],
+						toProperties: EntitySchemaFactory.get(nameof<MigIndexedV2Secondary>()).properties ?? []
+					}
+				]
+			);
+			expect(migrated).toBe(1);
+			expect(await finalConnector.get("1")).toEqual({ id: "1", type: "alias", value: "Acme" });
+		});
+
+		test("reports no missing columns when bootstrapping fresh storage", async () => {
+			const storageId = `fr${Date.now().toString(36)}`;
+			const connector = await createConnector(nameof<MigIndexedV2>(), undefined, storageId);
+			expect(connector.getMissingColumns?.()).toEqual([]);
 		});
 
 		test("preserves entity count across migration", async () => {
@@ -1034,6 +1398,23 @@ describe("MySqlEntityStorageConnector - partitioning and migration", () => {
 			expect(await finalConnector.count()).toBe(2);
 			expect(await finalConnector.get("1")).toBeDefined();
 			expect(await finalConnector.get("2")).toBeDefined();
+		});
+
+		test("finalizeMigration: a failed swap leaves the source and its entities in place", async () => {
+			const source = (await createConnector(
+				nameof<MigV1>()
+			)) as IEntityStorageMigrationConnector<MigV1>;
+			await source.set({ id: "1", legacyField: "a" });
+			await source.set({ id: "2", legacyField: "b" });
+			await source.set({ id: "3", legacyField: "c" });
+
+			// The migration table was never created, so the swap cannot complete.
+			const target = await source.createTargetConnector<MigV2>(nameof<MigV2>());
+
+			await expect(source.finalizeMigration(target)).rejects.toThrow();
+
+			expect(await source.count()).toBe(3);
+			expect(await source.get("1")).toBeDefined();
 		});
 	});
 });

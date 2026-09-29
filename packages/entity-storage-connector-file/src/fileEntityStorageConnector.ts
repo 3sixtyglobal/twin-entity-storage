@@ -35,8 +35,10 @@ import {
 	type SortDirection
 } from "@twin.org/entity";
 import {
+	EntityStorageCommon,
 	EntityStorageHelper,
 	type IEntityStorageConnector,
+	type IEntityStorageJoinOptions,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
 } from "@twin.org/entity-storage-models";
@@ -731,6 +733,25 @@ export class FileEntityStorageConnector<T = unknown>
 	}
 
 	/**
+	 * Find all the entities which match the conditions, attaching to each one the entities from a
+	 * second storage connector whose join property matches. The join behaves like a left join by
+	 * default, a primary entity with no matches is still returned with an empty joined list, unless
+	 * joinRequired asks for an inner join and those entities are left out altogether.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The properties to join on, the conditions, sort order, projection and
+	 * paging for the primary entities, the optional grouping and group conditions, and the optional
+	 * conditions, sort order and projection for the joined entities.
+	 * @returns All the entities for the storage matching the conditions with their joined entities,
+	 * and a cursor which can be used to request more entities.
+	 */
+	public async queryJoin<U>(
+		joinConnector: IEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>
+	): Promise<{ entities: (Partial<T> & { joined: Partial<U>[] })[]; cursor?: string }> {
+		return EntityStorageCommon.queryJoin(this, joinConnector, joinOptions);
+	}
+
+	/**
 	 * Count all the entities which match the conditions.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
@@ -787,7 +808,7 @@ export class FileEntityStorageConnector<T = unknown>
 			return undefined;
 		}
 		const contextIds: { [id: string]: IContextIds } = {};
-		const skipped = new Set<string>();
+		const skipped = new Map<string, number>();
 
 		const store = await this.readStoreWithLock();
 
@@ -802,7 +823,7 @@ export class FileEntityStorageConnector<T = unknown>
 					partitionId
 				);
 				if (Is.undefined(split)) {
-					skipped.add(partitionId);
+					skipped.set(partitionId, (skipped.get(partitionId) ?? 0) + 1);
 				} else {
 					contextIds[partitionId] = split;
 				}
@@ -818,7 +839,7 @@ export class FileEntityStorageConnector<T = unknown>
 				message: "partitionIdsSkipped",
 				data: {
 					expected: this._partitionContextIds?.length,
-					partitionIds: Array.from(skipped).join(", ")
+					partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 				}
 			});
 		}
@@ -850,7 +871,7 @@ export class FileEntityStorageConnector<T = unknown>
 	}
 
 	/**
-	 * Finalize the migration by tearing down the old connector and replacing it with the target connector.
+	 * Finalize the migration by replacing the source store with the migrated store and removing the migration directory.
 	 * @param targetConnector The target connector to finalize the migration with.
 	 * @param options The options to control how the migration is finalized.
 	 * @param loggingComponentType The optional component type to use for logging the migration progress.
@@ -861,14 +882,11 @@ export class FileEntityStorageConnector<T = unknown>
 		options?: IMigrationOptions,
 		loggingComponentType?: string
 	): Promise<IEntityStorageConnector<U>> {
-		const originalDir = this._directory;
-		const migrationDir = targetConnector._directory;
-
-		// Teardown the original connector, removing the entire source directory.
-		await this.teardown(loggingComponentType);
-
-		// Rename the migration directory into the original location.
-		await rename(migrationDir, originalDir);
+		// writeStore replaces the source store atomically, so a failure or a process death leaves
+		// either the untouched source or the complete migrated store in place.
+		const migratedStore = await targetConnector.readStoreWithLock();
+		await this.withLock(async () => this.writeStore(migratedStore as unknown as T[]));
+		await rm(targetConnector._directory, { recursive: true, force: true });
 
 		return new FileEntityStorageConnector<U>({
 			entitySchema: targetConnector._entitySchemaName,

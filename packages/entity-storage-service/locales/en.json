@@ -4,7 +4,9 @@
 			"storedVersionNewer": "Stored schema version ({stored}) for \"{schemaName}\" is newer than the current version ({current}). Downgrade is not supported.",
 			"noMigrationStep": "No migration step from version {missingFromVersion} to {missingToVersion} found for \"{schemaName}\". Cannot complete migration from {stored} to {current}. Register the versioned schema class \"{schemaName}V{missingFromVersion}\" in EntitySchemaFactory.",
 			"noMigrationStepTarget": "No target schema for migration step {missingFromVersion} to {missingToVersion} found for \"{schemaName}\". Cannot complete migration from {stored} to {current}. Register the versioned schema class \"{schemaName}V{missingToVersion}\" in EntitySchemaFactory.",
-			"connectorNotMigrationCapable": "Schema \"{schemaName}\" needs migration from version {stored} to {current} but its connector does not support automatic migration. Please migrate the schema manually before starting the node."
+			"connectorNotMigrationCapable": "Schema \"{schemaName}\" needs migration from version {stored} to {current} but its connector does not support automatic migration. Please migrate the schema manually before starting the node.",
+			"migrationInterrupted": "A previous start-up died while finalizing the migration of schema \"{schemaName}\" to version {version}. Restore the data from the leftover migration copy, then delete the \"{marker}\" record from the schema version store.",
+			"columnsMissingWithoutMigration": "Schema \"{schemaName}\" is missing columns {missingColumns} in its existing storage and no migration will rebuild it. Bump the entity version so the storage is rebuilt, or add the missing columns or drop the storage so it is recreated."
 		}
 	},
 	"warn": {

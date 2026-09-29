@@ -8,11 +8,13 @@ import {
 	Guards,
 	Is,
 	type IValidationFailure,
+	ObjectHelper,
 	RandomHelper,
 	Validation
 } from "@twin.org/core";
 import {
 	ComparisonOperator,
+	EntityConditions,
 	EntitySchemaFactory,
 	EntitySchemaPropertyFormat,
 	EntitySchemaPropertyType,
@@ -25,7 +27,13 @@ import {
 	type IEntitySchema,
 	type IEntitySchemaProperty
 } from "@twin.org/entity";
-import { ConnectionHelper, EntityStorageHelper } from "@twin.org/entity-storage-models";
+import {
+	ConnectionHelper,
+	EntityStorageCommon,
+	EntityStorageHelper,
+	type IEntityStorageConnector,
+	type IEntityStorageJoinOptions
+} from "@twin.org/entity-storage-models";
 import type { ILoggingComponent } from "@twin.org/logging-models";
 import { nameof } from "@twin.org/nameof";
 import { types as CassandraTypes, Client } from "cassandra-driver";
@@ -58,6 +66,12 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @internal
 	 */
 	protected static readonly DEFAULT_LIMIT: number = 40;
+
+	/**
+	 * The page size used when scanning candidate rows for client side filtering.
+	 * @internal
+	 */
+	protected static readonly FILTER_PAGE_SIZE: number = 500;
 
 	/**
 	 * The name of the database table.
@@ -290,6 +304,9 @@ export abstract class AbstractScyllaDBConnector<T> {
 	 * @param limit The suggested number of entities to return in each chunk, in some scenarios can return a different amount.
 	 * @returns All the entities for the storage matching the conditions,
 	 * and a cursor which can be used to request more entities.
+	 * @remarks Comparisons which CQL cannot express are filtered client side. Candidate pages are
+	 * consumed whole so the page state stays a valid cursor, which can return up to a page more
+	 * than the limit.
 	 */
 	public async query(
 		conditions?: EntityCondition<T>,
@@ -344,7 +361,10 @@ export abstract class AbstractScyllaDBConnector<T> {
 
 		// Validates and throws for unsupported conditions before entering the try-catch
 		// so that comparisonNotSupported errors surface directly to the caller.
-		const { whereClause, params, noResults } = this.buildCqlConditions(conditions, partitionKey);
+		const { whereClause, params, noResults, residual } = this.buildCqlConditions(
+			conditions,
+			partitionKey
+		);
 
 		if (noResults) {
 			return { entities: [], cursor: undefined };
@@ -354,12 +374,24 @@ export abstract class AbstractScyllaDBConnector<T> {
 			const returnSize = limit ?? AbstractScyllaDBConnector.DEFAULT_LIMIT;
 			let sql = `SELECT * FROM "${this.safeTableName(this._fullTableName)}"`;
 
+			// Columns selected only so the residual comparators can be evaluated; they are
+			// removed from the entities before they are returned to the caller.
+			const filterOnlyProperties: string[] = [];
+
 			if (Is.array(properties)) {
 				const fields: string[] = [];
 				for (const property of properties) {
 					fields.push(property.toString());
 				}
-				sql = sql.replace("*", fields.join(","));
+				for (const comparator of residual) {
+					if (!fields.includes(comparator.property)) {
+						fields.push(comparator.property);
+						filterOnlyProperties.push(comparator.property);
+					}
+				}
+				// CQL folds an unquoted identifier to lower case, so a camel case column has to be
+				// quoted here the same way it is when the table is created.
+				sql = sql.replace("*", fields.map(field => `"${field}"`).join(","));
 			}
 
 			sql += ` WHERE ${whereClause}`;
@@ -384,22 +416,42 @@ export abstract class AbstractScyllaDBConnector<T> {
 				data: { sql }
 			});
 
-			const result = await this.queryDB(connection, sql, params, cursor, returnSize);
-
 			const entities: Partial<T>[] = [];
+			let pageState: string | undefined = cursor;
+			let lastRowCount = 0;
 
-			for (const row of result.rows) {
-				entities.push(this.convertRowToObject(this._entitySchema.properties, row));
+			do {
+				const result = await this.queryDB(connection, sql, params, pageState, returnSize);
+				lastRowCount = result.rows.length;
+
+				for (const row of result.rows) {
+					const entity = this.convertRowToObject(this._entitySchema.properties, row);
+					if (this.matchesResidual(entity, residual)) {
+						entities.push(entity);
+					}
+				}
+
+				pageState = result.pageState;
+			} while (
+				entities.length < returnSize &&
+				lastRowCount >= returnSize &&
+				Is.stringValue(pageState)
+			);
+
+			for (const entity of entities) {
+				for (const property of filterOnlyProperties) {
+					ObjectHelper.propertyDelete(entity, property);
+				}
 			}
 
 			// ScyllaDB may return a pageState even when the current page is the last one
 			// (when rows.length == fetchSize). Peek at the next page to verify there are
 			// actually more rows before surfacing the cursor to the caller.
 			let nextCursor: string | undefined;
-			if (returnSize > 0 && result.rows.length >= returnSize && Is.stringValue(result.pageState)) {
-				const peek = await this.queryDB(connection, sql, params, result.pageState, 1);
+			if (returnSize > 0 && lastRowCount >= returnSize && Is.stringValue(pageState)) {
+				const peek = await this.queryDB(connection, sql, params, pageState, 1);
 				if (peek.rows.length > 0) {
-					nextCursor = result.pageState;
+					nextCursor = pageState;
 				}
 			}
 
@@ -418,23 +470,84 @@ export abstract class AbstractScyllaDBConnector<T> {
 	}
 
 	/**
+	 * Find all the entities which match the conditions, attaching to each one the entities from a
+	 * second storage connector whose join property matches. The join behaves like a left join by
+	 * default, a primary entity with no matches is still returned with an empty joined list, unless
+	 * joinRequired asks for an inner join and those entities are left out altogether.
+	 * @param joinConnector The connector holding the entities to join to.
+	 * @param joinOptions The properties to join on, the conditions, sort order, projection and
+	 * paging for the primary entities, the optional grouping and group conditions, and the optional
+	 * conditions, sort order and projection for the joined entities.
+	 * @returns All the entities for the storage matching the conditions with their joined entities,
+	 * and a cursor which can be used to request more entities.
+	 */
+	public async queryJoin<U>(
+		joinConnector: IEntityStorageConnector<U>,
+		joinOptions: IEntityStorageJoinOptions<T, U>
+	): Promise<{ entities: (Partial<T> & { joined: Partial<U>[] })[]; cursor?: string }> {
+		return EntityStorageCommon.queryJoin(
+			this as unknown as IEntityStorageConnector<T>,
+			joinConnector,
+			joinOptions
+		);
+	}
+
+	/**
 	 * Count all the entities which match the conditions.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @returns The total count of entities in the storage.
+	 * @remarks Comparisons which CQL cannot express are counted client side.
 	 */
 	public async count(conditions?: EntityCondition<T>): Promise<number> {
 		const contextIds = await ContextIdStore.getContextIds();
 		const partitionKey = ContextIdHelper.combinedContextKey(contextIds, this._partitionContextIds);
-		const { whereClause, params, noResults } = this.buildCqlConditions(conditions, partitionKey);
+		const { whereClause, params, noResults, residual } = this.buildCqlConditions(
+			conditions,
+			partitionKey
+		);
 
 		if (noResults) {
 			return 0;
 		}
 
 		try {
-			const sql = `SELECT COUNT(*) FROM "${this.safeTableName(this._fullTableName)}" WHERE ${whereClause} ALLOW FILTERING`;
-
 			const connection = await this.getClient();
+
+			if (residual.length > 0) {
+				const fields = [...new Set(residual.map(comparator => comparator.property))];
+				const filterSql = `SELECT ${fields.map(field => `"${field}"`).join(",")} FROM "${this.safeTableName(this._fullTableName)}" WHERE ${whereClause} ALLOW FILTERING`;
+
+				let total = 0;
+				let pageState: string | undefined;
+				let lastRowCount = 0;
+
+				do {
+					const page = await this.queryDB(
+						connection,
+						filterSql,
+						params,
+						pageState,
+						AbstractScyllaDBConnector.FILTER_PAGE_SIZE
+					);
+					lastRowCount = page.rows.length;
+
+					for (const row of page.rows) {
+						const entity = this.convertRowToObject(this._entitySchema.properties, row);
+						if (this.matchesResidual(entity, residual)) {
+							total++;
+						}
+					}
+
+					pageState = page.pageState;
+				} while (
+					lastRowCount >= AbstractScyllaDBConnector.FILTER_PAGE_SIZE &&
+					Is.stringValue(pageState)
+				);
+
+				return total;
+			}
+
+			const sql = `SELECT COUNT(*) FROM "${this.safeTableName(this._fullTableName)}" WHERE ${whereClause} ALLOW FILTERING`;
 			const result = await this.queryDB(connection, sql, params);
 			return Number(result.rows[0]?.get("count") ?? 0);
 		} catch (err) {
@@ -816,6 +929,18 @@ export abstract class AbstractScyllaDBConnector<T> {
 	}
 
 	/**
+	 * Get the properties which form the table key after the partition key.
+	 * @param schema The entity schema to read.
+	 * @returns The property names in schema order.
+	 * @internal
+	 */
+	protected keyProperties<U>(schema: IEntitySchema<U>): string[] {
+		return (schema.properties ?? [])
+			.filter(property => property.isPrimary === true || property.isSecondary === true)
+			.map(property => String(property.property));
+	}
+
+	/**
 	 * Retrieve (or lazily create) the shared ScyllaDB client for this endpoint.
 	 * @returns The shared client.
 	 * @internal
@@ -844,6 +969,16 @@ export abstract class AbstractScyllaDBConnector<T> {
 				return client;
 			}
 		);
+	}
+
+	/**
+	 * Escape the LIKE wildcard characters in a value so they match literally.
+	 * @param value The value to escape.
+	 * @returns The escaped value.
+	 * @internal
+	 */
+	private escapeLike(value: string): string {
+		return value.replace(/[\\%_]/g, "\\$&");
 	}
 
 	/**
@@ -878,18 +1013,20 @@ export abstract class AbstractScyllaDBConnector<T> {
 	}
 
 	/**
-	 * Parse, validate, and build a CQL WHERE clause from an EntityCondition tree.
+	 * Parse and validate an EntityCondition tree, splitting it into a CQL WHERE clause and the
+	 * residual comparators which CQL cannot express.
 	 * The partition key equality is always the first clause; user conditions follow.
 	 * @param conditions The optional conditions to match for the entities.
 	 * @param partitionKey The partition key value to filter by.
-	 * @returns The complete WHERE clause (without the WHERE keyword) and bound params.
-	 * @throws GeneralError if OR conditions, dot-notation paths, null comparisons, NotEquals, or NotIncludes operators are used.
+	 * @returns The complete WHERE clause (without the WHERE keyword), the bound params, and the
+	 * residual comparators which must be evaluated client side.
+	 * @throws GeneralError if OR conditions, dot-notation paths, or NotIncludes operators are used.
 	 * @internal
 	 */
 	private buildCqlConditions(
 		conditions: EntityCondition<T> | undefined,
 		partitionKey: string | undefined
-	): { whereClause: string; params: unknown[]; noResults?: boolean } {
+	): { whereClause: string; params: unknown[]; noResults?: boolean; residual: IComparator[] } {
 		let conditionsList: IComparator[] = [];
 		if (conditions !== undefined) {
 			if ("conditions" in conditions) {
@@ -902,6 +1039,9 @@ export abstract class AbstractScyllaDBConnector<T> {
 			}
 		}
 
+		const residual: IComparator[] = [];
+		const pushDown: IComparator[] = [];
+
 		for (const cond of conditionsList) {
 			const comparator = cond;
 			if (comparator.property.includes(".")) {
@@ -911,32 +1051,26 @@ export abstract class AbstractScyllaDBConnector<T> {
 				});
 			}
 			EntityStorageHelper.validateConditionProperties(this._entitySchema, cond);
-			if (
-				(comparator.comparison === ComparisonOperator.Equals ||
-					comparator.comparison === ComparisonOperator.NotEquals) &&
-				(comparator.value === null || comparator.value === undefined)
-			) {
-				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "comparisonNotSupported", {
-					property: comparator.property,
-					reason: "null/undefined comparisons are not supported in CQL WHERE clauses"
-				});
-			}
-			if (comparator.comparison === ComparisonOperator.NotEquals) {
-				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "notEqualsNotSupported", {
-					property: comparator.property
-				});
-			}
 			if (comparator.comparison === ComparisonOperator.NotIncludes) {
 				throw new GeneralError(AbstractScyllaDBConnector.CLASS_NAME, "notIncludesNotSupported", {
 					property: comparator.property
 				});
+			}
+			// CQL has no "!=" operator and no IS NULL predicate, so these comparisons are evaluated client side.
+			if (
+				comparator.comparison === ComparisonOperator.NotEquals ||
+				(comparator.comparison === ComparisonOperator.Equals && Is.empty(comparator.value))
+			) {
+				residual.push(EntityStorageHelper.normalizeConditionValues<T>(comparator) as IComparator);
+			} else {
+				pushDown.push(comparator);
 			}
 		}
 
 		const conds: string[] = [];
 		const params: unknown[] = [partitionKey ?? AbstractScyllaDBConnector.PARTITION_KEY_VALUE];
 
-		for (const cond of conditionsList) {
+		for (const cond of pushDown) {
 			const condition = cond;
 			const descriptor = this._entitySchema.properties?.find(
 				p => p.property === condition.property
@@ -953,6 +1087,11 @@ export abstract class AbstractScyllaDBConnector<T> {
 				} else {
 					conds.push(`"${condition.property}" NOT LIKE ?`);
 				}
+			} else if (condition.comparison === ComparisonOperator.StartsWith) {
+				const serialized = this.propertyToDbValue(condition.value, descriptor);
+				const searchStr = Is.stringValue(serialized) ? serialized : "";
+				params.push(`${this.escapeLike(searchStr)}%`);
+				conds.push(`"${condition.property}" LIKE ?`);
 			} else if (condition.comparison === ComparisonOperator.In) {
 				// Guard must come first: Is.arrayValue([]) returns false for an empty array,
 				// so an empty value would be wrapped as a single element below and bypass
@@ -961,7 +1100,8 @@ export abstract class AbstractScyllaDBConnector<T> {
 					return {
 						whereClause: "",
 						params: [],
-						noResults: true
+						noResults: true,
+						residual: []
 					};
 				}
 				let value: unknown[] = [];
@@ -977,8 +1117,6 @@ export abstract class AbstractScyllaDBConnector<T> {
 				params.push(propValue);
 				if (condition.comparison === ComparisonOperator.Equals) {
 					conds.push(`"${condition.property}" = ?`);
-				} else if (condition.comparison === ComparisonOperator.NotEquals) {
-					conds.push(`"${condition.property}" != ?`);
 				} else if (condition.comparison === ComparisonOperator.GreaterThan) {
 					conds.push(`"${condition.property}" > ?`);
 				} else if (condition.comparison === ComparisonOperator.LessThan) {
@@ -1001,6 +1139,23 @@ export abstract class AbstractScyllaDBConnector<T> {
 			whereClause += ` AND ${conds.join(` ${operator} `)}`;
 		}
 
-		return { whereClause, params };
+		return { whereClause, params, residual };
+	}
+
+	/**
+	 * Evaluate the comparators against an entity.
+	 * @param entity The entity to test.
+	 * @param residual The comparators to evaluate.
+	 * @returns True if the entity matches every comparator.
+	 * @internal
+	 */
+	private matchesResidual(entity: T, residual: IComparator[]): boolean {
+		for (const comparator of residual) {
+			if (!EntityConditions.compare(entity, comparator)) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 }

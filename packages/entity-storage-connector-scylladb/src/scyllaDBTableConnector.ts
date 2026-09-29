@@ -782,16 +782,16 @@ export class ScyllaDBTableConnector<T = unknown>
 				0
 			);
 			const seen = new Set<string>();
-			const skipped = new Set<string>();
+			const skipped = new Map<string, number>();
 			const contextIds: IContextIds[] = [];
 			for (const row of result.rows) {
 				const id = row[AbstractScyllaDBConnector.PARTITION_KEY] as string;
 				if (Is.stringValue(id) && !seen.has(id)) {
-					seen.add(id);
 					const split = EntityStorageHelper.tryShortSplit(this._partitionContextIds ?? [], id);
 					if (Is.undefined(split)) {
-						skipped.add(id);
+						skipped.set(id, (skipped.get(id) ?? 0) + 1);
 					} else {
+						seen.add(id);
 						contextIds.push(split);
 					}
 				}
@@ -805,7 +805,7 @@ export class ScyllaDBTableConnector<T = unknown>
 					message: "partitionIdsSkipped",
 					data: {
 						expected: this._partitionContextIds?.length,
-						partitionIds: Array.from(skipped).join(", ")
+						partitionIds: Array.from(skipped, ([id, count]) => `${id}: ${count}`).join(", ")
 					}
 				});
 			}
@@ -1057,7 +1057,6 @@ export class ScyllaDBTableConnector<T = unknown>
 	 */
 	private buildSchemaColumns(schema: IEntitySchema<T>): string {
 		const fields: string[] = [];
-		const clusteringKeys: string[] = [];
 
 		// partitionId is always the sole partition key so that WHERE "partitionId" = ?
 		// allows ORDER BY on the subsequent clustering keys.
@@ -1065,10 +1064,9 @@ export class ScyllaDBTableConnector<T = unknown>
 
 		for (const field of schema.properties ?? []) {
 			fields.push(`"${String(field.property)}" ${this.toDbField(field)}`);
-			if (field.isPrimary || field.isSecondary) {
-				clusteringKeys.push(`"${field.property as string}"`);
-			}
 		}
+
+		const clusteringKeys = this.keyProperties(schema).map(key => `"${key}"`);
 
 		if (clusteringKeys.length > 0) {
 			fields.push(

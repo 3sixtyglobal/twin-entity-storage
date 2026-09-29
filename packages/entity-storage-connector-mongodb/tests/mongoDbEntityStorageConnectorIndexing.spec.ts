@@ -5,9 +5,12 @@ import {
 	ComparisonOperator,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
+	LogicalOperator,
+	SortDirection,
 	entity,
 	property
 } from "@twin.org/entity";
+import { IndexHelper } from "@twin.org/entity-storage-models";
 import { nameof } from "@twin.org/nameof";
 import { MongoClient } from "mongodb";
 import { TEST_MONGODB_CONFIG } from "./setupTestEnv.js";
@@ -19,8 +22,18 @@ const SUPPORT_SECONDARY_INDEXING = true;
 // Set to false for connectors that do not create named index objects in the database.
 const SUPPORT_NAMED_INDEX_OBJECTS = false;
 
+// Set to false for connectors which create no index for a property marked isSecondary.
+const SUPPORT_SECONDARY_INDEX_CREATION = true;
+
+// Set to false for connectors which create no index for a property that only declares a
+// sortDirection.
+const SUPPORT_SORT_DIRECTION_INDEX_CREATION = true;
+
 // Set to false for connectors which cannot add an index to an already created store.
 const SUPPORT_INDEX_UPDATE = true;
+
+// Set to false for connectors which cannot create a composite index over a schema index group.
+const SUPPORT_COMPOSITE_INDEXING = true;
 
 @entity()
 class IndexedTestType {
@@ -35,6 +48,18 @@ class IndexedTestType {
 }
 
 @entity()
+class SortedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({ type: "string", sortDirection: SortDirection.Descending })
+	public sorted!: string;
+
+	@property({ type: "number", format: "uint32" })
+	public value!: number;
+}
+
+@entity()
 class UnindexedTestType {
 	@property({ type: "string", isPrimary: true })
 	public id!: string;
@@ -43,6 +68,47 @@ class UnindexedTestType {
 	public category!: string;
 
 	@property({ type: "number", format: "uint32" })
+	public value!: number;
+}
+
+/**
+ * Resolve the index name a connector generates for one of the schema's index groups.
+ * @param tableName The table or collection the index belongs to.
+ * @param groupName The name of the index group.
+ * @returns The generated index name.
+ */
+function compositeIndexName(tableName: string, groupName: string): string {
+	const indexGroups = EntitySchemaHelper.getIndexGroups(
+		EntitySchemaHelper.getSchema(CompositeIndexedTestType)
+	);
+	return IndexHelper.generateCompositeName(tableName, indexGroups[groupName]);
+}
+
+@entity()
+class CompositeIndexedTestType {
+	@property({ type: "string", isPrimary: true })
+	public id!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [{ name: "categoryStatus", direction: SortDirection.Ascending, index: 0 }]
+	})
+	public category!: string;
+
+	@property({
+		type: "string",
+		indexGroup: [
+			{ name: "categoryStatus", direction: SortDirection.Descending, index: 1 },
+			{ name: "statusValue", direction: SortDirection.Ascending, index: 1 }
+		]
+	})
+	public status!: string;
+
+	@property({
+		type: "number",
+		format: "uint32",
+		indexGroup: [{ name: "statusValue", direction: SortDirection.Descending, index: 0 }]
+	})
 	public value!: number;
 }
 
@@ -66,6 +132,35 @@ function createUnindexedConnector(): MongoDbEntityStorageConnector<UnindexedTest
 	});
 }
 
+/**
+ * Read the key fields of every index on a collection, in key order.
+ * @param collectionName The collection to inspect.
+ * @returns The key fields and their sort order for each index, keyed by index name.
+ */
+async function indexFieldsByName(
+	collectionName: string
+): Promise<{ [indexName: string]: string[] }> {
+	const client = new MongoClient(buildConnectionUrl());
+	try {
+		await client.connect();
+		const indexes = await client
+			.db(TEST_MONGODB_CONFIG.database)
+			.collection(collectionName)
+			.listIndexes()
+			.toArray();
+		const indexFields: { [indexName: string]: string[] } = {};
+		for (const index of indexes) {
+			const key = index.key as { [k: string]: number };
+			indexFields[index.name as string] = Object.keys(key).map(
+				field => `${field} ${key[field] === -1 ? "DESC" : "ASC"}`
+			);
+		}
+		return indexFields;
+	} finally {
+		await client.close();
+	}
+}
+
 function buildConnectionUrl(): string {
 	const port = TEST_MONGODB_CONFIG.port ?? 27017;
 	return `mongodb://${TEST_MONGODB_CONFIG.host}:${port}/${TEST_MONGODB_CONFIG.database}`;
@@ -76,8 +171,14 @@ describe("MongoDbEntityStorageConnector", () => {
 		EntitySchemaFactory.register(nameof<IndexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(IndexedTestType)
 		);
+		EntitySchemaFactory.register(nameof<SortedTestType>(), () =>
+			EntitySchemaHelper.getSchema(SortedTestType)
+		);
 		EntitySchemaFactory.register(nameof<UnindexedTestType>(), () =>
 			EntitySchemaHelper.getSchema(UnindexedTestType)
+		);
+		EntitySchemaFactory.register(nameof<CompositeIndexedTestType>(), () =>
+			EntitySchemaHelper.getSchema(CompositeIndexedTestType)
 		);
 
 		ContextIdStore.getContextIds = vi
@@ -154,6 +255,79 @@ describe("MongoDbEntityStorageConnector", () => {
 			}
 		},
 		300_000
+	);
+
+	test.skipIf(!SUPPORT_SECONDARY_INDEX_CREATION)(
+		"bootstrap creates an index for a property marked isSecondary",
+		async () => {
+			const collectionName = `${TEST_MONGODB_CONFIG.collection}_secondary_${Date.now()}`;
+			const connector = new MongoDbEntityStorageConnector<IndexedTestType>({
+				entitySchema: nameof<IndexedTestType>(),
+				config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+			});
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				// MongoDB names the index itself, so the key it covers is what identifies it.
+				const indexFields = await indexFieldsByName(collectionName);
+				expect(Object.values(indexFields)).toContainEqual(["category ASC"]);
+
+				// The index has to actually serve a query on the property it covers.
+				await connector.set({ id: "1", category: "catA", value: 1 });
+				const result = await connector.query({
+					property: "category",
+					value: "catA",
+					comparison: ComparisonOperator.Equals
+				});
+				expect(result.entities.map(e => e.id)).toEqual(["1"]);
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_SORT_DIRECTION_INDEX_CREATION)(
+		"bootstrap creates an index for a property which only declares a sortDirection",
+		async () => {
+			const collectionName = `${TEST_MONGODB_CONFIG.collection}_sortdirection_${Date.now()}`;
+			const connector = new MongoDbEntityStorageConnector<SortedTestType>({
+				entitySchema: nameof<SortedTestType>(),
+				config: { ...TEST_MONGODB_CONFIG, collection: collectionName }
+			});
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				// A sortDirection alone marks the property as sortable, which needs the same index
+				// an isSecondary property gets. A single-field index is traversed in either
+				// direction, so the declared direction does not change the key.
+				const indexFields = await indexFieldsByName(collectionName);
+				expect(Object.values(indexFields)).toContainEqual(["sorted ASC"]);
+
+				// The index has to actually serve a sort on the property it covers.
+				await connector.set({ id: "1", sorted: "a", value: 1 });
+				await connector.set({ id: "2", sorted: "b", value: 2 });
+				const result = await connector.query(undefined, [
+					{ property: "sorted", sortDirection: SortDirection.Descending }
+				]);
+				expect(result.entities.map(e => e.id)).toEqual(["2", "1"]);
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
 	);
 
 	test("bootstrap is idempotent when called multiple times", async () => {
@@ -802,4 +976,108 @@ describe("MongoDbEntityStorageConnector", () => {
 		},
 		60_000
 	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstrap creates a composite index for each multi-property index group",
+		async () => {
+			const collection = `${TEST_MONGODB_CONFIG.collection}_group_${Date.now()}`;
+			const connector = new MongoDbEntityStorageConnector<CompositeIndexedTestType>({
+				entitySchema: nameof<CompositeIndexedTestType>(),
+				config: { ...TEST_MONGODB_CONFIG, collection }
+			});
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+
+				const indexFields = await indexFieldsByName(collection);
+
+				// The group order and directions come from the index entries, not the schema order.
+				expect(indexFields[compositeIndexName(collection, "categoryStatus")]).toEqual([
+					"category ASC",
+					"status DESC"
+				]);
+				expect(indexFields[compositeIndexName(collection, "statusValue")]).toEqual([
+					"value DESC",
+					"status ASC"
+				]);
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test.skipIf(!SUPPORT_COMPOSITE_INDEXING)(
+		"bootstrap does not create a duplicate composite index when called multiple times",
+		async () => {
+			const collection = `${TEST_MONGODB_CONFIG.collection}_group_idempotent_${Date.now()}`;
+			const connector = new MongoDbEntityStorageConnector<CompositeIndexedTestType>({
+				entitySchema: nameof<CompositeIndexedTestType>(),
+				config: { ...TEST_MONGODB_CONFIG, collection }
+			});
+
+			try {
+				expect(await connector.bootstrap()).toBe(true);
+				expect(await connector.bootstrap()).toBe(true);
+
+				const indexFields = await indexFieldsByName(collection);
+
+				const groupIndexNames = Object.keys(indexFields).filter(
+					indexName =>
+						indexName === compositeIndexName(collection, "categoryStatus") ||
+						indexName === compositeIndexName(collection, "statusValue")
+				);
+				expect(groupIndexNames.length).toBe(2);
+			} finally {
+				try {
+					await connector.teardown?.();
+				} catch {}
+				try {
+					await connector.stop?.();
+				} catch {}
+			}
+		},
+		60_000
+	);
+
+	test("query filtering on every property of an index group returns only the matching entities", async () => {
+		const collection = `${TEST_MONGODB_CONFIG.collection}_group_query_${Date.now()}`;
+		const connector = new MongoDbEntityStorageConnector<CompositeIndexedTestType>({
+			entitySchema: nameof<CompositeIndexedTestType>(),
+			config: { ...TEST_MONGODB_CONFIG, collection }
+		});
+
+		try {
+			expect(await connector.bootstrap()).toBe(true);
+
+			await connector.setBatch([
+				{ id: "1", category: "catA", status: "active", value: 1 },
+				{ id: "2", category: "catA", status: "archived", value: 2 },
+				{ id: "3", category: "catB", status: "active", value: 3 },
+				{ id: "4", category: "catA", status: "active", value: 4 }
+			]);
+
+			const result = await connector.query({
+				conditions: [
+					{ property: "category", value: "catA", comparison: ComparisonOperator.Equals },
+					{ property: "status", value: "active", comparison: ComparisonOperator.Equals }
+				],
+				logicalOperator: LogicalOperator.And
+			});
+
+			expect(result.entities.map(matched => matched.id).sort()).toEqual(["1", "4"]);
+		} finally {
+			try {
+				await connector.teardown?.();
+			} catch {}
+			try {
+				await connector.stop?.();
+			} catch {}
+		}
+	}, 60_000);
 });
