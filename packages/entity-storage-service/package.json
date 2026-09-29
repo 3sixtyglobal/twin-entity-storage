@@ -1,6 +1,6 @@
 {
 	"name": "@twin.org/entity-storage-service",
-	"version": "0.10.1-next.14",
+	"version": "0.11.0",
 	"description": "Service layer exposing storage contracts and REST endpoint definitions.",
 	"repository": {
 		"type": "git",
@@ -29,22 +29,22 @@
 		"dist:no-test": "pnpm run clean && concurrently -g -n build,locales,types \"pnpm run build\" \"pnpm run validate-locales\" \"pnpm run test:build\""
 	},
 	"dependencies": {
-		"@twin.org/api-models": "next",
-		"@twin.org/context": "next",
-		"@twin.org/core": "next",
-		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.10.1-next.14",
-		"@twin.org/logging-models": "next",
-		"@twin.org/nameof": "next",
-		"@twin.org/web": "next"
+		"@twin.org/api-models": "^0.10.0",
+		"@twin.org/context": "^0.11.0",
+		"@twin.org/core": "^0.11.0",
+		"@twin.org/entity": "^0.11.0",
+		"@twin.org/entity-storage-models": "^0.11.0",
+		"@twin.org/logging-models": "^0.10.0",
+		"@twin.org/nameof": "^0.11.0",
+		"@twin.org/web": "^0.11.0"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.10.1-next.14",
-		"@twin.org/entity-storage-connector-mysql": "0.10.1-next.14",
-		"@twin.org/nameof-transformer": "next",
-		"@twin.org/nameof-vitest-plugin": "next",
-		"@twin.org/ts-to-openapi": "next",
-		"@twin.org/validate-locales": "next",
+		"@twin.org/entity-storage-connector-memory": "^0.11.0",
+		"@twin.org/entity-storage-connector-mysql": "^0.11.0",
+		"@twin.org/nameof-transformer": "^0.11.0",
+		"@twin.org/nameof-vitest-plugin": "^0.11.0",
+		"@twin.org/ts-to-openapi": "^0.11.0",
+		"@twin.org/validate-locales": "^0.11.0",
 		"@types/node": "26.6.2",
 		"@vitest/coverage-v8": "5.0.1",
 		"concurrently": "10.0.5",
