@@ -27,3 +27,7 @@ Detailed reference documentation for the API can be found in [docs/reference/ind
 ## Changelog
 
 The changes between each version can be found in [docs/changelog.md](docs/changelog.md)
+
+## Origin
+
+This package is derived from the original [iotaledger/twin-entity-storage](https://github.com/iotaledger/twin-entity-storage/tree/next/packages/entity-storage-connector-scylladb) repository.

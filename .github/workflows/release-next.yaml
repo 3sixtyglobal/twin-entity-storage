@@ -460,7 +460,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
         run: |
-          gh api repos/iotaledger/twin-workspace/dispatches \
+          gh api repos/3sixtyglobal/twin-workspace/dispatches \
             --method POST \
             --input - <<EOF
           {

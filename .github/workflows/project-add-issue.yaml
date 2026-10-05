@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/add-to-project@v2
         with:
-          project-url: https://github.com/orgs/iotaledger/projects/104
+          project-url: https://github.com/orgs/3sixtyglobal/projects/1
           github-token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
 
       - uses: actions/github-script@v9

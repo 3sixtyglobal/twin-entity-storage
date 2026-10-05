@@ -4,7 +4,7 @@
 	"description": "REST client for calling storage services from applications and tools.",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/iotaledger/twin-entity-storage.git",
+		"url": "git+https://github.com/3sixtyglobal/twin-entity-storage.git",
 		"directory": "packages/entity-storage-rest-client"
 	},
 	"author": "martyn.janes@iota.org",
@@ -80,7 +80,7 @@
 		"database"
 	],
 	"bugs": {
-		"url": "git+https://github.com/iotaledger/twin-entity-storage/issues"
+		"url": "git+https://github.com/3sixtyglobal/twin-entity-storage/issues"
 	},
 	"homepage": "https://twindev.org"
 }

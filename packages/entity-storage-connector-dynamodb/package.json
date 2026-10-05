@@ -4,7 +4,7 @@
 	"description": "Amazon DynamoDB connector for managed NoSQL persistence.",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/iotaledger/twin-entity-storage.git",
+		"url": "git+https://github.com/3sixtyglobal/twin-entity-storage.git",
 		"directory": "packages/entity-storage-connector-dynamodb"
 	},
 	"author": "martyn.janes@iota.org",
@@ -91,7 +91,7 @@
 		"integration"
 	],
 	"bugs": {
-		"url": "git+https://github.com/iotaledger/twin-entity-storage/issues"
+		"url": "git+https://github.com/3sixtyglobal/twin-entity-storage/issues"
 	},
 	"homepage": "https://twindev.org"
 }

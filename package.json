@@ -4,7 +4,7 @@
 	"description": "Unified packages for modelling, serving and connecting entity storage across multiple backends.",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/iotaledger/twin-entity-storage.git"
+		"url": "git+https://github.com/3sixtyglobal/twin-entity-storage.git"
 	},
 	"author": "martyn.janes@iota.org",
 	"license": "Apache-2.0",
@@ -70,7 +70,7 @@
 	},
 	"type": "module",
 	"bugs": {
-		"url": "git+https://github.com/iotaledger/twin-entity-storage/issues"
+		"url": "git+https://github.com/3sixtyglobal/twin-entity-storage/issues"
 	},
 	"homepage": "https://twindev.org"
 }
