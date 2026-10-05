@@ -39,6 +39,11 @@ export interface ICosmosDbEntityStorageConnectorConfig {
 	disableEndpointDiscovery?: boolean;
 
 	/**
+	 * Milliseconds to wait for a Cosmos DB request before timing out, defaults to the SDK value.
+	 */
+	requestTimeoutMs?: number;
+
+	/**
 	 * Milliseconds to wait for connector mutex locks before throwing.
 	 */
 	mutexTimeoutMs?: number;

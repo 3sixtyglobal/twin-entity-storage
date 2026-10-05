@@ -1,9 +1,9 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import {
-	type BulkOperationResult,
 	BulkOperationType,
 	type CompositePath,
+	type ConnectionPolicy,
 	type Container,
 	CosmosClient,
 	type FeedOptions,
@@ -112,24 +112,6 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 	private static readonly _WRITE_CONCURRENCY: number = 10;
 
 	/**
-	 * Bulk operation status codes which are transient and retried.
-	 * @internal
-	 */
-	private static readonly _BULK_RETRY_STATUS_CODES: number[] = [408, 410, 429, 449, 503];
-
-	/**
-	 * Maximum attempts for bulk operations which fail with a transient status.
-	 * @internal
-	 */
-	private static readonly _BULK_MAX_ATTEMPTS: number = 5;
-
-	/**
-	 * Base delay in milliseconds between bulk operation retries.
-	 * @internal
-	 */
-	private static readonly _BULK_RETRY_DELAY_MS: number = 250;
-
-	/**
 	 * The name for the schema.
 	 * @internal
 	 */
@@ -224,75 +206,6 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 		this._config = options.config;
 		this._mutexTimeoutMs = Coerce.integer(options.config.mutexTimeoutMs);
 		this._instanceId = RandomHelper.generateUuidV7("compact");
-	}
-
-	/**
-	 * Execute bulk operations, retrying transient failures and throwing if any operation still fails.
-	 * @param container The container to execute the operations against.
-	 * @param operations The operations to execute.
-	 * @param ignoreNotFound Treat a not found response as success, used for deletes.
-	 * @returns Nothing.
-	 * @internal
-	 */
-	private static async executeBulk(
-		container: Container,
-		operations: OperationInput[],
-		ignoreNotFound: boolean = false
-	): Promise<void> {
-		let pending = operations;
-		for (let attempt = 1; Is.arrayValue(pending); attempt++) {
-			const results = await container.items.executeBulkOperations(pending);
-			const failed = results.filter(result => {
-				const statusCode = CosmosDbEntityStorageConnector.bulkStatusCode(result);
-				if (ignoreNotFound && statusCode === 404) {
-					return false;
-				}
-				return Is.notEmpty(result.error) || !Is.integer(statusCode) || statusCode >= 400;
-			});
-
-			if (!Is.arrayValue(failed)) {
-				return;
-			}
-
-			const retryable = failed.every(result => {
-				const statusCode = CosmosDbEntityStorageConnector.bulkStatusCode(result);
-				return (
-					Is.integer(statusCode) &&
-					CosmosDbEntityStorageConnector._BULK_RETRY_STATUS_CODES.includes(statusCode)
-				);
-			});
-
-			if (!retryable || attempt >= CosmosDbEntityStorageConnector._BULK_MAX_ATTEMPTS) {
-				throw new GeneralError(
-					CosmosDbEntityStorageConnector.CLASS_NAME,
-					"bulkOperationFailed",
-					{
-						failedCount: failed.length,
-						totalCount: operations.length,
-						statusCode: CosmosDbEntityStorageConnector.bulkStatusCode(failed[0])
-					},
-					failed[0].error
-				);
-			}
-
-			const backoff = 2 ** (attempt - 1);
-			const delayMs = Math.max(
-				CosmosDbEntityStorageConnector._BULK_RETRY_DELAY_MS * backoff,
-				...failed.map(result => result.error?.retryAfterInMs ?? 0)
-			);
-			await new Promise(resolve => setTimeout(resolve, delayMs));
-			pending = failed.map(result => result.operationInput);
-		}
-	}
-
-	/**
-	 * Get the status code of a bulk operation result.
-	 * @param result The bulk operation result.
-	 * @returns The status code if one is available.
-	 * @internal
-	 */
-	private static bulkStatusCode(result: BulkOperationResult): number | undefined {
-		return result.response?.statusCode ?? Coerce.integer(result.error?.code);
 	}
 
 	/**
@@ -734,21 +647,22 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 				for (let j = 0; j < window.length; j += chunkSize) {
 					const chunk = window.slice(j, j + chunkSize);
 					sends.push(
-						CosmosDbEntityStorageConnector.executeBulk(
-							container,
-							chunk.map(
-								prepared =>
-									({
-										operationType: BulkOperationType.Upsert,
-										partitionKey: pk,
-										resourceBody: {
-											id: prepared[this._primaryKey.property] as string,
-											[CosmosDbEntityStorageConnector._PARTITION_KEY]: pk,
-											...(prepared as { [key: string]: unknown })
-										}
-									}) as OperationInput
-							)
-						)
+						(async () => {
+							await container.items.executeBulkOperations(
+								chunk.map(
+									prepared =>
+										({
+											operationType: BulkOperationType.Upsert,
+											partitionKey: pk,
+											resourceBody: {
+												id: prepared[this._primaryKey.property] as string,
+												[CosmosDbEntityStorageConnector._PARTITION_KEY]: pk,
+												...(prepared as { [key: string]: unknown })
+											}
+										}) as OperationInput
+								)
+							);
+						})()
 					);
 				}
 				await Promise.all(sends);
@@ -795,7 +709,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 						id: r.id,
 						partitionKey: pk
 					}));
-					await CosmosDbEntityStorageConnector.executeBulk(container, operations, true);
+					await container.items.executeBulkOperations(operations);
 				}
 			} while (Is.stringValue(continuationToken));
 		} catch (err) {
@@ -900,7 +814,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 				partitionKey: partitionKey ?? CosmosDbEntityStorageConnector._PARTITION_KEY_VALUE
 			}));
 
-			await CosmosDbEntityStorageConnector.executeBulk(container, operations, true);
+			await container.items.executeBulkOperations(operations);
 		} catch (err) {
 			throw new GeneralError(
 				CosmosDbEntityStorageConnector.CLASS_NAME,
@@ -1345,10 +1259,7 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 							resourceBody: rest
 						})
 					);
-					await CosmosDbEntityStorageConnector.executeBulk(
-						await destConnector.getContainer(),
-						operations
-					);
+					await (await destConnector.getContainer()).items.executeBulkOperations(operations);
 				}
 			} while (Is.stringValue(continuationToken));
 		}
@@ -1655,14 +1566,20 @@ export class CosmosDbEntityStorageConnector<T = unknown>
 			this.createClientId(),
 			this._instanceId,
 			this._mutexTimeoutMs,
-			async () =>
-				new CosmosClient({
+			async () => {
+				const connectionPolicy: ConnectionPolicy = {
+					enableEndpointDiscovery: !this._config.disableEndpointDiscovery
+				};
+				// The SDK merges with Object.assign, so only set the timeout when configured to keep its default.
+				if (Is.integer(this._config.requestTimeoutMs)) {
+					connectionPolicy.requestTimeout = this._config.requestTimeoutMs;
+				}
+				return new CosmosClient({
 					endpoint: this._config.endpoint,
 					key: this._config.key,
-					connectionPolicy: {
-						enableEndpointDiscovery: !this._config.disableEndpointDiscovery
-					}
-				})
+					connectionPolicy
+				});
+			}
 		);
 	}
 

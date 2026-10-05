@@ -36,7 +36,6 @@
 			"countFailed": "Unable to count entities",
 			"emptyFailed": "Unable to empty entity storage",
 			"removeBatchFailed": "Unable to remove batch of entities",
-			"bulkOperationFailed": "{failedCount} of {totalCount} bulk operations failed, first status code \"{statusCode}\"",
 			"teardownFailed": "Unable to teardown entity storage",
 			"finalizeMigrationFailedBootstrap": "Finalizing migration failed during bootstrap phase"
 		}

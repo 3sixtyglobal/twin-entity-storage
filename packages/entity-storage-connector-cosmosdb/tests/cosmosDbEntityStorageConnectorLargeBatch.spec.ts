@@ -23,7 +23,8 @@ function createConnector(): IEntityStorageConnector<LargeBatchTestType> {
 		entitySchema: nameof<LargeBatchTestType>(),
 		config: {
 			...TEST_COSMOS_CONFIG,
-			containerId: `${TEST_COSMOS_CONFIG.containerId}_largebatch_${Date.now()}`
+			containerId: `${TEST_COSMOS_CONFIG.containerId}_largebatch_${Date.now()}`,
+			requestTimeoutMs: 300_000
 		}
 	});
 }
