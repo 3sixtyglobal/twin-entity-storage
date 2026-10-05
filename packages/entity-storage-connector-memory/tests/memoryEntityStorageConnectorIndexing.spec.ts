@@ -172,28 +172,46 @@ describe("MemoryEntityStorageConnector", () => {
 					queryCategories.push(`cat${String(step + 1).padStart(6, "0")}`);
 				}
 
-				const startIndexed = Date.now();
+				// Warm up both connectors so connection and plan setup is not timed
+				await indexed.query({
+					property: "category",
+					value: queryCategories[0],
+					comparison: ComparisonOperator.Equals
+				});
+				await unindexed.query({
+					property: "category",
+					value: queryCategories[0],
+					comparison: ComparisonOperator.Equals
+				});
+
+				// Interleave the queries and compare medians so load spikes affect both equally
+				const indexedTimes: number[] = [];
+				const unindexedTimes: number[] = [];
 				for (const cat of queryCategories) {
+					let start = performance.now();
 					await indexed.query({
 						property: "category",
 						value: cat,
 						comparison: ComparisonOperator.Equals
 					});
-				}
-				const indexedMs = Date.now() - startIndexed;
+					indexedTimes.push(performance.now() - start);
 
-				const startUnindexed = Date.now();
-				for (const cat of queryCategories) {
+					start = performance.now();
 					await unindexed.query({
 						property: "category",
 						value: cat,
 						comparison: ComparisonOperator.Equals
 					});
+					unindexedTimes.push(performance.now() - start);
 				}
-				const unindexedMs = Date.now() - startUnindexed;
+
+				const median = (times: number[]): number =>
+					times.sort((a, b) => a - b)[Math.floor(times.length / 2)];
+				const indexedMs = median(indexedTimes);
+				const unindexedMs = median(unindexedTimes);
 
 				console.debug(
-					`indexed: ${indexedMs}ms, unindexed: ${unindexedMs}ms, improvement: ${unindexedMs - indexedMs}ms`
+					`median indexed: ${indexedMs.toFixed(2)}ms, unindexed: ${unindexedMs.toFixed(2)}ms`
 				);
 				expect(indexedMs).toBeLessThan(unindexedMs);
 			} finally {
