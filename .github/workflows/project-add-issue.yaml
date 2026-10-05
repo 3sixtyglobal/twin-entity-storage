@@ -13,9 +13,7 @@ permissions:
 
 jobs:
   add-to-project:
-    runs-on:
-      labels: ${{ github.event.repository.private && 'self-hosted-small' || 'ubuntu-latest' }}
-      group: ${{ github.event.repository.private && 'twin' || 'default' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted-small"}') || 'ubuntu-latest' }}
 
     steps:
       - uses: actions/add-to-project@v2

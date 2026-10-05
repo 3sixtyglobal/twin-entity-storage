@@ -9,9 +9,7 @@ jobs:
     # Release-please PRs are skipped here rather than via [skip ci], because the
     # production release PR's closed event must still trigger publishing.
     if: ${{ !startsWith(github.head_ref, 'release-please--') && (github.event.action == 'opened' || github.event.changes.title != null) }}
-    runs-on:
-      labels: ${{ github.event.repository.private && 'self-hosted-small' || 'ubuntu-latest' }}
-      group: ${{ github.event.repository.private && 'twin' || 'default' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted-small"}') || 'ubuntu-latest' }}
 
     steps:
       # Clone the repository to the runner
