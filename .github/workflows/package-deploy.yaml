@@ -15,6 +15,10 @@ on:
           - '🚧 prerelease (next branch)' # For prereleases (e.g., 0.1.0-next.1)
           - '🚀 production (main branch)' # For production releases (e.g., 1.0.0, 1.1.0, 1.1.1)
 
+env:
+  TWIN_GPG_EMAIL: ${{ secrets.TWIN_GPG_EMAIL }}
+  TWIN_GPG_NAME: ${{ secrets.TWIN_GPG_NAME }}
+
 jobs:
   deploy:
     runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
@@ -62,8 +66,8 @@ jobs:
       # Set git config once for all subsequent steps
       - name: Configure Git
         run: |
-          git config --global user.email "github@twindev.org"
-          git config --global user.name "TWIN GitHub Bot"
+          git config --global user.email "$TWIN_GPG_EMAIL"
+          git config --global user.name "$TWIN_GPG_NAME"
           git config --global user.signingkey "$TWIN_GPG_KEY_ID"
           git config --global commit.gpgsign true
           git config --global tag.gpgsign true

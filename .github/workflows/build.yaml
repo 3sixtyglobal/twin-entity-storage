@@ -8,12 +8,16 @@ on:
     paths-ignore:
       - '**/*.md'
       - '.github/**'
+      - '.githooks/**'
+      - 'LICENSE'
   push:
     branches:
       - next
     paths-ignore:
       - '**/*.md'
       - '.github/**'
+      - '.githooks/**'
+      - 'LICENSE'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}

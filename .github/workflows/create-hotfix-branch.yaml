@@ -18,6 +18,10 @@ on:
         required: true
         type: string
 
+env:
+  TWIN_GPG_EMAIL: ${{ secrets.TWIN_GPG_EMAIL }}
+  TWIN_GPG_NAME: ${{ secrets.TWIN_GPG_NAME }}
+
 jobs:
   create-hotfix-branch:
     name: Create Hotfix Branch
@@ -41,8 +45,8 @@ jobs:
 
       - name: Configure Git
         run: |
-          git config --global user.email "github@twindev.org"
-          git config --global user.name "TWIN GitHub Bot"
+          git config --global user.email "$TWIN_GPG_EMAIL"
+          git config --global user.name "$TWIN_GPG_NAME"
           git config --global user.signingkey "$TWIN_GPG_KEY_ID"
           git config --global commit.gpgsign true
 

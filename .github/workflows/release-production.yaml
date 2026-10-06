@@ -63,6 +63,10 @@ concurrency:
   group: production-release
   cancel-in-progress: false
 
+env:
+  TWIN_GPG_EMAIL: ${{ secrets.TWIN_GPG_EMAIL }}
+  TWIN_GPG_NAME: ${{ secrets.TWIN_GPG_NAME }}
+
 jobs:
   # When customVersion is provided, validates it against the current production
   # and prerelease manifests before any PRs are created. Checks:
@@ -183,8 +187,8 @@ jobs:
       - name: Configure Git
         if: ${{ steps.check-diff.outputs.has_changes == 'true' }}
         run: |
-          git config --global user.email "github@twindev.org"
-          git config --global user.name "TWIN GitHub Bot"
+          git config --global user.email "$TWIN_GPG_EMAIL"
+          git config --global user.name "$TWIN_GPG_NAME"
           git config --global user.signingkey "$TWIN_GPG_KEY_ID"
           git config --global commit.gpgsign true
 

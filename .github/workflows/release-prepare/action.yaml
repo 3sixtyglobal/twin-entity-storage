@@ -117,8 +117,8 @@ runs:
     - name: Configure Git
       shell: bash
       run: |
-        git config --global user.email "github@twindev.org"
-        git config --global user.name "TWIN GitHub Bot"
+        git config --global user.email "$TWIN_GPG_EMAIL"
+        git config --global user.name "$TWIN_GPG_NAME"
         git config --global user.signingkey "$TWIN_GPG_KEY_ID"
         git config --global commit.gpgsign true
         git config --global tag.gpgsign true

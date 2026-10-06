@@ -31,6 +31,10 @@ on:
         type: string
         default: ''
 
+env:
+  TWIN_GPG_EMAIL: ${{ secrets.TWIN_GPG_EMAIL }}
+  TWIN_GPG_NAME: ${{ secrets.TWIN_GPG_NAME }}
+
 jobs:
   # When customVersion is provided, validates it against the current prerelease
   # manifest before any PRs are created. Checks:
