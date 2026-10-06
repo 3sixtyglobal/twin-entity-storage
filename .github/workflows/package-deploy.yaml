@@ -12,8 +12,8 @@ on:
         required: true
         type: choice
         options:
-          - '🚧 prerelease (next branch)' # For prereleases (e.g., 0.1.0-next.1)
-          - '🚀 production (main branch)' # For production releases (e.g., 1.0.0, 1.1.0, 1.1.1)
+          - '🌱 prerelease (next branch)' # For prereleases (e.g., 0.1.0-next.1)
+          - '🌳 production (main branch)' # For production releases (e.g., 1.0.0, 1.1.0, 1.1.1)
 
 env:
   TWIN_GPG_EMAIL: ${{ secrets.TWIN_GPG_EMAIL }}

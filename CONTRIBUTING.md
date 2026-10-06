@@ -309,7 +309,7 @@ Before submitting your PR:
 
 ### Review Process
 
-1. **Automated Checks**: CI will run tests and quality checks
+1. **Automated Checks**: The `Build` workflow runs `pnpm run quality` and `pnpm run docs`, and the `PR Name Checker` workflow lints the PR title with commitlint
 2. **Code Review**: Maintainers will review your code
 3. **Feedback**: Address any requested changes
 4. **Approval**: Once approved, your PR will be merged to `next`
@@ -332,14 +332,20 @@ For development/beta releases from the `next` branch, use the **`Release Next`**
 
 1. **Start the Release Next workflow**:
    - Go to `Actions → Release Next → Run workflow`
+   - Optionally set `customVersion` (for example `0.1.0`) to reset the `next` branch to `0.1.0-next.0`, leave it blank for a normal prerelease increment
 
-2. **Review & Merge**:
+2. **Optional gate – Review the version reset PR**:
+   - Only created when `customVersion` is set and the reset produces changes
+   - Review and merge it into `next` to let the release continue
+
+3. **Review & Merge**:
    - Review the generated release PR carefully
    - Approve and merge it into `next`
 
-3. **Publishing runs automatically**:
+4. **Publishing runs automatically**:
    - Packages are published to npm with the `next` tag
    - GitHub releases are created and marked as prerelease
+   - The workspace repository is notified of the published submodule
 
 ### Production Versions
 
@@ -347,7 +353,8 @@ For stable releases to the `main` branch, use the **`Release Production`** workf
 
 1. **Trigger the Release Production workflow**:
    - Go to `Actions → Release Production → Run workflow`
-   - Select the version bump: `⬆️ promote`, `🔧 patch`, `✨ minor`, or `🚀 major`
+   - Select the version bump: `⬆️ promote next`, `🔧 patch`, `✨ minor`, or `🚀 major`
+   - Optionally set `customVersion` (for example `1.2.3`) to release an explicit version, this overrides the version bump
 
 2. **Gate 0 – Review the next-to-main PR**:
    - If `next` is ahead of `main`, the workflow creates a PR that brings the full `next` diff into `main`
@@ -367,6 +374,7 @@ For stable releases to the `main` branch, use the **`Release Production`** workf
 5. **Publishing and next-branch realignment run automatically**:
    - Packages are published to npm with the `latest` tag
    - Stable GitHub releases are created
+   - The workspace repository is notified of the published submodule
    - `Versions Prepare` is triggered on `next` automatically; review and merge the resulting PR to resume prerelease development from the published version
 
 ### Recovery: stale autorelease state
@@ -432,7 +440,7 @@ If one or more of these conditions is not met, include the fix in the next full 
 
 ### API Documentation
 
-Documentation is auto-generated from TypeScript comments using **TypeDoc**:
+Documentation is auto-generated from TypeScript comments using **TypeDoc**, run `pnpm run docs` to write it to each package's `docs/reference` folder.
 
 ### Documentation Structure
 
