@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-connector-mysql
+# @3sixty/entity-storage-connector-mysql
 
 ## Classes
 

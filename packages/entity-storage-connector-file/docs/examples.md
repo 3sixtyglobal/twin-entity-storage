@@ -8,13 +8,13 @@ Use this page to see local-file storage workflows for bootstrapping, entity life
 import {
   FileEntityStorageConnector,
   type IFileEntityStorageConnectorConstructorOptions
-} from '@twin.org/entity-storage-connector-file';
+} from '@3sixty/entity-storage-connector-file';
 import {
   ComparisonOperator,
   LogicalOperator,
   SortDirection,
   type EntityCondition
-} from '@twin.org/entity';
+} from '@3sixty/entity';
 
 interface Profile {
   id: string;

@@ -1,13 +1,13 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { Guards, Is } from "@twin.org/core";
-import { type EntityCondition, SortDirection } from "@twin.org/entity";
+import { Guards, Is } from "@3sixty/core";
+import { type EntityCondition, SortDirection } from "@3sixty/entity";
 import {
 	EntityStorageConnectorFactory,
 	type IEntityStorageComponent,
 	type IEntityStorageConnector
-} from "@twin.org/entity-storage-models";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity-storage-models";
+import { nameof } from "@3sixty/nameof";
 import type { IEntityStorageServiceConstructorOptions } from "./models/IEntityStorageServiceConstructorOptions.js";
 
 /**

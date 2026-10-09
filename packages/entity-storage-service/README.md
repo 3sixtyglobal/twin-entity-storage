@@ -5,7 +5,7 @@ This package defines the service-facing contracts and REST endpoint definitions 
 ## Installation
 
 ```shell
-npm install @twin.org/entity-storage-service
+npm install @3sixty/entity-storage-service
 ```
 
 ## Examples

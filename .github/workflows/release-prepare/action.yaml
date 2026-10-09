@@ -112,14 +112,14 @@ runs:
       shell: bash
       run: |
         echo "${{ inputs.gpg_private_key }}" | base64 --decode | gpg --import
-        echo "TWIN_GPG_KEY_ID=${{ inputs.gpg_key_id }}" >> "$GITHUB_ENV"
+        echo "ORG_GPG_KEY_ID=${{ inputs.gpg_key_id }}" >> "$GITHUB_ENV"
 
     - name: Configure Git
       shell: bash
       run: |
-        git config --global user.email "$TWIN_GPG_EMAIL"
-        git config --global user.name "$TWIN_GPG_NAME"
-        git config --global user.signingkey "$TWIN_GPG_KEY_ID"
+        git config --global user.email "$ORG_GPG_EMAIL"
+        git config --global user.name "$ORG_GPG_NAME"
+        git config --global user.signingkey "$ORG_GPG_KEY_ID"
         git config --global commit.gpgsign true
         git config --global tag.gpgsign true
 

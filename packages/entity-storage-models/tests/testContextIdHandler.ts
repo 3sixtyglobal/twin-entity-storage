@@ -1,8 +1,8 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import type { IContextIdHandler } from "@twin.org/context";
-import { GeneralError } from "@twin.org/core";
-import { nameof } from "@twin.org/nameof";
+import type { IContextIdHandler } from "@3sixty/context";
+import { GeneralError } from "@3sixty/core";
+import { nameof } from "@3sixty/nameof";
 
 /**
  * Minimal context ID handler for test use.

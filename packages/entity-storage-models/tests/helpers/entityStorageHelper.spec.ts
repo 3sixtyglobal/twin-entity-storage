@@ -1,6 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { BaseError, GeneralError } from "@twin.org/core";
+import { BaseError, GeneralError } from "@3sixty/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -9,9 +9,9 @@ import {
 	SortDirection,
 	entity,
 	property
-} from "@twin.org/entity";
-import type { EntityCondition, IComparator } from "@twin.org/entity";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity";
+import type { EntityCondition, IComparator } from "@3sixty/entity";
+import { nameof } from "@3sixty/nameof";
 import { EntityStorageHelper } from "../../src/helpers/entityStorageHelper.js";
 
 @entity()

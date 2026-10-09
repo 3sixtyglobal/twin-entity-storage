@@ -7,8 +7,8 @@ import {
 	type INoContentResponse,
 	type IRestRoute,
 	type ITag
-} from "@twin.org/api-models";
-import { Coerce, ComponentFactory, Guards, StringHelper } from "@twin.org/core";
+} from "@3sixty/api-models";
+import { Coerce, ComponentFactory, Guards, StringHelper } from "@3sixty/core";
 import type {
 	IEntityStorageComponent,
 	IEntityStorageCountRequest,
@@ -22,9 +22,9 @@ import type {
 	IEntityStorageRemoveRequest,
 	IEntityStorageSetBatchRequest,
 	IEntityStorageSetRequest
-} from "@twin.org/entity-storage-models";
-import { nameof } from "@twin.org/nameof";
-import { HttpStatusCode } from "@twin.org/web";
+} from "@3sixty/entity-storage-models";
+import { nameof } from "@3sixty/nameof";
+import { HttpStatusCode } from "@3sixty/web";
 import type { IEntityStorageRoutesExamples } from "./models/IEntityStorageRoutesExamples.js";
 
 /**

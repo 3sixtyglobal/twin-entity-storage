@@ -1,10 +1,10 @@
 {
-	"name": "@twin.org/entity-storage-connector-gcp-firestore",
-	"version": "0.11.1-next.0",
+	"name": "@3sixty/entity-storage-connector-gcp-firestore",
+	"version": "0.20.0-next.0",
 	"description": "Google Cloud Firestore connector for document-based persistence.",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/3sixtyglobal/twin-entity-storage.git",
+		"url": "git+https://github.com/3sixtyglobal/entity-storage.git",
 		"directory": "packages/entity-storage-connector-gcp-firestore"
 	},
 	"author": "cornel.filip@iota.org",
@@ -29,22 +29,22 @@
 	},
 	"dependencies": {
 		"@google-cloud/firestore": "9.2.0",
-		"@twin.org/api-models": "next",
-		"@twin.org/context": "next",
-		"@twin.org/core": "next",
-		"@twin.org/entity": "next",
-		"@twin.org/entity-storage-models": "0.11.1-next.0",
-		"@twin.org/logging-models": "next",
-		"@twin.org/nameof": "next",
+		"@3sixty/api-models": "next",
+		"@3sixty/context": "next",
+		"@3sixty/core": "next",
+		"@3sixty/entity": "next",
+		"@3sixty/entity-storage-models": "0.20.0-next.0",
+		"@3sixty/logging-models": "next",
+		"@3sixty/nameof": "next",
 		"google-auth-library": "11.1.0"
 	},
 	"devDependencies": {
-		"@twin.org/entity-storage-connector-memory": "0.11.1-next.0",
-		"@twin.org/logging-connector-entity-storage": "next",
-		"@twin.org/logging-service": "next",
-		"@twin.org/nameof-transformer": "next",
-		"@twin.org/nameof-vitest-plugin": "next",
-		"@twin.org/validate-locales": "next",
+		"@3sixty/entity-storage-connector-memory": "0.20.0-next.0",
+		"@3sixty/logging-connector-entity-storage": "next",
+		"@3sixty/logging-service": "next",
+		"@3sixty/nameof-transformer": "next",
+		"@3sixty/nameof-vitest-plugin": "next",
+		"@3sixty/validate-locales": "next",
 		"@vitest/coverage-v8": "5.0.1",
 		"concurrently": "10.0.5",
 		"copyfiles": "2.4.1",
@@ -89,7 +89,7 @@
 		"integration"
 	],
 	"bugs": {
-		"url": "git+https://github.com/3sixtyglobal/twin-entity-storage/issues"
+		"url": "git+https://github.com/3sixtyglobal/entity-storage/issues"
 	},
-	"homepage": "https://twindev.org"
+	"homepage": "https://3sixty.global"
 }

@@ -1,13 +1,13 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { BaseRestClient } from "@twin.org/api-core";
+import { BaseRestClient } from "@3sixty/api-core";
 import {
 	HttpParameterHelper,
 	type IBaseRestClientConfig,
 	type INoContentResponse
-} from "@twin.org/api-models";
-import { Coerce, Guards } from "@twin.org/core";
-import type { EntityCondition, SortDirection } from "@twin.org/entity";
+} from "@3sixty/api-models";
+import { Coerce, Guards } from "@3sixty/core";
+import type { EntityCondition, SortDirection } from "@3sixty/entity";
 import type {
 	IEntityStorageComponent,
 	IEntityStorageCountRequest,
@@ -21,9 +21,9 @@ import type {
 	IEntityStorageRemoveRequest,
 	IEntityStorageSetBatchRequest,
 	IEntityStorageSetRequest
-} from "@twin.org/entity-storage-models";
-import { nameof } from "@twin.org/nameof";
-import { HttpMethod } from "@twin.org/web";
+} from "@3sixty/entity-storage-models";
+import { nameof } from "@3sixty/nameof";
+import { HttpMethod } from "@3sixty/web";
 
 /**
  * Client for performing entity storage through to REST endpoints.

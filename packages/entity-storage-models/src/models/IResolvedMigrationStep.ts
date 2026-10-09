@@ -1,6 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import type { IEntitySchemaProperty } from "@twin.org/entity";
+import type { IEntitySchemaProperty } from "@3sixty/entity";
 import type { EntityPropertyRemover } from "./entityPropertyRemover.js";
 import type { EntityPropertyTransformer } from "./entityPropertyTransformer.js";
 import type { EntityTransformer } from "./entityTransformer.js";

@@ -1,7 +1,7 @@
 {
-	"title": "TWIN - Test Endpoints",
+	"title": "3Sixty - Test Endpoints",
 	"version": "1.0.0",
-	"description": "REST API for TWIN - Test Endpoints.",
+	"description": "REST API for 3Sixty - Test Endpoints.",
 	"licenseName": "Apache 2.0 License",
 	"licenseUrl": "https://opensource.org/licenses/Apache-2.0",
 	"servers": ["https://localhost"],

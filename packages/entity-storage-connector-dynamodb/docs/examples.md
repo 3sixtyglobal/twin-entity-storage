@@ -8,13 +8,13 @@ These examples show a complete flow from connector setup through reads, writes, 
 import {
   DynamoDbEntityStorageConnector,
   type IDynamoDbEntityStorageConnectorConstructorOptions
-} from '@twin.org/entity-storage-connector-dynamodb';
+} from '@3sixty/entity-storage-connector-dynamodb';
 import {
   ComparisonOperator,
   LogicalOperator,
   SortDirection,
   type EntityCondition
-} from '@twin.org/entity';
+} from '@3sixty/entity';
 
 interface Profile {
   id: string;
@@ -74,7 +74,7 @@ await connector.remove('profile-1');
 ```
 
 ```typescript
-import { DynamoDbEntityStorageConnector } from '@twin.org/entity-storage-connector-dynamodb';
+import { DynamoDbEntityStorageConnector } from '@3sixty/entity-storage-connector-dynamodb';
 
 interface Profile {
   id: string;

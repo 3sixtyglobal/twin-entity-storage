@@ -1,6 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { HeaderTypes, HttpStatusCode, MimeTypes } from "@twin.org/web";
+import { HeaderTypes, HttpStatusCode, MimeTypes } from "@3sixty/web";
 
 /**
  * Minimal 204 No-Content response accepted by BaseRestClient.

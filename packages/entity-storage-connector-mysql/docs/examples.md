@@ -8,13 +8,13 @@ This page focuses on full connector lifecycle work, from initial bootstrap and e
 import {
   MySqlEntityStorageConnector,
   type IMySqlEntityStorageConnectorConstructorOptions
-} from '@twin.org/entity-storage-connector-mysql';
+} from '@3sixty/entity-storage-connector-mysql';
 import {
   ComparisonOperator,
   LogicalOperator,
   SortDirection,
   type EntityCondition
-} from '@twin.org/entity';
+} from '@3sixty/entity';
 
 interface Profile {
   id: string;
@@ -74,7 +74,7 @@ await connector.remove('profile-1');
 ```
 
 ```typescript
-import { MySqlEntityStorageConnector } from '@twin.org/entity-storage-connector-mysql';
+import { MySqlEntityStorageConnector } from '@3sixty/entity-storage-connector-mysql';
 
 interface Profile {
   id: string;

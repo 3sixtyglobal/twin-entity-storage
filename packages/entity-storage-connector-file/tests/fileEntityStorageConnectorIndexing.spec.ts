@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0.
 import os from "node:os";
 import path from "node:path";
-import { ContextIdStore } from "@twin.org/context";
+import { ContextIdStore } from "@3sixty/context";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -11,8 +11,8 @@ import {
 	SortDirection,
 	entity,
 	property
-} from "@twin.org/entity";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity";
+import { nameof } from "@3sixty/nameof";
 import { FileEntityStorageConnector } from "../src/fileEntityStorageConnector.js";
 
 // File connector performs no indexing; all queries are full scans over the filesystem.

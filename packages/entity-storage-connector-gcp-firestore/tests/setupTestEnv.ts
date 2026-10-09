@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import path from "node:path";
-import { Coerce, Guards, Is } from "@twin.org/core";
+import { Coerce, Guards, Is } from "@3sixty/core";
 import * as dotenv from "dotenv";
 import type { IFirestoreEntityStorageConnectorConfig } from "../src/models/IFirestoreEntityStorageConnectorConfig.js";
 

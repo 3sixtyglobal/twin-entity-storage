@@ -6,13 +6,13 @@ import {
 	ContextIdKeys,
 	ContextIdStore,
 	type IContextIds
-} from "@twin.org/context";
-import { BaseError, ComponentFactory, GeneralError, Is } from "@twin.org/core";
+} from "@3sixty/context";
+import { BaseError, ComponentFactory, GeneralError, Is } from "@3sixty/core";
 import {
 	EntitySchemaPropertyType,
 	type IEntitySchemaDiff,
 	type IEntitySchemaProperty
-} from "@twin.org/entity";
+} from "@3sixty/entity";
 import { EntityStorageHelper } from "../../src/helpers/entityStorageHelper.js";
 import { MigrationHelper } from "../../src/helpers/migrationHelper.js";
 import type { IEntityStorageConnector } from "../../src/models/IEntityStorageConnector.js";

@@ -1,10 +1,10 @@
 {
-	"name": "@twin.org/entity-storage",
+	"name": "@3sixty/entity-storage",
 	"version": "0.0.0",
 	"description": "Unified packages for modelling, serving and connecting entity storage across multiple backends.",
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/3sixtyglobal/twin-entity-storage.git"
+		"url": "git+https://github.com/3sixtyglobal/entity-storage.git"
 	},
 	"author": "martyn.janes@iota.org",
 	"license": "Apache-2.0",
@@ -35,7 +35,7 @@
 		"quality:no-test": "pnpm run format && concurrently -g -n lint,compile \"pnpm run lint\" \"pnpm run compile\" && pnpm run validate-locales",
 		"docs": "pnpm -r run docs",
 		"package:update-latest": "pnpm update --recursive --interactive --latest",
-		"package:update-framework": "pnpm update --recursive --no-save \"@twin.org/*\"",
+		"package:update-framework": "pnpm update --recursive --no-save \"@3sixty/*\"",
 		"package:update": "pnpm run package:update-latest && pnpm run package:update-framework",
 		"local-link": "node ./scripts/local-link.mjs",
 		"commitlint": "commitlint --edit",
@@ -70,7 +70,7 @@
 	},
 	"type": "module",
 	"bugs": {
-		"url": "git+https://github.com/3sixtyglobal/twin-entity-storage/issues"
+		"url": "git+https://github.com/3sixtyglobal/entity-storage/issues"
 	},
-	"homepage": "https://twindev.org"
+	"homepage": "https://3sixty.global"
 }

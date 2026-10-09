@@ -5,7 +5,7 @@ This package provides a client layer for calling storage service endpoints throu
 ## Installation
 
 ```shell
-npm install @twin.org/entity-storage-rest-client
+npm install @3sixty/entity-storage-rest-client
 ```
 
 ## Examples

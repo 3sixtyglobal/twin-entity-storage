@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-models
+# @3sixty/entity-storage-models
 
 ## Classes
 

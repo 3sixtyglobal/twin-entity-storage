@@ -1,6 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@3sixty/context";
 import {
 	BaseError,
 	Coerce,
@@ -10,16 +10,16 @@ import {
 	Guards,
 	Is,
 	ObjectHelper
-} from "@twin.org/core";
-import { Blake2b } from "@twin.org/crypto";
+} from "@3sixty/core";
+import { Blake2b } from "@3sixty/crypto";
 import {
 	EntitySchemaDiffHelper,
 	EntitySchemaHelper,
 	EntitySchemaPropertyType,
 	type IEntitySchemaDiff
-} from "@twin.org/entity";
-import type { ILoggingComponent } from "@twin.org/logging-models";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity";
+import type { ILoggingComponent } from "@3sixty/logging-models";
+import { nameof } from "@3sixty/nameof";
 import type { EntityPropertyRemover } from "../models/entityPropertyRemover.js";
 import type { EntityPropertyTransformer } from "../models/entityPropertyTransformer.js";
 import type { IEntityStorageConnector } from "../models/IEntityStorageConnector.js";

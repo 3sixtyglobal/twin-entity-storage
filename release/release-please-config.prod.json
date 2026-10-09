@@ -8,6 +8,7 @@
 	"release-type": "node",
 	"initial-version": "0.0.1",
 	"versioning": "default",
+	"last-release-sha": "4a3d7bd4dc9c7c52114e3b6dea1c9704d44922ab",
 	"packages": {
 		"packages/entity-storage-models": {
 			"package-name": "entity-storage-models",

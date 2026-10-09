@@ -8,13 +8,13 @@ Use these snippets to work with table-backed storage first, then add a view conn
 import {
   ScyllaDBTableConnector,
   type IScyllaDBTableConnectorConstructorOptions
-} from '@twin.org/entity-storage-connector-scylladb';
+} from '@3sixty/entity-storage-connector-scylladb';
 import {
   ComparisonOperator,
   LogicalOperator,
   SortDirection,
   type EntityCondition
-} from '@twin.org/entity';
+} from '@3sixty/entity';
 
 interface Profile {
   id: string;
@@ -79,7 +79,7 @@ await connector.dropTable();
 import {
   ScyllaDBViewConnector,
   type IScyllaDBViewConnectorConstructorOptions
-} from '@twin.org/entity-storage-connector-scylladb';
+} from '@3sixty/entity-storage-connector-scylladb';
 
 interface ProfileView {
   id: string;

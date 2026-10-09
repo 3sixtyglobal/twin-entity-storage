@@ -1,6 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import type { EntityCondition, SortDirection } from "@twin.org/entity";
+import type { EntityCondition, SortDirection } from "@3sixty/entity";
 
 /**
  * Interface describing how a primary entity is joined to the entities of a second connector.

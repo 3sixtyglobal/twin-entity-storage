@@ -1,4 +1,4 @@
-# TWIN Entity Storage
+# 3Sixty Entity Storage
 
 This repository provides a unified entity storage ecosystem that combines shared models, service contracts, client access and backend implementations behind consistent interfaces. The aim is to let teams build against stable contracts while selecting the persistence approach that best fits local development, cloud services and production operations.
 

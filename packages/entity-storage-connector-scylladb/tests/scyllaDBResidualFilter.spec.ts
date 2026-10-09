@@ -1,15 +1,15 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 
-import { ContextIdStore } from "@twin.org/context";
+import { ContextIdStore } from "@3sixty/context";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
 	EntitySchemaHelper,
 	entity,
 	property
-} from "@twin.org/entity";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity";
+import { nameof } from "@3sixty/nameof";
 import { TEST_SCYLLA_CONFIG } from "./setupTestEnv.js";
 import { ScyllaDBTableConnector } from "../src/scyllaDBTableConnector.js";
 

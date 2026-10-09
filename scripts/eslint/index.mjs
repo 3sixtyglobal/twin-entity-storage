@@ -5,7 +5,7 @@ import { noMultipleDeclarationsPlugin } from './eslint-plugin-no-multiple-declar
 import { repoStructurePlugin } from './eslint-plugin-repo-structure.mjs';
 import { requireInternalOnPrivatePlugin } from './eslint-plugin-require-internal-on-private-methods.mjs';
 
-export const twinOrgPlugin = {
+export const customLintPlugin = {
 	rules: {
 		...repoStructurePlugin.rules,
 		...noMultipleDeclarationsPlugin.rules,

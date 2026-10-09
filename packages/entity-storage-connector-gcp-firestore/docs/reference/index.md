@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-connector-gcp-firestore
+# @3sixty/entity-storage-connector-gcp-firestore
 
 ## Classes
 

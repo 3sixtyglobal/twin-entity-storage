@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0.
 import os from "node:os";
 import path from "node:path";
-import { ContextIdStore } from "@twin.org/context";
-import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
-import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { nameof } from "@twin.org/nameof";
+import { ContextIdStore } from "@3sixty/context";
+import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@3sixty/entity";
+import type { IEntityStorageConnector } from "@3sixty/entity-storage-models";
+import { nameof } from "@3sixty/nameof";
 import { FileEntityStorageConnector } from "../src/fileEntityStorageConnector.js";
 
 // File connector serialises the entire store as a single JSON file; 1M rows would produce

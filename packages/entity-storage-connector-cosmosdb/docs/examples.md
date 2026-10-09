@@ -8,13 +8,13 @@ Use these snippets to configure a connector, work with common entity operations,
 import {
   CosmosDbEntityStorageConnector,
   type ICosmosDbEntityStorageConnectorConstructorOptions
-} from '@twin.org/entity-storage-connector-cosmosdb';
+} from '@3sixty/entity-storage-connector-cosmosdb';
 import {
   ComparisonOperator,
   LogicalOperator,
   SortDirection,
   type EntityCondition
-} from '@twin.org/entity';
+} from '@3sixty/entity';
 
 interface Profile {
   id: string;
@@ -73,7 +73,7 @@ await connector.remove('profile-1');
 ```
 
 ```typescript
-import { CosmosDbEntityStorageConnector } from '@twin.org/entity-storage-connector-cosmosdb';
+import { CosmosDbEntityStorageConnector } from '@3sixty/entity-storage-connector-cosmosdb';
 
 interface Profile {
   id: string;

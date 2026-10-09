@@ -13,9 +13,9 @@
  * the links into node_modules/.pnpm resolve to the local package too.
  *
  * You can use wildcards to link multiple packages with similar names.
- *    pnpm run local-link "@twin.org/engine*"
+ *    pnpm run local-link "@3sixty/engine*"
  * or to link all packages in the current repo
- *    pnpm run local-link "@twin.org//*"
+ *    pnpm run local-link "@3sixty//*"
  *
  * Usage:
  *    pnpm run local-link <package-name>

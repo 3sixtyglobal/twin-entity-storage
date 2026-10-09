@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-connector-cosmosdb
+# @3sixty/entity-storage-connector-cosmosdb
 
 ## Classes
 

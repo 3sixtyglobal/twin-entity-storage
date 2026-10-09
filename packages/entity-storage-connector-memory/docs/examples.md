@@ -5,13 +5,13 @@ Use these snippets to perform fast in-memory storage operations during developme
 ## MemoryEntityStorageConnector
 
 ```typescript
-import { MemoryEntityStorageConnector } from '@twin.org/entity-storage-connector-memory';
+import { MemoryEntityStorageConnector } from '@3sixty/entity-storage-connector-memory';
 import {
   ComparisonOperator,
   LogicalOperator,
   SortDirection,
   type EntityCondition
-} from '@twin.org/entity';
+} from '@3sixty/entity';
 
 interface Profile {
   id: string;
@@ -61,7 +61,7 @@ await connector.remove('profile-1');
 ```
 
 ```typescript
-import { MemoryEntityStorageConnector } from '@twin.org/entity-storage-connector-memory';
+import { MemoryEntityStorageConnector } from '@3sixty/entity-storage-connector-memory';
 
 interface Profile {
   id: string;

@@ -64,8 +64,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  TWIN_GPG_EMAIL: ${{ secrets.TWIN_GPG_EMAIL }}
-  TWIN_GPG_NAME: ${{ secrets.TWIN_GPG_NAME }}
+  ORG_GPG_EMAIL: ${{ secrets.ORG_GPG_EMAIL }}
+  ORG_GPG_NAME: ${{ secrets.ORG_GPG_NAME }}
 
 jobs:
   # When customVersion is provided, validates it against the current production
@@ -77,7 +77,7 @@ jobs:
   validate-custom-version:
     name: 'Guard: Validate custom version'
     if: github.event_name == 'workflow_dispatch' && inputs.customVersion != ''
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     timeout-minutes: 5
     permissions:
@@ -117,7 +117,7 @@ jobs:
       (needs.validate-custom-version.result == 'success' || needs.validate-custom-version.result == 'skipped')
     env:
       SOURCE_BRANCH: ${{ inputs.hotfixBranch || 'next' }}
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     timeout-minutes: 15
     permissions:
@@ -133,7 +133,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          token: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
       - name: Validate hotfix inputs
         if: ${{ inputs.hotfixBranch != '' }}
@@ -181,15 +181,15 @@ jobs:
       - name: Import GPG key
         if: ${{ steps.check-diff.outputs.has_changes == 'true' }}
         run: |
-          echo "${{ secrets.TWIN_GPG_PRIVATE_KEY }}" | base64 --decode | gpg --import
-          echo "TWIN_GPG_KEY_ID=${{ secrets.TWIN_GPG_KEY_ID }}" >> "$GITHUB_ENV"
+          echo "${{ secrets.ORG_GPG_PRIVATE_KEY }}" | base64 --decode | gpg --import
+          echo "ORG_GPG_KEY_ID=${{ secrets.ORG_GPG_KEY_ID }}" >> "$GITHUB_ENV"
 
       - name: Configure Git
         if: ${{ steps.check-diff.outputs.has_changes == 'true' }}
         run: |
-          git config --global user.email "$TWIN_GPG_EMAIL"
-          git config --global user.name "$TWIN_GPG_NAME"
-          git config --global user.signingkey "$TWIN_GPG_KEY_ID"
+          git config --global user.email "$ORG_GPG_EMAIL"
+          git config --global user.name "$ORG_GPG_NAME"
+          git config --global user.signingkey "$ORG_GPG_KEY_ID"
           git config --global commit.gpgsign true
 
       - name: Create merge branch
@@ -238,12 +238,12 @@ jobs:
         run: |
           gh pr review ${{ steps.create-pr.outputs.pr_number }} --approve
         env:
-          GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
       - name: Cleanup GPG key
         if: always()
         run: |
-          FINGERPRINT=$(gpg --list-secret-keys --with-colons "$TWIN_GPG_KEY_ID" | awk -F: '/fpr:/ {print $10}' | head -1)
+          FINGERPRINT=$(gpg --list-secret-keys --with-colons "$ORG_GPG_KEY_ID" | awk -F: '/fpr:/ {print $10}' | head -1)
           if [ -n "$FINGERPRINT" ]; then
             gpg --batch --yes --delete-secret-keys "$FINGERPRINT" || true
             gpg --batch --yes --delete-keys "$FINGERPRINT" || true
@@ -258,7 +258,7 @@ jobs:
       !cancelled() &&
       needs.merge-next-to-main.result == 'success' &&
       needs.merge-next-to-main.outputs.has_changes == 'true'
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     timeout-minutes: 360
     permissions:
@@ -279,7 +279,7 @@ jobs:
           success_message: PR #__PR_NUMBER__ merged. Advancing to version preparation.
           closed_error_title: Gate Failed
           closed_error_message: PR #__PR_NUMBER__ (__PR_URL__) was closed without merging. Production release aborted.
-          github_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          github_token: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
   # Runs the Versions Prepare steps inline on main and creates the alignment PR.
   prepare-main:
@@ -292,7 +292,7 @@ jobs:
       (needs.validate-custom-version.result == 'success' || needs.validate-custom-version.result == 'skipped') &&
       (needs.merge-next-to-main.result == 'success' || needs.merge-next-to-main.result == 'skipped') &&
       (needs.gate-next-to-main.result == 'success' || needs.gate-next-to-main.result == 'skipped')
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     timeout-minutes: 90
     permissions:
@@ -308,7 +308,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          token: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
       - name: Resolve semver type
         id: resolve-semver
@@ -342,11 +342,11 @@ jobs:
           branch: main
           semver_type: ${{ steps.resolve-semver.outputs.semver_type }}
           custom_version: ${{ inputs.customVersion }}
-          gpg_private_key: ${{ secrets.TWIN_GPG_PRIVATE_KEY }}
-          gpg_key_id: ${{ secrets.TWIN_GPG_KEY_ID }}
-          test_env_vars: ${{ secrets.TWIN_TEST_ENV_VARS }}
+          gpg_private_key: ${{ secrets.ORG_GPG_PRIVATE_KEY }}
+          gpg_key_id: ${{ secrets.ORG_GPG_KEY_ID }}
+          test_env_vars: ${{ secrets.ORG_TEST_ENV_VARS }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          release_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          release_token: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
       - name: Announce main alignment PR
         if: ${{ steps.versions-prepare.outputs.has_changes == 'true' && steps.versions-prepare.outputs.pr_url != '' }}
@@ -369,7 +369,7 @@ jobs:
       !cancelled() &&
       needs.prepare-main.result == 'success' &&
       needs.prepare-main.outputs.has_changes == 'true'
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     timeout-minutes: 360
     permissions:
@@ -391,7 +391,7 @@ jobs:
           closed_error_title: Gate Failed
           closed_error_message: PR #__PR_NUMBER__ (__PR_URL__) was closed without merging. Production release aborted.
           closed_follow_up: Re-run this workflow to restart.
-          github_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          github_token: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
   # Maps the semver input to the target branch and semver strategy, then runs
   # the release-prepare composite directly to create the release PR. Runs
@@ -415,7 +415,7 @@ jobs:
       (needs.gate-next-to-main.result == 'success' || needs.gate-next-to-main.result == 'skipped') &&
       (needs.prepare-main.result == 'success' || needs.prepare-main.result == 'skipped') &&
       (needs.gate-main-alignment.result == 'success' || needs.gate-main-alignment.result == 'skipped')
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     timeout-minutes: 60
     permissions:
@@ -464,10 +464,10 @@ jobs:
         with:
           branch: ${{ steps.resolve-release.outputs.branch }}
           semver_type: ${{ steps.resolve-release.outputs.semver_type }}
-          gpg_private_key: ${{ secrets.TWIN_GPG_PRIVATE_KEY }}
-          gpg_key_id: ${{ secrets.TWIN_GPG_KEY_ID }}
+          gpg_private_key: ${{ secrets.ORG_GPG_PRIVATE_KEY }}
+          gpg_key_id: ${{ secrets.ORG_GPG_KEY_ID }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          release_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          release_token: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
       - name: Label release PR as hotfix
         if: ${{ inputs.hotfixBranch != '' && steps.release-prepare.outputs.pr_number != '' }}
@@ -477,7 +477,7 @@ jobs:
           # REST endpoint, not `gh pr edit`: the latter needs read:org scope on the token.
           gh api "repos/${{ github.repository }}/issues/${{ steps.release-prepare.outputs.pr_number }}/labels" -f "labels[]=hotfix"
         env:
-          GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
       - name: Announce release PR
         if: ${{ steps.release-prepare.outputs.pr_url != '' }}
@@ -495,7 +495,7 @@ jobs:
       !cancelled() &&
       needs.prepare-release.result == 'success' &&
       needs.prepare-release.outputs.pr_number != ''
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     timeout-minutes: 360
     permissions:
@@ -522,7 +522,7 @@ jobs:
           closed_error_title: Gate Failed
           closed_error_message: Release PR #__PR_NUMBER__ (__PR_URL__) was closed without merging. Publishing aborted.
           closed_follow_up: "To recover: remove the 'autorelease: pending' label from the PR, then re-run this workflow."
-          github_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          github_token: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
   # Prints the final handoff state once both gates have passed.
   # Publishing and next-branch realignment are already underway via the
@@ -531,7 +531,7 @@ jobs:
     name: 'Production release handoff complete'
     needs: [merge-next-to-main, prepare-main, prepare-release, gate-release-pr]
     if: github.event_name == 'workflow_dispatch' && always() && !cancelled() && needs.gate-release-pr.result == 'success'
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     permissions:
       actions: read
@@ -544,7 +544,7 @@ jobs:
           # a re-dispatch would find no diff and proceed without the branch.
           gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/${{ inputs.hotfixBranch }}" && echo "Deleted ${{ inputs.hotfixBranch }}" || echo "::warning::Could not delete ${{ inputs.hotfixBranch }} — remove it manually."
         env:
-          GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
       - name: Print release summary
         env:
@@ -610,7 +610,7 @@ jobs:
     if: >-
       github.event.pull_request.merged == true &&
       contains(github.event.pull_request.labels.*.name, 'autorelease: pending')
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     permissions:
       contents: read
@@ -664,7 +664,7 @@ jobs:
   # Only runs on the pull_request path; 'later phase only' is the fallback name shown on workflow_dispatch where this job is skipped.
   publish-packages:
     name: Publish Package (${{ matrix.package || 'later phase only' }})
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     permissions:
       contents: read
@@ -685,7 +685,7 @@ jobs:
       - name: Load Test Environment Variables
         shell: bash
         env:
-          TEST_ENV_VARS: ${{ secrets.TWIN_TEST_ENV_VARS }}
+          TEST_ENV_VARS: ${{ secrets.ORG_TEST_ENV_VARS }}
         run: |
           while IFS= read -r line; do
             [[ -z "$line" ]] && continue
@@ -707,7 +707,7 @@ jobs:
         uses: ./.github/workflows/setup-test-env
         with:
           package: ${{ matrix.package }}
-          test_env_vars: ${{ secrets.TWIN_TEST_ENV_VARS }}
+          test_env_vars: ${{ secrets.ORG_TEST_ENV_VARS }}
 
       - name: Remove Mono-Repo Node Modules
         run: |
@@ -770,11 +770,10 @@ jobs:
             echo "Package is marked as private, skipping publication"
             echo "published=false" >> $GITHUB_OUTPUT
           else
+            # Authenticates with npm trusted publishing (OIDC via the job's id-token permission).
             npm publish "${{ steps.pack_npm_package.outputs.tarball_filename }}" --access public --tag latest
             echo "published=true" >> $GITHUB_OUTPUT
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.TWIN_NPM_TOKEN }}
 
       - name: Wait for package to be available on npm
         if: steps.publish_npm_package.outputs.published == 'true'
@@ -809,7 +808,7 @@ jobs:
   # Creates GitHub releases from the production manifest after all packages are on npm.
   publish-gh-releases:
     name: Publish GitHub Releases
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     permissions:
       contents: read
@@ -840,21 +839,21 @@ jobs:
             --manifest-file=release/release-please-manifest.prod.json \
             --repo-url=${{ github.repository }} \
             --target-branch=main \
-            --token=${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+            --token=${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
-  # Triggers twin-workspace to update its submodule pointer to the new main SHA.
+  # Triggers workspace-core to update its submodule pointer to the new main SHA.
   notify-workspace:
     name: Notify Workspace
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     needs: [process-workspaces, publish-gh-releases]
 
     steps:
       - name: Dispatch submodule change to workspace
         env:
-          GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
         run: |
-          gh api repos/3sixtyglobal/twin-workspace/dispatches \
+          gh api repos/3sixtyglobal/workspace-core/dispatches \
             --method POST \
             --input - <<EOF
           {
@@ -874,7 +873,7 @@ jobs:
   # in-flight development).
   realign-next:
     name: Realign Next Branch
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     needs: [process-workspaces, notify-workspace]
     permissions:
@@ -890,7 +889,7 @@ jobs:
       - name: Checkout workflow ref
         uses: actions/checkout@v6
         with:
-          token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          token: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
       - name: Versions Prepare for next
         id: versions-prepare
@@ -899,18 +898,18 @@ jobs:
           branch: next
           # semver_type intentionally omitted — composite defaults to prerelease, always correct post-release
           hotfix: ${{ contains(github.event.pull_request.labels.*.name, 'hotfix') && 'true' || 'false' }}
-          gpg_private_key: ${{ secrets.TWIN_GPG_PRIVATE_KEY }}
-          gpg_key_id: ${{ secrets.TWIN_GPG_KEY_ID }}
-          test_env_vars: ${{ secrets.TWIN_TEST_ENV_VARS }}
+          gpg_private_key: ${{ secrets.ORG_GPG_PRIVATE_KEY }}
+          gpg_key_id: ${{ secrets.ORG_GPG_KEY_ID }}
+          test_env_vars: ${{ secrets.ORG_TEST_ENV_VARS }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          release_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          release_token: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
       - name: Enable auto-merge on next alignment PR
         if: ${{ steps.versions-prepare.outputs.pr_number != '' }}
         run: |
           gh pr merge ${{ steps.versions-prepare.outputs.pr_number }} --auto --squash
         env:
-          GH_TOKEN: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
   # Polls until the realignment PR for the next branch is merged. The PR is
   # pre-approved and auto-merge is enabled, so it merges as soon as all
@@ -919,7 +918,7 @@ jobs:
     name: 'Gate: Merge next alignment PR'
     needs: realign-next
     if: ${{ needs.realign-next.outputs.has_changes == 'true' }}
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     timeout-minutes: 360
     permissions:
@@ -941,7 +940,7 @@ jobs:
           closed_error_title: Gate Failed
           closed_error_message: Next alignment PR #__PR_NUMBER__ (__PR_URL__) was closed without merging. Next branch realignment incomplete.
           closed_follow_up: Re-run the Realign Next Branch job or manually merge the next alignment PR.
-          github_token: ${{ secrets.TWIN_GHA_RELEASE_TOKEN }}
+          github_token: ${{ secrets.ORG_GHA_RELEASE_TOKEN }}
 
       - name: Workflow complete
         run: echo "::notice title=Workflow Complete::Production release finished. Packages published to npm, GitHub releases created, and next branch realigned."

@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-connector-dynamodb
+# @3sixty/entity-storage-connector-dynamodb
 
 ## Classes
 

@@ -10,6 +10,7 @@
 	"versioning": "prerelease",
 	"prerelease": true,
 	"prerelease-type": "next",
+	"last-release-sha": "73b085ce6b5700997dea138bdc8972bfeeefef8b",
 	"packages": {
 		"packages/entity-storage-models": {
 			"package-name": "entity-storage-models",

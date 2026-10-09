@@ -5,8 +5,8 @@ import {
 	HealthStatus,
 	type IHealth,
 	type IHealthProviderComponent
-} from "@twin.org/api-models";
-import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
+} from "@3sixty/api-models";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@3sixty/context";
 import {
 	BaseError,
 	Coerce,
@@ -21,7 +21,7 @@ import {
 	ObjectHelper,
 	RandomHelper,
 	Validation
-} from "@twin.org/core";
+} from "@3sixty/core";
 import {
 	ComparisonOperator,
 	type EntityCondition,
@@ -33,7 +33,7 @@ import {
 	type IEntitySchemaProperty,
 	LogicalOperator,
 	SortDirection
-} from "@twin.org/entity";
+} from "@3sixty/entity";
 import {
 	ConnectionHelper,
 	EntityStorageHelper,
@@ -43,9 +43,9 @@ import {
 	type IMigrationOptions,
 	IndexHelper,
 	MigrationHelper
-} from "@twin.org/entity-storage-models";
-import type { ILoggingComponent } from "@twin.org/logging-models";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity-storage-models";
+import type { ILoggingComponent } from "@3sixty/logging-models";
+import { nameof } from "@3sixty/nameof";
 import postgres, { type ParameterOrJSON } from "postgres";
 import type { IPostgreSqlEntityStorageConnectorConfig } from "./models/IPostgreSqlEntityStorageConnectorConfig.js";
 import type { IPostgreSqlEntityStorageConnectorConstructorOptions } from "./models/IPostgreSqlEntityStorageConnectorConstructorOptions.js";

@@ -5,7 +5,7 @@ This package defines the shared domain models that standardise storage contracts
 ## Installation
 
 ```shell
-npm install @twin.org/entity-storage-models
+npm install @3sixty/entity-storage-models
 ```
 
 ## Examples

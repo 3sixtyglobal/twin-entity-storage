@@ -8,13 +8,13 @@ These examples cover setup, strongly typed CRUD access, filtered query calls, an
 import {
   FirestoreEntityStorageConnector,
   type IFirestoreEntityStorageConnectorConstructorOptions
-} from '@twin.org/entity-storage-connector-gcp-firestore';
+} from '@3sixty/entity-storage-connector-gcp-firestore';
 import {
   ComparisonOperator,
   LogicalOperator,
   SortDirection,
   type EntityCondition
-} from '@twin.org/entity';
+} from '@3sixty/entity';
 
 interface Profile {
   id: string;
@@ -72,7 +72,7 @@ await connector.remove('profile-1');
 ```
 
 ```typescript
-import { FirestoreEntityStorageConnector } from '@twin.org/entity-storage-connector-gcp-firestore';
+import { FirestoreEntityStorageConnector } from '@3sixty/entity-storage-connector-gcp-firestore';
 
 interface Profile {
   id: string;

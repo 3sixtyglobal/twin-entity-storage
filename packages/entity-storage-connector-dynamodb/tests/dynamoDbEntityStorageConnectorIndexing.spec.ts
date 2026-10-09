@@ -3,8 +3,7 @@
 
 // DynamoDB GSIs are required by the connector's query routing; deleting a GSI causes
 // the connector to throw rather than fall back to a scan.
-import { DynamoDB } from "@aws-sdk/client-dynamodb";
-import { ContextIdStore } from "@twin.org/context";
+import { ContextIdStore } from "@3sixty/context";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -13,9 +12,10 @@ import {
 	SortDirection,
 	entity,
 	property
-} from "@twin.org/entity";
-import { IndexHelper } from "@twin.org/entity-storage-models";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity";
+import { IndexHelper } from "@3sixty/entity-storage-models";
+import { nameof } from "@3sixty/nameof";
+import { DynamoDB } from "@aws-sdk/client-dynamodb";
 import { TEST_DYNAMODB_CONFIG } from "./setupTestEnv.js";
 import { DynamoDbEntityStorageConnector } from "../src/dynamoDbEntityStorageConnector.js";
 

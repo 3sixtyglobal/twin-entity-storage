@@ -17,7 +17,7 @@ import unicornPlugin from 'eslint-plugin-unicorn';
 import unusedImportsPlugin from 'eslint-plugin-unused-imports';
 import globals from 'globals';
 import { fileExists } from './scripts/common.mjs';
-import { twinOrgPlugin } from './scripts/eslint/index.mjs';
+import { customLintPlugin } from './scripts/eslint/index.mjs';
 
 let customModule;
 if (await fileExists('./eslint.config-custom.js')) {
@@ -136,7 +136,7 @@ const jsRules = {
 			patterns: [
 				{
 					group: [
-						'@twin.org/**/index.js',
+						'@3sixty/**/index.js',
 						'./index.js',
 						'./**/index.js',
 						'../index.js',
@@ -241,10 +241,10 @@ const stylisticJsRules = {
 	'@stylistic/quotes': ['error', 'single', { avoidEscape: true }]
 };
 
-const twinOrgRules = {
-	'@twin.org/no-multiple-declarations': 'error',
-	'@twin.org/no-deep-type-nesting': 'error',
-	'@twin.org/require-internal-on-private-methods': 'error'
+const customLintRules = {
+	'@3sixty/no-multiple-declarations': 'error',
+	'@3sixty/no-deep-type-nesting': 'error',
+	'@3sixty/require-internal-on-private-methods': 'error'
 };
 
 const tsRestrictedSyntaxCommon = [
@@ -255,7 +255,7 @@ const tsRestrictedSyntaxCommon = [
 	},
 	{
 		selector: "NewExpression[callee.name='RangeError']",
-		message: 'new RangeError is disallowed; use Guards and Validation from @twin.org/core instead'
+		message: 'new RangeError is disallowed; use Guards and Validation from @3sixty/core instead'
 	},
 	{
 		selector: "MemberExpression[object.name='process'][property.name='env']",
@@ -317,7 +317,7 @@ const tsRestrictedSyntax = [
 	{
 		selector:
 			":matches(BinaryExpression[operator='==='], BinaryExpression[operator='!=='], BinaryExpression[operator='=='], BinaryExpression[operator='!=']) > UnaryExpression[operator='typeof']",
-		message: 'Avoid runtime typeof comparisons. Use the @twin.org/core Is.* methods instead.'
+		message: 'Avoid runtime typeof comparisons. Use the @3sixty/core Is.* methods instead.'
 	},
 	{
 		selector:
@@ -661,7 +661,7 @@ const allRules = {
 	importRules,
 	unicornRules,
 	jsDocRules,
-	twinOrgRules
+	customLintRules
 };
 
 if (customModule?.extendRules) {
@@ -678,10 +678,10 @@ const config = [
 	{
 		files: ['scripts/eslint-plugin-repo-structure.mjs'],
 		plugins: {
-			'@twin.org': twinOrgPlugin
+			'@3sixty': customLintPlugin
 		},
 		rules: {
-			'@twin.org/validate-repo-structure': 'error'
+			'@3sixty/validate-repo-structure': 'error'
 		}
 	},
 
@@ -757,7 +757,7 @@ const config = [
 			'simple-import-sort': simpleImportSortPlugin,
 			header: headerPlugin,
 			'@stylistic': stylistic,
-			'@twin.org': twinOrgPlugin
+			'@3sixty': customLintPlugin
 		},
 		rules: {
 			// Extend recommended TypeScript rules
@@ -788,8 +788,8 @@ const config = [
 			// Stylistic
 			...stylisticRules,
 
-			// Custom twin.org rules
-			...twinOrgRules
+			// Custom lint rules
+			...customLintRules
 		},
 		settings: {
 			jsdoc: {
@@ -816,9 +816,9 @@ const config = [
 			'unicorn/no-useless-undefined': 'off',
 			'no-restricted-syntax': ['error', ...tsRestrictedSyntax],
 			'@typescript-eslint/unbound-method': 'off',
-			'@twin.org/no-multiple-declarations': 'off',
-			'@twin.org/no-deep-type-nesting': 'off',
-			'@twin.org/require-internal-on-private-methods': 'off'
+			'@3sixty/no-multiple-declarations': 'off',
+			'@3sixty/no-deep-type-nesting': 'off',
+			'@3sixty/require-internal-on-private-methods': 'off'
 		}
 	}
 ];

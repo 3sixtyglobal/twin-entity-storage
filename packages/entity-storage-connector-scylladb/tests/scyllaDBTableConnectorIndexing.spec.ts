@@ -4,7 +4,7 @@
 // ScyllaDB expresses secondary indexes as clustering columns in the compound PRIMARY KEY;
 // clustering columns cannot be dropped without dropping and recreating the table, making
 // the drop/recreate pattern unsuitable for this connector.
-import { ContextIdStore } from "@twin.org/context";
+import { ContextIdStore } from "@3sixty/context";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -13,8 +13,8 @@ import {
 	SortDirection,
 	entity,
 	property
-} from "@twin.org/entity";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity";
+import { nameof } from "@3sixty/nameof";
 import { Client } from "cassandra-driver";
 import { TEST_SCYLLA_CONFIG } from "./setupTestEnv.js";
 import { ScyllaDBTableConnector } from "../src/scyllaDBTableConnector.js";

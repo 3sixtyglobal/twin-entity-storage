@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdStore } from "@twin.org/context";
-import { Is } from "@twin.org/core";
+import { ContextIdStore } from "@3sixty/context";
+import { Is } from "@3sixty/core";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -10,9 +10,9 @@ import {
 	SortDirection,
 	entity,
 	property
-} from "@twin.org/entity";
-import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity";
+import type { IEntityStorageConnector } from "@3sixty/entity-storage-models";
+import { nameof } from "@3sixty/nameof";
 import { MemoryEntityStorageConnector } from "../src/memoryEntityStorageConnector.js";
 
 // These tests are duplicated across all connectors. If you modify anything here make sure to

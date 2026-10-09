@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-connector-file
+# @3sixty/entity-storage-connector-file
 
 ## Classes
 

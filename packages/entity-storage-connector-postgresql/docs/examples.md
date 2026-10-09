@@ -8,13 +8,13 @@ These snippets demonstrate day-to-day usage with PostgreSQL, including setup, CR
 import {
   PostgreSqlEntityStorageConnector,
   type IPostgreSqlEntityStorageConnectorConstructorOptions
-} from '@twin.org/entity-storage-connector-postgresql';
+} from '@3sixty/entity-storage-connector-postgresql';
 import {
   ComparisonOperator,
   LogicalOperator,
   SortDirection,
   type EntityCondition
-} from '@twin.org/entity';
+} from '@3sixty/entity';
 
 interface Profile {
   id: string;
@@ -74,7 +74,7 @@ await connector.remove('profile-1');
 ```
 
 ```typescript
-import { PostgreSqlEntityStorageConnector } from '@twin.org/entity-storage-connector-postgresql';
+import { PostgreSqlEntityStorageConnector } from '@3sixty/entity-storage-connector-postgresql';
 
 interface Profile {
   id: string;

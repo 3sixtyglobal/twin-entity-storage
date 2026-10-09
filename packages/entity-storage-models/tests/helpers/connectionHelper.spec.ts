@@ -1,6 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { SharedStore } from "@twin.org/core";
+import { SharedStore } from "@3sixty/core";
 import { ConnectionHelper } from "../../src/helpers/connectionHelper.js";
 
 const STORE_KEY = "connectionHelperTests";

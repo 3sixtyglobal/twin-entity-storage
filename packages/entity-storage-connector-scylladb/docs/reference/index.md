@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-connector-scylladb
+# @3sixty/entity-storage-connector-scylladb
 
 ## Classes
 

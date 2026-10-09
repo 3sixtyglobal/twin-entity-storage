@@ -5,7 +5,7 @@ This package provides a MongoDB backend for flexible document persistence and ev
 ## Installation
 
 ```shell
-npm install @twin.org/entity-storage-connector-mongodb
+npm install @3sixty/entity-storage-connector-mongodb
 ```
 
 ## Docker
@@ -14,7 +14,7 @@ To perform testing of this component it may be necessary to launch a local insta
 
 ```shell
 docker pull mongo:latest
-docker run -d --name twin-entity-storage-mongodb -p 27017:27017 mongo:latest
+docker run -d --name 3sixty-entity-storage-mongodb -p 27017:27017 mongo:latest
 ```
 
 ## Examples

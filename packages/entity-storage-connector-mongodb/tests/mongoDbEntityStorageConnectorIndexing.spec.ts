@@ -1,6 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdStore } from "@twin.org/context";
+import { ContextIdStore } from "@3sixty/context";
 import {
 	ComparisonOperator,
 	EntitySchemaFactory,
@@ -9,9 +9,9 @@ import {
 	SortDirection,
 	entity,
 	property
-} from "@twin.org/entity";
-import { IndexHelper } from "@twin.org/entity-storage-models";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity";
+import { IndexHelper } from "@3sixty/entity-storage-models";
+import { nameof } from "@3sixty/nameof";
 import { MongoClient } from "mongodb";
 import { TEST_MONGODB_CONFIG } from "./setupTestEnv.js";
 import { MongoDbEntityStorageConnector } from "../src/mongoDbEntityStorageConnector.js";

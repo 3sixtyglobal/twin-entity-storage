@@ -6,8 +6,8 @@ import {
 	EntitySchemaHelper,
 	entity,
 	property
-} from "@twin.org/entity";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity";
+import { nameof } from "@3sixty/nameof";
 import { MemoryEntityStorageConnector } from "../src/memoryEntityStorageConnector.js";
 
 @entity()

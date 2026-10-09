@@ -7,8 +7,8 @@ import {
 	EntitySchemaHelper,
 	entity,
 	property
-} from "@twin.org/entity";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity";
+import { nameof } from "@3sixty/nameof";
 import { FileEntityStorageConnector } from "../src/fileEntityStorageConnector.js";
 
 const TEST_DIRECTORY = "./.tmp/test-security/";

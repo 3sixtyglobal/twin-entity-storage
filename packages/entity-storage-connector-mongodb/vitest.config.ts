@@ -1,6 +1,6 @@
 // Copyright 2025 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { NameOfPlugin } from "@twin.org/nameof-vitest-plugin";
+import { NameOfPlugin } from "@3sixty/nameof-vitest-plugin";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({

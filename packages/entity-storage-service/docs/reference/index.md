@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-service
+# @3sixty/entity-storage-service
 
 ## Classes
 

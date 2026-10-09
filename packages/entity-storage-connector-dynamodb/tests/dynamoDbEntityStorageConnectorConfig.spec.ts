@@ -1,9 +1,9 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { HealthStatus } from "@twin.org/api-models";
-import { ContextIdStore } from "@twin.org/context";
-import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
-import { nameof } from "@twin.org/nameof";
+import { HealthStatus } from "@3sixty/api-models";
+import { ContextIdStore } from "@3sixty/context";
+import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@3sixty/entity";
+import { nameof } from "@3sixty/nameof";
 import { TEST_DYNAMODB_CONFIG } from "./setupTestEnv.js";
 import { DynamoDbEntityStorageConnector } from "../src/dynamoDbEntityStorageConnector.js";
 import type { IDynamoDbEntityStorageConnectorConfig } from "../src/models/IDynamoDbEntityStorageConnectorConfig.js";

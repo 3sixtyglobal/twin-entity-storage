@@ -8,13 +8,13 @@ These snippets show how to initialise a connector, run common data operations, a
 import {
   MongoDbEntityStorageConnector,
   type IMongoDbEntityStorageConnectorConstructorOptions
-} from '@twin.org/entity-storage-connector-mongodb';
+} from '@3sixty/entity-storage-connector-mongodb';
 import {
   ComparisonOperator,
   LogicalOperator,
   SortDirection,
   type EntityCondition
-} from '@twin.org/entity';
+} from '@3sixty/entity';
 
 interface Profile {
   id: string;
@@ -72,7 +72,7 @@ await connector.remove('profile-1');
 ```
 
 ```typescript
-import { MongoDbEntityStorageConnector } from '@twin.org/entity-storage-connector-mongodb';
+import { MongoDbEntityStorageConnector } from '@3sixty/entity-storage-connector-mongodb';
 
 interface Profile {
   id: string;

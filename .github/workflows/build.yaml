@@ -28,7 +28,7 @@ jobs:
     # No need to trigger on merging pull request 'chore: release next'
     # or 'docs: regenerate package documentation' as they have already performed a build
     if: "${{ github.event_name != 'push' || (!startsWith(github.event.head_commit.message, 'Merge pull request') && !startsWith(github.event.head_commit.message, 'chore: release next') && !startsWith(github.event.head_commit.message, 'docs: regenerate package documentation') && !startsWith(github.event.head_commit.message, 'chore: merge next into main for production release')) }}"
-    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"twin","labels":"self-hosted"}') || 'ubuntu-latest' }}
+    runs-on: ${{ github.event.repository.private && fromJSON('{"group":"3sixty","labels":"self-hosted"}') || 'ubuntu-latest' }}
 
     steps:
       # Clone the repository to the runner
@@ -39,7 +39,7 @@ jobs:
       - name: Load Test Environment Variables
         shell: bash
         env:
-          TEST_ENV_VARS: ${{ secrets.TWIN_TEST_ENV_VARS }}
+          TEST_ENV_VARS: ${{ secrets.ORG_TEST_ENV_VARS }}
         run: |
           while IFS= read -r line; do
             [[ -z "$line" ]] && continue
@@ -75,7 +75,7 @@ jobs:
       - name: Setup Test Environment
         uses: ./.github/workflows/setup-test-env
         with:
-          test_env_vars: ${{ secrets.TWIN_TEST_ENV_VARS }}
+          test_env_vars: ${{ secrets.ORG_TEST_ENV_VARS }}
 
       # Run Lint and Dist
       - name: Run Lint and Dist

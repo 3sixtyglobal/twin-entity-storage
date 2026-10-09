@@ -5,7 +5,7 @@ This package provides an in-memory backend suited to local development, automate
 ## Installation
 
 ```shell
-npm install @twin.org/entity-storage-connector-memory
+npm install @3sixty/entity-storage-connector-memory
 ```
 
 ## Examples

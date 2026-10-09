@@ -5,7 +5,7 @@ This package provides a PostgreSQL backend for relational persistence, transacti
 ## Installation
 
 ```shell
-npm install @twin.org/entity-storage-connector-postgresql
+npm install @3sixty/entity-storage-connector-postgresql
 ```
 
 ## Docker
@@ -14,7 +14,7 @@ To perform testing of this component it may be necessary to launch a local insta
 
 ```shell
 docker pull postgres:latest
-docker run -d --name twin-entity-storage-postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -p 5432:5432 postgres:latest
+docker run -d --name 3sixty-entity-storage-postgresql -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -p 5432:5432 postgres:latest
 ```
 
 ## Examples

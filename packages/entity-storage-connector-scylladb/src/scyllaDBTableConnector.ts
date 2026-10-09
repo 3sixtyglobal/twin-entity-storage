@@ -5,8 +5,8 @@ import {
 	HealthStatus,
 	type IHealth,
 	type IHealthProviderComponent
-} from "@twin.org/api-models";
-import { ContextIdHelper, ContextIdStore, type IContextIds } from "@twin.org/context";
+} from "@3sixty/api-models";
+import { ContextIdHelper, ContextIdStore, type IContextIds } from "@3sixty/context";
 import {
 	BaseError,
 	Coerce,
@@ -18,21 +18,21 @@ import {
 	type IError,
 	Mutex,
 	ObjectHelper
-} from "@twin.org/core";
+} from "@3sixty/core";
 import {
 	EntitySchemaFactory,
 	EntitySchemaPropertyType,
 	type IEntitySchema,
 	type IEntitySchemaProperty
-} from "@twin.org/entity";
+} from "@3sixty/entity";
 import {
 	EntityStorageHelper,
 	MigrationHelper,
 	type IEntityStorageMigrationConnector,
 	type IMigrationOptions
-} from "@twin.org/entity-storage-models";
-import type { ILoggingComponent } from "@twin.org/logging-models";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity-storage-models";
+import type { ILoggingComponent } from "@3sixty/logging-models";
+import { nameof } from "@3sixty/nameof";
 import { AbstractScyllaDBConnector } from "./abstractScyllaDBConnector.js";
 import type { IScyllaDBTableConnectorConstructorOptions } from "./models/IScyllaDBTableConnectorConstructorOptions.js";
 

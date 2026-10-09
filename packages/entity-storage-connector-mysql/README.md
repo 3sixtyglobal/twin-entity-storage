@@ -7,7 +7,7 @@ Requires MySQL 8.0 or later; the index bootstrap relies on `INFORMATION_SCHEMA.S
 ## Installation
 
 ```shell
-npm install @twin.org/entity-storage-connector-mysql
+npm install @3sixty/entity-storage-connector-mysql
 ```
 
 ## Docker
@@ -16,7 +16,7 @@ To perform testing of this component it may be necessary to launch a local insta
 
 ```shell
 docker pull mysql:latest
-docker run -d --name twin-entity-storage-mysql -e MYSQL_ROOT_PASSWORD=password -p 3306:3306 mysql:latest
+docker run -d --name 3sixty-entity-storage-mysql -e MYSQL_ROOT_PASSWORD=password -p 3306:3306 mysql:latest
 ```
 
 ## Examples

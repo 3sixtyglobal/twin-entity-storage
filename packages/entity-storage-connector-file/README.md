@@ -11,7 +11,7 @@ Every operation reads and parses the whole file, and every write serialises and 
 ## Installation
 
 ```shell
-npm install @twin.org/entity-storage-connector-file
+npm install @3sixty/entity-storage-connector-file
 ```
 
 ## Examples

@@ -1,6 +1,6 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { Mutex, SharedStore } from "@twin.org/core";
+import { Mutex, SharedStore } from "@3sixty/core";
 
 /**
  * Helper for managing shared database client instances via SharedStore.

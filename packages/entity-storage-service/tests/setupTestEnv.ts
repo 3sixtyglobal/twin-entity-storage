@@ -1,8 +1,8 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
 import path from "node:path";
-import { Guards } from "@twin.org/core";
-import type { IMySqlEntityStorageConnectorConfig } from "@twin.org/entity-storage-connector-mysql";
+import { Guards } from "@3sixty/core";
+import type { IMySqlEntityStorageConnectorConfig } from "@3sixty/entity-storage-connector-mysql";
 import * as dotenv from "dotenv";
 
 dotenv.config({

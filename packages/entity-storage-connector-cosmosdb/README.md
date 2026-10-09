@@ -5,7 +5,7 @@ This package provides an Azure Cosmos DB backend for globally distributed persis
 ## Installation
 
 ```shell
-npm install @twin.org/entity-storage-connector-cosmosdb
+npm install @3sixty/entity-storage-connector-cosmosdb
 ```
 
 ## Docker
@@ -14,7 +14,7 @@ To perform testing of this component it may be necessary to launch a local insta
 
 ```shell
 docker pull mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
-docker run -p 8081:8081 --detach --name twin-entity-storage-cosmos mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
+docker run -p 8081:8081 --detach --name 3sixty-entity-storage-cosmos mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:vnext-preview
 ```
 
 ## Examples

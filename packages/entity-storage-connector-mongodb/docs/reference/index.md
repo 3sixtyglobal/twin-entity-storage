@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-connector-mongodb
+# @3sixty/entity-storage-connector-mongodb
 
 ## Classes
 

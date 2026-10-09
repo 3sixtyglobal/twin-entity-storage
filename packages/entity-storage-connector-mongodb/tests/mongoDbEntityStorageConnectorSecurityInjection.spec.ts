@@ -6,8 +6,8 @@ import {
 	EntitySchemaHelper,
 	entity,
 	property
-} from "@twin.org/entity";
-import { nameof } from "@twin.org/nameof";
+} from "@3sixty/entity";
+import { nameof } from "@3sixty/nameof";
 import { TEST_MONGODB_CONFIG } from "./setupTestEnv.js";
 import { MongoDbEntityStorageConnector } from "../src/mongoDbEntityStorageConnector.js";
 

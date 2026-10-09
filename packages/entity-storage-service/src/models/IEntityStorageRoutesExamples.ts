@@ -1,6 +1,6 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import type { IRestRouteRequestExample, IRestRouteResponseExample } from "@twin.org/api-models";
+import type { IRestRouteRequestExample, IRestRouteResponseExample } from "@3sixty/api-models";
 import type {
 	IEntityStorageCountRequest,
 	IEntityStorageCountResponse,
@@ -10,7 +10,7 @@ import type {
 	IEntityStorageListResponse,
 	IEntityStorageRemoveRequest,
 	IEntityStorageSetRequest
-} from "@twin.org/entity-storage-models";
+} from "@3sixty/entity-storage-models";
 
 /**
  * Examples for the entity storage routes.

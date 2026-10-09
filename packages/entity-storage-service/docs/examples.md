@@ -8,15 +8,15 @@ Use these snippets to wire a registered connector into the service layer and to 
 import {
   EntityStorageService,
   generateRestRoutesEntityStorage
-} from '@twin.org/entity-storage-service';
-import { EntityStorageConnectorFactory } from '@twin.org/entity-storage-models';
-import { MemoryEntityStorageConnector } from '@twin.org/entity-storage-connector-memory';
+} from '@3sixty/entity-storage-service';
+import { EntityStorageConnectorFactory } from '@3sixty/entity-storage-models';
+import { MemoryEntityStorageConnector } from '@3sixty/entity-storage-connector-memory';
 import {
   ComparisonOperator,
   LogicalOperator,
   SortDirection,
   type EntityCondition
-} from '@twin.org/entity';
+} from '@3sixty/entity';
 
 interface Profile {
   id: string;

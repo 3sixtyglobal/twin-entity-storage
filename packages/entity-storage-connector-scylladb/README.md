@@ -5,7 +5,7 @@ This package provides a ScyllaDB backend for distributed workloads that need low
 ## Installation
 
 ```shell
-npm install @twin.org/entity-storage-connector-scylladb
+npm install @3sixty/entity-storage-connector-scylladb
 ```
 
 ## Docker
@@ -13,7 +13,7 @@ npm install @twin.org/entity-storage-connector-scylladb
 To perform testing of this component it may be necessary to launch a local instance to communicate with.
 
 ```shell
-docker run -d --name twin-entity-storage-scylladb -p 9042:9042 scylladb/scylla:5.4.9
+docker run -d --name 3sixty-entity-storage-scylladb -p 9042:9042 scylladb/scylla:5.4.9
 ```
 
 ## Examples

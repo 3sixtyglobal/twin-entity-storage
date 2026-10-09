@@ -1,9 +1,9 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdStore } from "@twin.org/context";
-import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
-import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { nameof } from "@twin.org/nameof";
+import { ContextIdStore } from "@3sixty/context";
+import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@3sixty/entity";
+import type { IEntityStorageConnector } from "@3sixty/entity-storage-models";
+import { nameof } from "@3sixty/nameof";
 import { TEST_MYSQL_CONFIG } from "./setupTestEnv.js";
 import { MySqlEntityStorageConnector } from "../src/mysqlEntityStorageConnector.js";
 

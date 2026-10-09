@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-rest-client
+# @3sixty/entity-storage-rest-client
 
 ## Classes
 

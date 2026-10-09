@@ -8,7 +8,7 @@
  * 1. Production: Updates all packages from prerelease versions to stable versions
  * 2. Next: Updates all packages to the next prerelease version for development
  *
- * The script also manages internal dependencies between @twin.org packages,
+ * The script also manages internal dependencies between @3sixty packages,
  * ensuring they reference the correct versions of each other.
  */
 import fs from 'node:fs/promises';
@@ -218,7 +218,7 @@ async function run() {
 	const workspaces = await loadWorkspaceDirs();
 
 	// Collect all in-repo workspace package names up front so dependency processing
-	// can distinguish them from external @twin.org packages regardless of the order
+	// can distinguish them from external @3sixty packages regardless of the order
 	// the workspaces are processed in.
 	const workspaceNames = new Set();
 	for (const workspace of workspaces) {
@@ -322,7 +322,7 @@ async function processPackage(
 	// Cache this package's version to avoid redundant lookups when processing dependencies
 	versionCache[workspacePackageJson.name] = workspacePackageJson.version;
 
-	// Process all types of dependencies that might reference other @twin.org packages
+	// Process all types of dependencies that might reference other @3sixty packages
 	// This ensures internal dependencies are updated to the correct versions
 	await processDependencies(
 		isProduction,
@@ -373,8 +373,8 @@ async function processDependencies(
 		return;
 	}
 	for (const [name, version] of Object.entries(dependencies)) {
-		// Only process @twin.org packages (internal dependencies)
-		if (name.startsWith('@twin.org')) {
+		// Only process @3sixty packages (internal dependencies)
+		if (name.startsWith('@3sixty')) {
 			if (isPeerDependency) {
 				// If it's a peer dependency, we just match the major version
 				// This allows the package to work with any compatible version

@@ -5,8 +5,8 @@ These examples focus on wiring connectors through the shared factory and shaping
 ## EntityStorageConnectorFactory
 
 ```typescript
-import { EntityStorageConnectorFactory } from '@twin.org/entity-storage-models';
-import { MemoryEntityStorageConnector } from '@twin.org/entity-storage-connector-memory';
+import { EntityStorageConnectorFactory } from '@3sixty/entity-storage-models';
+import { MemoryEntityStorageConnector } from '@3sixty/entity-storage-connector-memory';
 
 interface Profile {
   id: string;
@@ -42,7 +42,7 @@ import type {
   IEntityStorageListResponse,
   IEntityStorageRemoveRequest,
   IEntityStorageSetRequest
-} from '@twin.org/entity-storage-models';
+} from '@3sixty/entity-storage-models';
 
 interface Profile {
   id: string;

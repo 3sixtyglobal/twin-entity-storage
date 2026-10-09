@@ -1,10 +1,10 @@
 // Copyright 2026 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { ContextIdStore } from "@twin.org/context";
-import { RandomHelper, StringHelper } from "@twin.org/core";
-import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
-import type { IEntityStorageConnector } from "@twin.org/entity-storage-models";
-import { nameof } from "@twin.org/nameof";
+import { ContextIdStore } from "@3sixty/context";
+import { RandomHelper, StringHelper } from "@3sixty/core";
+import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@3sixty/entity";
+import type { IEntityStorageConnector } from "@3sixty/entity-storage-models";
+import { nameof } from "@3sixty/nameof";
 import { TEST_COSMOS_CONFIG } from "./setupTestEnv.js";
 import { CosmosDbEntityStorageConnector } from "../src/cosmosDbEntityStorageConnector.js";
 

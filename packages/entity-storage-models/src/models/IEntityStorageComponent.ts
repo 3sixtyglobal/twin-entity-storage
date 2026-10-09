@@ -1,7 +1,7 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import type { IComponent } from "@twin.org/core";
-import type { EntityCondition, SortDirection } from "@twin.org/entity";
+import type { IComponent } from "@3sixty/core";
+import type { EntityCondition, SortDirection } from "@3sixty/entity";
 
 /**
  * Interface describing an entity storage component.

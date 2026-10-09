@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-connector-postgresql
+# @3sixty/entity-storage-connector-postgresql
 
 ## Classes
 

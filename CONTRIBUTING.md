@@ -32,7 +32,7 @@ will not set the repository up correctly.
 1. **Fork the repository** and clone your fork:
 
    ```shell
-   git clone https://github.com/3sixtyglobal/twin-<repo>.git
+   git clone https://github.com/3sixtyglobal/<repo>.git
    cd <repo>
    ```
 

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0.
 import { readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@twin.org/entity";
-import { nameof } from "@twin.org/nameof";
+import { EntitySchemaFactory, EntitySchemaHelper, entity, property } from "@3sixty/entity";
+import { nameof } from "@3sixty/nameof";
 import { FileEntityStorageConnector } from "../src/fileEntityStorageConnector.js";
 
 const TEST_DIRECTORY = "./.tmp/test-concurrency/";

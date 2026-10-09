@@ -1,8 +1,8 @@
 // Copyright 2024 IOTA Stiftung.
 // SPDX-License-Identifier: Apache-2.0.
-import { Converter, Is } from "@twin.org/core";
-import { Blake2b } from "@twin.org/crypto";
-import { type IEntitySchemaProperty, SortDirection } from "@twin.org/entity";
+import { Converter, Is } from "@3sixty/core";
+import { Blake2b } from "@3sixty/crypto";
+import { type IEntitySchemaProperty, SortDirection } from "@3sixty/entity";
 
 /**
  * Helper for generating bounded database index names.

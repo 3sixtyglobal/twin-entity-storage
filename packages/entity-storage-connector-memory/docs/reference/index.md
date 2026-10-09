@@ -1,4 +1,4 @@
-# @twin.org/entity-storage-connector-memory
+# @3sixty/entity-storage-connector-memory
 
 ## Classes
 

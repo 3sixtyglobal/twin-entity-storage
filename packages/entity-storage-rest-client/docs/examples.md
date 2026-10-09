@@ -5,13 +5,13 @@ These snippets show how to call the REST endpoints with typed payloads and how t
 ## EntityStorageRestClient
 
 ```typescript
-import { EntityStorageRestClient } from '@twin.org/entity-storage-rest-client';
+import { EntityStorageRestClient } from '@3sixty/entity-storage-rest-client';
 import {
   ComparisonOperator,
   LogicalOperator,
   SortDirection,
   type EntityCondition
-} from '@twin.org/entity';
+} from '@3sixty/entity';
 
 interface Profile {
   id: string;
